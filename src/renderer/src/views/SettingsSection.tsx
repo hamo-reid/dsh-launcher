@@ -53,7 +53,7 @@ export default function SettingsSection() {
               <Select
                 value={language}
                 onChange={value => void setLanguage(value)}
-                style={{ maxWidth: 220 }}
+                style={{ width: 300 }}
                 options={[
                   { value: 'zh', label: t('settings.language.zh') },
                   { value: 'en', label: t('settings.language.en') },

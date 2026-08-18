@@ -11,6 +11,7 @@ import { registerPluginsIpc } from './ipc/plugins.ts'
 import { registerDshIpc } from './ipc/dsh.ts'
 import { registerTrashIpc } from './ipc/trash.ts'
 import { registerSettingsIpc } from './ipc/settings.ts'
+import { hookWindowMaximize, registerWindowIpc } from './ipc/window.ts'
 import { openDatabase } from './core/settings.ts'
 import { configureAppState } from './core/appState.ts'
 
@@ -21,12 +22,15 @@ function createWindow(): void {
     minWidth: 1280,
     minHeight: 720,
     title: 'DSH Launcher',
+    // Frameless: the renderer provides its own title bar (brand + window controls).
+    frame: false,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },
   })
+  hookWindowMaximize(win)
 
   // Guard exit while a profile process is still running: ask first, and only
   // terminate if the user chooses to.
@@ -68,6 +72,7 @@ function registerIpc(): void {
   registerDshIpc()
   registerTrashIpc()
   registerSettingsIpc()
+  registerWindowIpc()
 }
 
 app.whenReady().then(async () => {

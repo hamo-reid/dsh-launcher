@@ -21,6 +21,8 @@ interface DshEntry {
   version: string
   home: string
   launch?: string
+  /** True only for app-managed (official install) dsh — deletable from here. */
+  managed?: boolean
   /** Effective (resolved) profile dir, computed in main. */
   profileDir?: string
   /** Configured profile-dir override, if any. */
@@ -94,7 +96,10 @@ export default function DshSection() {
   const actionsFor = (d: DshEntry): MenuAction[] => [
     { key: 'rename', label: t('dsh.action.rename') },
     { key: 'activate', label: t('dsh.action.setCurrent') },
-    { key: 'remove', label: t('dsh.action.remove'), danger: true },
+    // 仅 app 管理的（官方安装）可删除；系统级/手动加入的用户全局 dsh 不给删除入口。
+    ...(d.managed === true
+      ? [{ key: 'remove', label: t('dsh.action.remove'), danger: true } as MenuAction]
+      : []),
   ]
 
   const handleAction = (d: DshEntry, key: string): void => {

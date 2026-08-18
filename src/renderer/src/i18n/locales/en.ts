@@ -232,6 +232,7 @@ const en: typeof zh = {
     'errors.dsh.needActive': 'No DSH selected — configure and activate one in the DSH page first.',
     'errors.dsh.notFound': 'DSH not found',
     'errors.dsh.versionExists': 'Version name “{{name}}” already exists (directory not empty). Use another name, or remove that version in DSH management first.',
+    'errors.dsh.protected': 'This is your own globally-installed DSH and cannot be removed.',
     'errors.name.invalid': 'Invalid name',
     'errors.store.notConfigured': 'Plugin store location not set — configure it in Settings first.',
     'errors.store.notDir': 'Not a directory: {{path}}',

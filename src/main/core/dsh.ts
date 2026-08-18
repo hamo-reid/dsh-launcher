@@ -211,3 +211,11 @@ export async function entryFromPath(path: string): Promise<DshEntry> {
 export function installDir(execPath: string): string {
   return resolveTargetPath(execPath)
 }
+
+/** A dsh is deletable from the DSH page only when it is an app-managed install
+ * (official install in the version repo). System/globally-installed dsh we only
+ * discovered or were added by path must never be removed — deleting would hit
+ * the user's own environment. */
+export function isDeletableDsh(entry: DshEntry): boolean {
+  return entry.managed === true
+}

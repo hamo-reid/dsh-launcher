@@ -230,6 +230,7 @@ const zh = {
     'errors.dsh.needActive': '未选择 DSH —— 先在「DSH」页配置并激活。',
     'errors.dsh.notFound': '找不到该 DSH',
     'errors.dsh.versionExists': '版本名「{{name}}」已存在（目录非空）。请换一个名称，或先在 DSH 管理中删除该版本。',
+    'errors.dsh.protected': '这是您自己安装的全局 DSH，无法删除。',
     'errors.name.invalid': '名称不合法',
     'errors.store.notConfigured': '未配置插件保存位置 —— 请先在「设置」指定',
     'errors.store.notDir': '该路径不是目录：{{path}}',

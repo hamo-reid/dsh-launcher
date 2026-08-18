@@ -187,6 +187,18 @@ const api = {
     revealDir: (id: string): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('dsh:revealDir', id),
   },
+
+  window: {
+    minimize: (): Promise<IpcResult<boolean>> => ipcRenderer.invoke('window:minimize'),
+    toggleMaximize: (): Promise<IpcResult<boolean>> => ipcRenderer.invoke('window:toggleMaximize'),
+    close: (): Promise<IpcResult<boolean>> => ipcRenderer.invoke('window:close'),
+    isMaximized: (): Promise<IpcResult<boolean>> => ipcRenderer.invoke('window:isMaximized'),
+    onMaximizeState: (callback: (maximized: boolean) => void): (() => void) => {
+      const handler = (_: unknown, maximized: boolean): void => callback(maximized)
+      ipcRenderer.on('window:maximized', handler)
+      return () => { ipcRenderer.removeListener('window:maximized', handler) }
+    },
+  },
 } satisfies WindowApi
 
 contextBridge.exposeInMainWorld('api', api)

@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { detectExecutables, resolveDshPackage } from './dsh.ts'
+import { detectExecutables, isDeletableDsh, resolveDshPackage } from './dsh.ts'
 
 let root: string
 
@@ -81,5 +81,17 @@ describe('detectExecutables', () => {
       if (prev === undefined) delete process.env.APPDATA
       else process.env.APPDATA = prev
     }
+  })
+})
+
+describe('isDeletableDsh', () => {
+  const base = { id: 'x', name: 'x', execPath: 'x', version: '1', home: '/h' }
+  it('is true only for app-managed (official install) dsh', () => {
+    expect(isDeletableDsh({ ...base, managed: true })).toBe(true)
+  })
+  it('is false for system/globally-installed or manually added dsh', () => {
+    // 缺省（检测/手动/路径添加都不打标）
+    expect(isDeletableDsh(base)).toBe(false)
+    expect(isDeletableDsh({ ...base, managed: false })).toBe(false)
   })
 })

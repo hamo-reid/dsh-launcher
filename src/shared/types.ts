@@ -97,6 +97,10 @@ export interface DshEntry {
   home: string
   /** Optional override for this dsh's profiles directory (default `<home>/profiles`). */
   profilesDir?: string
+  /** True only for app-managed (official install in the version repo) dsh —
+   * the only kind deletable from the DSH page. System/globally-installed dsh
+   * (detected, added by path, or added manually) are never managed. */
+  managed?: boolean
   /** User-friendly base launch command (e.g. `pnpm dsh`), derived at read time. */
   launch?: string
   /** Directory holding this dsh's executable (derived, for reveal-in-explorer). */

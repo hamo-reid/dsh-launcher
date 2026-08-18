@@ -1,7 +1,8 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { ConfigProvider, Layout, Tabs, theme, Typography } from 'antd'
 import {
-  AppstoreOutlined, ProfileOutlined, RobotOutlined, SettingOutlined,
+  AppstoreOutlined, CloseOutlined, FullscreenExitOutlined, FullscreenOutlined,
+  MinusOutlined, ProfileOutlined, RobotOutlined, SettingOutlined,
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { useAppLang } from './i18n'
@@ -22,6 +23,7 @@ export default function App() {
   const [onboarding, setOnboarding] = useState<'loading' | 'open' | 'done'>('loading')
   const [onboardDefaults, setOnboardDefaults] = useState({ pluginDir: '', dshVersionDir: '' })
   const { token } = theme.useToken()
+  const [maximized, setMaximized] = useState(false)
 
   // Decide once whether the first-run wizard is required (fresh install).
   useEffect(() => {
@@ -35,6 +37,12 @@ export default function App() {
     return () => { alive = false }
   }, [])
 
+  // Mirror the window's maximize state for the custom title-bar icon.
+  useEffect(() => {
+    void window.api.window.isMaximized().then(r => { if (r.ok) setMaximized(r.value) })
+    return window.api.window.onMaximizeState(setMaximized)
+  }, [])
+
   const TABS: { key: Tab; label: string; icon: ReactNode }[] = [
     { key: 'dsh', label: t('app.tab.dsh'), icon: <RobotOutlined /> },
     { key: 'profile', label: t('app.tab.profile'), icon: <ProfileOutlined /> },
@@ -46,26 +54,39 @@ export default function App() {
     <ConfigProvider locale={antdLocale}>
     <Layout style={{ height: '100vh', overflow: 'hidden', background: token.colorBgLayout }}>
       {/* App chrome: unified main header (brand + nav tabs), divided from the
-          canvas by a clear border so it reads as one block, not floating flat. */}
-      <div style={{ background: token.colorBgContainer, borderBottom: `1px solid ${token.colorBorder}`, flexShrink: 0 }}>
+          canvas below by a clear border + a soft drop shadow so the header reads
+          as one distinct block sitting above the content. */}
+      <div
+        style={{
+          background: token.colorBgContainer,
+          borderBottom: `1px solid ${token.colorSplit}`,
+          flexShrink: 0,
+        }}
+      >
+        {/* Brand row doubles as the frameless drag handle; the window controls
+            and the tabs below opt out (no-drag) so they stay clickable. */}
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '0 16px',
+            paddingLeft: 16,
             height: 52,
-          }}
+            borderBottom: `1px solid ${token.colorBorder}`,
+            WebkitAppRegion: 'drag',
+          } as CSSProperties}
+          onDoubleClick={() => void window.api.window.toggleMaximize()}
         >
           <Typography.Text strong style={{ fontSize: 15 }}>
             DSH Launcher
           </Typography.Text>
+          <WindowControls maximized={maximized} />
         </div>
         <Tabs
           activeKey={tab}
           onChange={key => setTab(key as Tab)}
           items={TABS.map(entry => ({ key: entry.key, label: entry.label, icon: entry.icon }))}
-          tabBarStyle={{ marginBottom: 0, padding: '0 16px', background: token.colorBgContainer }}
+          tabBarStyle={{ marginBottom: 0, padding: '0 16px', background: token.colorBgContainer, WebkitAppRegion: 'no-drag' } as CSSProperties}
         />
       </div>
 
@@ -83,5 +104,61 @@ export default function App() {
       />
     )}
     </ConfigProvider>
+  )
+}
+
+/** One title-bar window-control button (min/max/close). */
+function WindowButton(props: {
+  label: string
+  danger?: boolean
+  onClick: () => void
+  children: ReactNode
+}): JSX.Element {
+  const { token } = theme.useToken()
+  const [hover, setHover] = useState(false)
+  const danger = props.danger === true
+  const background = hover ? (danger ? token.colorError : token.colorFillTertiary) : 'transparent'
+  const color = danger && hover ? '#fff' : token.colorTextSecondary
+  return (
+    <button
+      aria-label={props.label}
+      title={props.label}
+      onClick={props.onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        appearance: 'none',
+        border: 'none',
+        cursor: 'default',
+        background,
+        color,
+        width: 46,
+        height: 32,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        WebkitAppRegion: 'no-drag',
+        fontSize: 13,
+      } as CSSProperties}
+    >
+      {props.children}
+    </button>
+  )
+}
+
+/** Frameless title-bar window controls (minimize / maximize-restore / close). */
+function WindowControls({ maximized }: { maximized: boolean }): JSX.Element {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', WebkitAppRegion: 'no-drag', height: '100%' } as CSSProperties}>
+      <WindowButton label="Minimize" onClick={() => void window.api.window.minimize()}>
+        <MinusOutlined />
+      </WindowButton>
+      <WindowButton label={maximized ? 'Restore' : 'Maximize'} onClick={() => void window.api.window.toggleMaximize()}>
+        {maximized ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+      </WindowButton>
+      <WindowButton label="Close" danger onClick={() => void window.api.window.close()}>
+        <CloseOutlined />
+      </WindowButton>
+    </div>
   )
 }

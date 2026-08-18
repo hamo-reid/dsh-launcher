@@ -172,6 +172,11 @@ export function registerDshIpc(): void {
     try {
       const { dshes, activeDshId } = readDshState()
       const entry = dshes.find(d => d.id === id)
+      // 非 app 管理的（系统级/手动加入的用户已有安装）一律禁止删除，
+      // 避免误删用户全局环境或绕过 UI 的 `dsh:remove` 调用。
+      if (entry !== undefined && entry.managed !== true) {
+        return fail('dsh.protected')
+      }
       // 先从列表移除（脱管 — 始终执行）。
       writeDshState(dshes.filter(d => d.id !== id), activeDshId === id ? undefined : activeDshId)
       // 可选的物理删除：app 管理的版本实例（含其独立 home），其它则删可执行所属目录。
@@ -291,6 +296,8 @@ export function registerDshIpc(): void {
         execPath: info.execPath,
         version: info.version,
         home: info.home,
+        // App-managed (in the version repo) — the only kind deletable from the DSH page.
+        managed: true,
       }
       writeDshState([...dshes.filter(d => d.id !== entry.id), entry], entry.id)
       return { ok: true, value: true }

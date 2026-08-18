@@ -104,6 +104,15 @@ export interface WindowApi {
     completeOnboarding: (payload: OnboardingPayload) => Promise<IpcResult<boolean>>
   }
 
+  window: {
+    minimize: () => Promise<IpcResult<boolean>>
+    toggleMaximize: () => Promise<IpcResult<boolean>>
+    close: () => Promise<IpcResult<boolean>>
+    isMaximized: () => Promise<IpcResult<boolean>>
+    /** Push event mirroring maximize state (for the title-bar icon). Returns an unsubscribe. */
+    onMaximizeState: (callback: (maximized: boolean) => void) => () => void
+  }
+
   dsh: {
     list: () => Promise<IpcResult<{ dshes: DshEntry[]; activeDshId?: string }>>
     detect: () => Promise<IpcResult<DshEntry[]>>
