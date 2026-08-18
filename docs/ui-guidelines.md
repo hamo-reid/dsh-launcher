@@ -216,15 +216,4 @@ export default function ExampleSection() {
 }
 ```
 
----
-
-## 10. 后续阶段路线
-
-以下本轮已完成、但刻意放后推进的深化项,标记为后续:
-
-- **插件管理页 / 设置页完整重构** —— 本轮仅做了轻量对齐(套 `AppShell` + token 化、统一状态 Tag);完整重构(下载中心卡片化、安装向导、表格分页体验)留待下一批。
-- **更多共享组件** —— 本轮已新增 `ActionCard` / `ScrollModal`,并升级 `NavList`(块状)、`SectionHeading`(`sticky`),同时清掉 `PluginsSection` 的硬编码弹窗宽度;仍待抽 `DataTable`(统一表格+加载+空态)、`ModalForm`(表单弹窗统一)、`InlineConfirm`(行内二次确认)。
-- **可视化 design-system 页面** —— 如需要可生成交互式样式参观页(artifactory),供设计与评审对齐。
-- **补齐 `cssVars()` 的暗色 chrome 变量** —— 注入 `--pm-text` / `--pm-selection` / `--pm-scrollbar-hover` 的暗色值(见 §5.1 已知缺口)。
-- **主色 / 品牌** —— 当前深蓝是中性预设,若 dsh 有正式品牌色,仅在 `theme.ts` `BRAND` 一处替换即可全量生效。
 
