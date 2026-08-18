@@ -13,8 +13,9 @@ import {
 } from '../core/appState.ts'
 import { loadSettings, saveSettings } from '../core/settings.ts'
 import { runPnpm } from '../core/pnpm.ts'
+import { fetchPackageVersions } from '../core/npm.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
-import type { IpcResult } from '../../shared/types.ts'
+import type { IpcResult, PackageVersionInfo } from '../../shared/types.ts'
 
 /** A filesystem-safe version name (defaults to `official`). */
 function safeVersionName(name: string | undefined): string {
@@ -23,12 +24,17 @@ function safeVersionName(name: string | undefined): string {
 }
 
 /** Install the official `@deepseek-ai/dsh` into `<versionDir>/<name>` with its
- * own home under `<versionDir>/../homes/<name>`. */
-async function installOfficialDsh(versionDir: string, name: string): Promise<{ execPath: string; version: string; home: string; dir: string }> {
+ * own home under `<versionDir>/../homes/<name>`. `version` selects a published
+ * version from npm (`@deepseek-ai/dsh@<v>`); when empty, the latest is installed. */
+async function installOfficialDsh(versionDir: string, name: string, version?: string): Promise<{ execPath: string; version: string; home: string; dir: string }> {
   const target = join(versionDir, name)
   const home = join(dirname(versionDir), 'homes', name)
   mkdirSync(target, { recursive: true })
-  const result = await runPnpm(target, ['add', '@deepseek-ai/dsh'])
+  // 版本可空（回落 latest），指定则装 npm 上的对应发布版。
+  const spec = version !== undefined && version.trim() !== ''
+    ? `@deepseek-ai/dsh@${version.trim()}`
+    : '@deepseek-ai/dsh'
+  const result = await runPnpm(target, ['add', spec])
   if (!result.ok) throw new Error(`安装官方 dsh 失败：${result.text}`)
 
   const binCandidates = [
@@ -39,15 +45,15 @@ async function installOfficialDsh(versionDir: string, name: string): Promise<{ e
   const execPath = binCandidates.find(candidate => existsSync(candidate))
     ?? join(target, 'node_modules', '.bin', 'dsh')
 
-  let version = 'unknown'
+  let installedVersion = 'unknown'
   try {
     const manifestPath = join(target, 'node_modules', '@deepseek-ai', 'dsh', 'package.json')
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { version?: string }
-    version = manifest.version ?? version
+    installedVersion = manifest.version ?? installedVersion
   } catch {
     // fall back to 'unknown'
   }
-  return { execPath, version, home, dir: target }
+  return { execPath, version: installedVersion, home, dir: target }
 }
 
 /** Physically delete a dsh install. App-managed version instances (under the
@@ -266,7 +272,7 @@ export function registerDshIpc(): void {
     }
   })
 
-  ipcMain.handle('dsh:installOfficial', async (_event, options?: { versionDir?: string; name?: string }): Promise<IpcResult<boolean>> => {
+  ipcMain.handle('dsh:installOfficial', async (_event, options?: { versionDir?: string; name?: string; version?: string }): Promise<IpcResult<boolean>> => {
     try {
       const versionDir = options?.versionDir?.trim() !== undefined && options.versionDir.trim() !== ''
         ? options.versionDir.trim()
@@ -277,7 +283,7 @@ export function registerDshIpc(): void {
       if (existsSync(target) && readdirSync(target).length > 0) {
         return fail('dsh.versionExists', { name })
       }
-      const info = await installOfficialDsh(versionDir, name)
+      const info = await installOfficialDsh(versionDir, name, options?.version)
       const { dshes } = readDshState()
       const entry: DshEntry = {
         id: info.execPath,
@@ -288,6 +294,15 @@ export function registerDshIpc(): void {
       }
       writeDshState([...dshes.filter(d => d.id !== entry.id), entry], entry.id)
       return { ok: true, value: true }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Official-install version picker: published `@deepseek-ai/dsh` versions.
+  ipcMain.handle('dsh:pkgVersions', async (): Promise<IpcResult<PackageVersionInfo>> => {
+    try {
+      return { ok: true, value: await fetchPackageVersions('@deepseek-ai/dsh') }
     } catch (error) {
       return failFromError(error)
     }

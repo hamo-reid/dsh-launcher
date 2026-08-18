@@ -171,8 +171,10 @@ const api = {
       ipcRenderer.invoke('dsh:setHome', id, home),
     setProfileDir: (id: string, dir: string): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('dsh:setProfileDir', id, dir),
-    installOfficial: (options?: { versionDir?: string; name?: string }): Promise<IpcResult<boolean>> =>
+    installOfficial: (options?: { versionDir?: string; name?: string; version?: string }): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('dsh:installOfficial', options),
+    pkgVersions: (): Promise<IpcResult<PackageVersionInfo>> =>
+      ipcRenderer.invoke('dsh:pkgVersions'),
     getVersionDir: (): Promise<IpcResult<{ dir: string }>> =>
       ipcRenderer.invoke('dsh:getVersionDir'),
     setVersionDir: (dir: string): Promise<IpcResult<boolean>> =>

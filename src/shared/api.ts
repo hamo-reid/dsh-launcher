@@ -112,7 +112,9 @@ export interface WindowApi {
     setActive: (id: string) => Promise<IpcResult<boolean>>
     setHome: (id: string, home: string) => Promise<IpcResult<boolean>>
     setProfileDir: (id: string, dir: string) => Promise<IpcResult<boolean>>
-    installOfficial: (options?: { versionDir?: string; name?: string }) => Promise<IpcResult<boolean>>
+    installOfficial: (options?: { versionDir?: string; name?: string; version?: string }) => Promise<IpcResult<boolean>>
+    /** Published `@deepseek-ai/dsh` versions + dist-tags (for the official-install picker). */
+    pkgVersions: () => Promise<IpcResult<PackageVersionInfo>>
     getVersionDir: () => Promise<IpcResult<{ dir: string }>>
     setVersionDir: (dir: string) => Promise<IpcResult<boolean>>
     probe: (path?: string) => Promise<IpcResult<DshEntry[]>>

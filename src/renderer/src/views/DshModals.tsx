@@ -2,11 +2,12 @@
  * is left with just list + activation orchestration. */
 
 import { useEffect, useState } from 'react'
-import { Alert, Button, Checkbox, Input, List, Modal, Space, Tag, message, theme } from 'antd'
+import { Alert, Button, Checkbox, Input, List, Modal, Select, Space, Spin, Tag, message, theme } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
 import FieldLabel from '../components/FieldLabel.tsx'
 import { MODAL } from '../theme.ts'
+import type { PackageVersionInfo } from '../../../shared/types.ts'
 
 // ── Add DSH ────────────────────────────────────────────────────────────────
 
@@ -161,22 +162,43 @@ export function OfficialInstallModal(p: OfficialInstallModalProps): JSX.Element 
   const [officialDone, setOfficialDone] = useState(false)
   const [versionDir, setVersionDir] = useState('')
   const [installName, setInstallName] = useState('official')
+  // npm 版本选择（官方包 @deepseek-ai/dsh）。
+  const [pkgInfo, setPkgInfo] = useState<PackageVersionInfo | null>(null)
+  const [version, setVersion] = useState('')
+  const [versionsLoading, setVersionsLoading] = useState(false)
 
   useEffect(() => {
     if (!p.open) return
     // 重新打开时重置状态，避免残留「已安装」。
     setInstalling(false)
     setOfficialDone(false)
+    setPkgInfo(null)
+    setVersion('')
+    setVersionsLoading(true)
+    let alive = true
     void (async () => {
       const v = await window.api.dsh.getVersionDir()
-      if (v.ok) setVersionDir(v.value.dir)
+      if (v.ok && alive) setVersionDir(v.value.dir)
+      const vv = await window.api.dsh.pkgVersions()
+      if (!alive) return
+      setVersionsLoading(false)
+      if (vv.ok) {
+        setPkgInfo(vv.value)
+        const latest = vv.value.distTags.latest ?? vv.value.versions[0]
+        if (latest !== undefined) setVersion(latest)
+      }
     })()
+    return () => { alive = false }
   }, [p.open])
 
   const doInstallOfficial = async (): Promise<void> => {
     setInstalling(true)
     setOfficialDone(false)
-    const r = await window.api.dsh.installOfficial({ versionDir: versionDir.trim(), name: installName.trim() })
+    const r = await window.api.dsh.installOfficial({
+      versionDir: versionDir.trim(),
+      name: installName.trim(),
+      version: version.trim() || undefined,
+    })
     setInstalling(false)
     if (!r.ok) { void message.error(apiErrorText(r)); return }
     setOfficialDone(true)
@@ -195,6 +217,27 @@ export function OfficialInstallModal(p: OfficialInstallModalProps): JSX.Element 
         <Input value={versionDir} onChange={e => setVersionDir(e.target.value)} placeholder={t('dsh.official.dirPlaceholder')} />
         <FieldLabel>{t('dsh.official.nameLabel')}</FieldLabel>
         <Input value={installName} onChange={e => setInstallName(e.target.value)} placeholder="official" />
+        <FieldLabel>{t('dsh.official.versionLabel')} <span style={{ fontWeight: 400, color: 'inherit' }}>{t('dsh.official.versionHint')}</span></FieldLabel>
+        {versionsLoading
+          ? <Spin size="small" />
+          : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {pkgInfo !== null && Object.keys(pkgInfo.distTags).length > 0 && (
+                <div>{Object.entries(pkgInfo.distTags).map(([tag, ver]) => (
+                  <Tag key={tag} style={{ marginBottom: 4 }}>{tag}={ver}</Tag>
+                ))}</div>
+              )}
+              <Select
+                placeholder={t('dsh.official.versionPlaceholder')}
+                value={version || undefined}
+                onChange={setVersion}
+                showSearch
+                allowClear
+                optionFilterProp="label"
+                options={(pkgInfo?.versions ?? []).map(v => ({ value: v, label: v }))}
+              />
+            </div>
+          )}
         <Alert type="info" showIcon message={t('dsh.official.stepsIntro')} />
         <ol style={{ paddingLeft: 20, margin: 0 }}>
           <li>{t('dsh.official.step1')}</li>
