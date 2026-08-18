@@ -11,6 +11,8 @@ import type {
   InstalledOverviewRow,
   IpcResult,
   NpmSearchHit,
+  OnboardingPayload,
+  OnboardingState,
   PackageVersionInfo,
   PluginRow,
   ProfileDetail,
@@ -136,6 +138,12 @@ const api = {
       ipcRenderer.invoke('settings:getUiLanguage'),
     setUiLanguage: (lng: string): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('settings:setUiLanguage', lng),
+    getOnboardingState: (): Promise<IpcResult<OnboardingState>> =>
+      ipcRenderer.invoke('settings:getOnboardingState'),
+    pickDir: (opts?: { title?: string; defaultPath?: string }): Promise<IpcResult<string>> =>
+      ipcRenderer.invoke('settings:pickDir', opts),
+    completeOnboarding: (payload: OnboardingPayload): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('settings:completeOnboarding', payload),
   },
 
   trash: {

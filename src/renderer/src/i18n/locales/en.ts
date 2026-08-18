@@ -364,6 +364,18 @@ const en: typeof zh = {
     'settings.dshVersionDir.desc': 'Directory that holds local DSH versions (one subdirectory per version); official installs land here by default.',
     'settings.pluginDir': 'Plugin store',
     'settings.pluginDir.desc': 'Directory where downloaded plugins are kept. If unset, the “network” sections are disabled.',
+
+    'onboarding.title': 'Welcome to DSH Launcher',
+    'onboarding.subtitle': 'First launch — please confirm the following. Keep the defaults, or change them, then click “Done”. You can adjust these at any time in Settings.',
+    'onboarding.language': 'Interface language',
+    'onboarding.language.desc': 'Interface language, applied immediately and saved.',
+    'onboarding.pluginDir': 'Plugin store location',
+    'onboarding.pluginDir.desc': 'Directory where downloaded / installed plugins are kept.',
+    'onboarding.versionDir': 'DSH version repo location',
+    'onboarding.versionDir.desc': 'Directory that holds local DSH versions; official installs land here by default.',
+    'onboarding.browse': 'Browse…',
+    'onboarding.submit': 'Done',
+    'onboarding.done': 'Settings saved',
   },
 }
 

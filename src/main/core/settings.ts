@@ -24,6 +24,8 @@ export interface AppSettings {
   activeDshId?: string
   /** Persisted UI language (`'zh'`/`'en'` …). */
   uiLanguage?: string
+  /** Whether the first-run onboarding wizard has been completed. */
+  onboarded?: boolean
 }
 
 const KEY = 'app'

@@ -202,3 +202,20 @@ export interface TrashItem {
   /** When the profile was moved to trash (ISO), derived from the dir mtime. */
   deletedAt: string
 }
+
+// ── onboarding (first-run wizard) ────────────────────────────────────────────
+
+/** Onboarding state + the effective default directories, for `settings:getOnboardingState`. */
+export interface OnboardingState {
+  /** True when a fresh install should show the wizard. */
+  required: boolean
+  /** The current effective defaults the wizard seeds its fields with. */
+  defaults: { pluginDir: string; dshVersionDir: string }
+}
+
+/** The values the wizard saves on completion, for `settings:completeOnboarding`. */
+export interface OnboardingPayload {
+  uiLanguage?: string
+  pluginDir?: string
+  dshVersionDir?: string
+}

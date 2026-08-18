@@ -14,6 +14,8 @@ import type {
   InstalledPlugin,
   IpcResult,
   NpmSearchHit,
+  OnboardingPayload,
+  OnboardingState,
   PackageVersionInfo,
   PluginRow,
   ProfileDetail,
@@ -97,6 +99,9 @@ export interface WindowApi {
   settings: {
     getUiLanguage: () => Promise<IpcResult<string | null>>
     setUiLanguage: (lng: string) => Promise<IpcResult<boolean>>
+    getOnboardingState: () => Promise<IpcResult<OnboardingState>>
+    pickDir: (opts?: { title?: string; defaultPath?: string }) => Promise<IpcResult<string>>
+    completeOnboarding: (payload: OnboardingPayload) => Promise<IpcResult<boolean>>
   }
 
   dsh: {

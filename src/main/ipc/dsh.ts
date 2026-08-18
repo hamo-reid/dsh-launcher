@@ -85,6 +85,17 @@ async function deleteDshFiles(entry: DshEntry): Promise<void> {
   }
 }
 
+/** Persist the dsh version-repository dir (shared by `dsh:setVersionDir` and
+ * the onboarding wizard). Empty string resets to the default. */
+export function setVersionDirValue(dir: string): IpcResult<boolean> {
+  try {
+    saveSettings({ ...loadSettings(), dshVersionDir: dir.trim() === '' ? undefined : dir.trim() })
+    return { ok: true, value: true }
+  } catch (error) {
+    return failFromError(error)
+  }
+}
+
 export function registerDshIpc(): void {
   ipcMain.handle('dsh:list', (): IpcResult<{ dshes: DshEntry[]; activeDshId?: string }> => {
     try {
@@ -290,12 +301,6 @@ export function registerDshIpc(): void {
       return failFromError(error)
     }
   })
-  ipcMain.handle('dsh:setVersionDir', (_event, dir: string): IpcResult<boolean> => {
-    try {
-      saveSettings({ ...loadSettings(), dshVersionDir: dir.trim() === '' ? undefined : dir.trim() })
-      return { ok: true, value: true }
-    } catch (error) {
-      return failFromError(error)
-    }
-  })
+  ipcMain.handle('dsh:setVersionDir', (_event, dir: string): IpcResult<boolean> =>
+    setVersionDirValue(dir))
 }

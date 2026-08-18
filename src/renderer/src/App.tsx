@@ -1,10 +1,11 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { ConfigProvider, Layout, Tabs, theme, Typography } from 'antd'
 import {
   AppstoreOutlined, ProfileOutlined, RobotOutlined, SettingOutlined,
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { useAppLang } from './i18n'
+import OnboardingModal from './components/OnboardingModal.tsx'
 import ProfileSection from './views/ProfileSection.tsx'
 import PluginsSection from './views/PluginsSection.tsx'
 import SettingsSection from './views/SettingsSection.tsx'
@@ -18,7 +19,21 @@ export default function App() {
   const { t } = useTranslation()
   const { antdLocale } = useAppLang()
   const [tab, setTab] = useState<Tab>('profile')
+  const [onboarding, setOnboarding] = useState<'loading' | 'open' | 'done'>('loading')
+  const [onboardDefaults, setOnboardDefaults] = useState({ pluginDir: '', dshVersionDir: '' })
   const { token } = theme.useToken()
+
+  // Decide once whether the first-run wizard is required (fresh install).
+  useEffect(() => {
+    let alive = true
+    void window.api.settings.getOnboardingState().then((r) => {
+      if (!alive) return
+      if (!r.ok) { setOnboarding('done'); return }
+      setOnboardDefaults(r.value.defaults)
+      setOnboarding(r.value.required ? 'open' : 'done')
+    })
+    return () => { alive = false }
+  }, [])
 
   const TABS: { key: Tab; label: string; icon: ReactNode }[] = [
     { key: 'dsh', label: t('app.tab.dsh'), icon: <RobotOutlined /> },
@@ -61,6 +76,12 @@ export default function App() {
         {tab === 'dsh' && <DshSection />}
       </Content>
     </Layout>
+    {onboarding === 'open' && (
+      <OnboardingModal
+        defaults={onboardDefaults}
+        onComplete={() => setOnboarding('done')}
+      />
+    )}
     </ConfigProvider>
   )
 }

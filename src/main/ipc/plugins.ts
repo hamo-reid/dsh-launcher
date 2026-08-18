@@ -16,6 +16,40 @@ import { fetchPackageVersions, npmSearch } from '../core/npm.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
 import type { ComboPlugin, InstalledOverviewRow, IpcResult, NpmSearchHit, PackageVersionInfo } from '../../shared/types.ts'
 
+/** Validate + persist the plugin-store location (shared by `plugins:setDir`
+ * and the onboarding wizard). On success the dir is made usable and saved. */
+export function setPluginStoreDir(dir: string): IpcResult<boolean> {
+  // Validate the chosen location before persisting it, so the user gets a
+  // precise message instead of a quiet failure on next install.
+  const trimmed = dir.trim()
+  if (trimmed === '') return fail(E.nameInvalid)
+  const target = resolve(trimmed)
+  try {
+    if (existsSync(target) && !statSync(target).isDirectory()) {
+      return fail(E.storeNotDir, { path: target })
+    }
+    mkdirSync(target, { recursive: true })
+    // Write-probe: the directory must actually be usable as a store.
+    const probe = join(target, '.pm-write-probe')
+    writeFileSync(probe, '')
+    rmSync(probe, { force: true })
+    // A pre-existing package.json must be a valid JSON object (this dir will
+    // double as a pnpm project once plugins are installed).
+    const manifestPath = join(target, 'package.json')
+    if (existsSync(manifestPath)) {
+      const parsed = JSON.parse(readFileSync(manifestPath, 'utf8')) as unknown
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return fail('store.badManifest', { path: manifestPath })
+      }
+    }
+    initStore(target)
+    saveSettings({ ...loadSettings(), pluginDir: target })
+    return { ok: true, value: true }
+  } catch (error) {
+    return fail('store.unusable', { detail: String(error) })
+  }
+}
+
 export function registerPluginsIpc(): void {
   ipcMain.handle('plugins:getDir', (): IpcResult<{ dir: string }> => {
     try {
@@ -25,37 +59,8 @@ export function registerPluginsIpc(): void {
     }
   })
 
-  ipcMain.handle('plugins:setDir', (_event, dir: string): IpcResult<boolean> => {
-    // Validate the chosen plugin-store location before persisting it, so the
-    // user gets a precise message instead of a quiet failure on next install.
-    const trimmed = dir.trim()
-    if (trimmed === '') return fail(E.nameInvalid)
-    const target = resolve(trimmed)
-    try {
-      if (existsSync(target) && !statSync(target).isDirectory()) {
-        return fail(E.storeNotDir, { path: target })
-      }
-      mkdirSync(target, { recursive: true })
-      // Write-probe: the directory must actually be usable as a store.
-      const probe = join(target, '.pm-write-probe')
-      writeFileSync(probe, '')
-      rmSync(probe, { force: true })
-      // A pre-existing package.json must be a valid JSON object (this dir will
-      // double as a pnpm project once plugins are installed).
-      const manifestPath = join(target, 'package.json')
-      if (existsSync(manifestPath)) {
-        const parsed = JSON.parse(readFileSync(manifestPath, 'utf8')) as unknown
-        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-          return fail('store.badManifest', { path: manifestPath })
-        }
-      }
-      initStore(target)
-      saveSettings({ ...loadSettings(), pluginDir: target })
-      return { ok: true, value: true }
-    } catch (error) {
-      return fail('store.unusable', { detail: String(error) })
-    }
-  })
+  ipcMain.handle('plugins:setDir', (_event, dir: string): IpcResult<boolean> =>
+    setPluginStoreDir(dir))
 
   ipcMain.handle('plugins:list', async (): Promise<IpcResult<{ name: string; version: string }[]>> => {
     try {

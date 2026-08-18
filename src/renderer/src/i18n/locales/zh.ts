@@ -362,6 +362,18 @@ const zh = {
     'settings.dshVersionDir.desc': '存放本地 DSH 各版本的目录，每个版本一个子目录；官方安装默认安装到这里。',
     'settings.pluginDir': '插件保存位置',
     'settings.pluginDir.desc': '下载 / 安装的插件（网络）存放目录。未配置时，插件管理页的「网络」部分不可用。',
+
+    'onboarding.title': '欢迎使用 DSH Launcher',
+    'onboarding.subtitle': '首次启动，请确认以下选项。你可以保留默认值，或修改后点击「完成」。完成后随时可在「设置」中调整。',
+    'onboarding.language': '界面语言',
+    'onboarding.language.desc': '界面显示语言，切换后立即生效并保存。',
+    'onboarding.pluginDir': '插件保存位置',
+    'onboarding.pluginDir.desc': '下载 / 安装的插件存放目录。',
+    'onboarding.versionDir': 'DSH 版本库位置',
+    'onboarding.versionDir.desc': '存放本地 DSH 各版本的目录，官方安装默认安装到这里。',
+    'onboarding.browse': '浏览…',
+    'onboarding.submit': '完成',
+    'onboarding.done': '设置已保存',
   },
 }
 

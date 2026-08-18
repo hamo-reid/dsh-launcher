@@ -83,5 +83,18 @@ export function dshVersionDir(): string {
   return loadSettings().dshVersionDir ?? defaultVersionDir()
 }
 
+/** True when a genuinely fresh install should run the onboarding wizard: no
+ * completion flag AND no user data yet (upgraded users with data are treated
+ * as already configured — never re-surveyed). */
+export function shouldRunOnboarding(): boolean {
+  const s = loadSettings()
+  if (s.onboarded === true) return false
+  const hasUserData =
+    (s.dshes?.length ?? 0) > 0 ||
+    (typeof s.pluginDir === 'string' && s.pluginDir.trim() !== '') ||
+    (typeof s.dshVersionDir === 'string' && s.dshVersionDir.trim() !== '')
+  return !hasUserData
+}
+
 /** Convenience re-exports used by IPC modules that read/write settings. */
 export type { AppSettings }
