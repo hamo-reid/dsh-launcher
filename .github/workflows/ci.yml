@@ -1,0 +1,44 @@
+name: CI
+
+# 质量门禁：每次 push 到 main 或开 PR 时，跑一遍完整检查。
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: typecheck · test · build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # pnpm + Node，缓存依赖。
+      - name: Enable pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        # 严格按 lock 安装，保证 CI 与本地一致。
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm run typecheck
+      - name: Unit tests
+        run: pnpm test
+      - name: Build
+        run: pnpm run build
+      - name: Verify packaged layout
+        # 确认编译产物目录就位（electron-vite 的 out/）。
+        run: node -e "require('fs').accessSync('out/main/index.js'); require('fs').accessSync('out/preload/index.js'); require('fs').accessSync('out/renderer/index.html')"

@@ -1,0 +1,66 @@
+name: Release
+
+# 打 `v*` tag 时：跑完整检查 → 用 electron-builder 打包 Windows 分发物
+# （portable 单文件 + win-unpacked 目录 zip）→ 上传到 GitHub Release。
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # 创建 Release / 上传资产
+
+jobs:
+  release:
+    name: Package & publish
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm run typecheck
+      - name: Unit tests
+        run: pnpm test
+      - name: Build
+        run: pnpm run build
+
+      # 版本对齐校验：electron-builder 依据 package.json 的 version 命名产物
+      # （如 Dsh-Launcher-0.1.0-portable.exe），所以 tag 必须与它一致。
+      - name: Validate tag matches package.json version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}".TrimStart('v')
+          $pkg = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($tag -ne $pkg) {
+            throw "Tag v$tag does not match package.json version $pkg — bump the version first."
+          }
+
+      # electron-builder 按 package.json「build」配置产出 portable + win-unpacked
+      # 到 release/；--publish never 禁止它自行发布（由本 workflow 显式上传）。
+      - name: Package Windows distributables
+        run: pnpm exec electron-builder --win --publish never
+
+      - name: Zip the unpacked directory
+        shell: pwsh
+        run: Compress-Archive -Path release/win-unpacked -DestinationPath release/Dsh-Launcher-win-unpacked.zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/Dsh-Launcher-*.exe
+            release/Dsh-Launcher-win-unpacked.zip
+          generate_release_notes: true
