@@ -1,7 +1,0 @@
-{
-  "name": "plugin-store",
-  "private": true,
-  "dependencies": {
-    "@deepseek-harness-tui/dsh-tui": "^0.8.0"
-  }
-}
