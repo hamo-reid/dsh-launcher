@@ -1,0 +1,78 @@
+{
+  "name": "dsh-launcher",
+  "version": "0.1.0",
+  "description": "DSH Launcher — manage dsh profiles, plugins and runtimes",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "test": "vitest run",
+    "pack": "pnpm build && electron-builder --win",
+    "pack:portable": "pnpm build && electron-builder --win portable",
+    "pack:dir": "pnpm build && electron-builder --win dir"
+  },
+  "build": {
+    "appId": "com.dsh.launcher",
+    "productName": "Dsh Launcher",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "out/**",
+      "package.json"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "**/sql.js/**"
+    ],
+    "win": {
+      "target": [
+        "portable",
+        "dir"
+      ],
+      "artifactName": "Dsh-Launcher-${version}-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "Dsh-Launcher-${version}-portable.exe"
+    }
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild"
+    ]
+  },
+  "dependencies": {
+    "@ant-design/icons": "^6.3.2",
+    "adm-zip": "^0.6.0",
+    "antd": "^6.6.0",
+    "dayjs": "^1.11.23",
+    "i18next": "^26.3.6",
+    "js-yaml": "^5.3.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-i18next": "^17.0.11",
+    "react-markdown": "^10.1.0",
+    "rehype-raw": "^7.0.0",
+    "rehype-sanitize": "^6.0.0",
+    "remark-gfm": "^4.0.1",
+    "sql.js": "^1.14.1"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.8",
+    "@types/node": "^22.10.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/sql.js": "^1.4.11",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^33.2.0",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^2.3.0",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11",
+    "vitest": "^3.2.7"
+  }
+}

@@ -1,0 +1,35 @@
+/** IPC for the machine-level home patch layer (`home:*`). */
+
+import { ipcMain } from 'electron'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { homePatchPath } from '../core/home.ts'
+import { parsePatchRows, setRowDisabled } from '../core/patch.ts'
+import { verifyDisabledState } from '../core/app-util.ts'
+import { fail, failFromError } from '../core/errors.ts'
+import type { IpcResult, PluginRow } from '../../shared/types.ts'
+
+export function registerHomeIpc(): void {
+  // Machine-level, shared by every profile; composes after each profile patch.
+  ipcMain.handle('home:load', (): IpcResult<{ rows: PluginRow[]; text: string }> => {
+    try {
+      const path = homePatchPath()
+      const text = existsSync(path) ? readFileSync(path, 'utf8') : ''
+      return { ok: true, value: { rows: parsePatchRows(text), text } }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  ipcMain.handle('home:setDisabled', (_event, id: string, disabled: boolean): IpcResult<boolean> => {
+    try {
+      const path = homePatchPath()
+      const current = existsSync(path) ? readFileSync(path, 'utf8') : '[]'
+      writeFileSync(path, setRowDisabled(current, id, disabled))
+      const after = readFileSync(path, 'utf8')
+      if (verifyDisabledState(after, id, disabled)) return { ok: true, value: true }
+      return fail('patch.writeVerify', { id })
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+}
