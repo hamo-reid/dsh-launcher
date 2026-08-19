@@ -240,6 +240,7 @@ export default function PluginsSection() {
                     <Space size={4} wrap>
                       <Tag>{t('plugin.overview.usageN', { count: r.usage.length })}</Tag>
                       <Tag>{t('plugin.overview.dshN', { count: dshs.size })}</Tag>
+                      {r.builtin === true ? <Tag color="purple">{t('plugin.overview.builtin')}</Tag> : null}
                       {r.inStore && <Tag color="blue">{t('plugin.overview.storeTag')}</Tag>}
                     </Space>
                   )

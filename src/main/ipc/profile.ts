@@ -56,10 +56,16 @@ function assertInsertValid(items: string[]): void {
  * misread as bad YAML. */
 function assertPatchDocValid(next: string): void {
   if (next.includes('!!js')) return
+  let parsed: unknown
   try {
-    yaml.load(next, { schema: yaml.FAILSAFE_SCHEMA })
+    parsed = yaml.load(next, { schema: yaml.FAILSAFE_SCHEMA })
   } catch (error) {
     throw new Error(`生成的 patch 不是合法 YAML，已拒绝写入：${String(error instanceof Error ? error.message : error)}`)
+  }
+  // dsh 要求 patch 顶层是 loader-patch 条目数组。空文档(只有注释 → null)、对象、标量
+  // 都会在启动时检查失败,必须在写入前拒绝——否则会静默写坏,到启动才暴露。
+  if (!Array.isArray(parsed)) {
+    throw new Error('生成的 patch 顶层必须是 YAML 数组（loader patch 条目列表），已拒绝写入')
   }
 }
 

@@ -356,9 +356,12 @@ export async function installOfficialDsh(
     emit({ kind: 'install', state: 'ok', version: installedVersion })
     return { name, version: installedVersion, execPath, home, dir: target }
   } catch (error) {
-    // Best-effort cleanup: a failed install must not leave a non-empty target
-    // dir that would trip the versionExists guard on a later retry.
-    if (created) await rm(target, { recursive: true, force: true }).catch(() => {})
+    // Only clean leftovers when the dsh package genuinely did NOT get installed:
+    // if it did, the install is usable and the failure is downstream (e.g. the
+    // icp registration) — deleting a working install would be destructive. home
+    // is never created here, so its rm force is a no-op.
+    const installed = existsSync(join(target, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'))
+    if (!installed && created) await rm(target, { recursive: true, force: true }).catch(() => {})
     await rm(home, { recursive: true, force: true }).catch(() => {})
     throw error
   }

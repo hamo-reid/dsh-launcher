@@ -59,6 +59,9 @@ export interface InstalledOverviewRow {
   versions: string[]
   usage: PluginUsagePoint[]
   inStore: boolean
+  /** True for a dsh-bundled template (used by a profile but not in the store):
+   * shown as built-in, not a manageable plugin. */
+  builtin?: boolean
 }
 
 /** What `profile:load` returns for one profile. */

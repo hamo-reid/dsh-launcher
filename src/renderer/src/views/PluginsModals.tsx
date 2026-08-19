@@ -83,6 +83,7 @@ export function PluginDetailModal(p: PluginDetailModalProps): JSX.Element {
             <Space direction="vertical" style={{ width: '100%' }} size="middle">
               <Space wrap>
                 {target?.inStore === true && <Tag color="blue">{t('plugin.detail.storeTag')}</Tag>}
+                {target?.builtin === true && <Tag color="purple">{t('plugin.detail.builtin')}</Tag>}
                 <Tag>{t('plugin.detail.usageCount', { count: target?.usage.length ?? 0 })}</Tag>
               </Space>
               <div>

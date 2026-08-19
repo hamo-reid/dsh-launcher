@@ -251,7 +251,12 @@ export function buildInstalledOverview(dshes: DshScope[], storeDir: string): Ins
     }
   }
 
-  return [...rows.values()].sort((a, b) => a.name.localeCompare(b.name))
+  // A package that's in use but not in the store is a dsh-bundled template
+  // (e.g. @deepseek-ai/dsh-base, @deepseek-ai/dsh-web-app) — mark it as built-in,
+  // not a plugin the user can manage/uninstall from the store.
+  return [...rows.values()]
+    .map(row => ({ ...row, builtin: row.inStore !== true && row.usage.length > 0 }))
+    .sort((a, b) => a.name.localeCompare(b.name))
 }
 
 /**
