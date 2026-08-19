@@ -69,6 +69,8 @@ const api = {
     ipcRenderer.invoke('profile:copyRow', name, bundle, id),
   removeBundle: (name: string, bundle: string): Promise<IpcResult<boolean>> =>
     ipcRenderer.invoke('profile:removeBundle', name, bundle),
+  reorderBundles: (name: string, bundle: string, toIndex: number): Promise<IpcResult<boolean>> =>
+    ipcRenderer.invoke('profile:reorderBundle', name, bundle, toIndex),
   reconcileBundles: (name: string): Promise<IpcResult<{ added: string[]; removed: string[] }>> =>
     ipcRenderer.invoke('profile:reconcile', name),
   configInfo: (name: string, id: string): Promise<IpcResult<{ default: string; current: string }>> =>

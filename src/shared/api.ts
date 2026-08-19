@@ -53,6 +53,8 @@ export interface WindowApi {
   removeRow: (name: string, id: string) => Promise<IpcResult<boolean>>
   copyRow: (name: string, bundle: string, id: string) => Promise<IpcResult<boolean>>
   removeBundle: (name: string, bundle: string) => Promise<IpcResult<boolean>>
+  /** Move a bundle layer to `toIndex` within the profile's bundle order. */
+  reorderBundles: (name: string, bundle: string, toIndex: number) => Promise<IpcResult<boolean>>
   reconcileBundles: (name: string) => Promise<IpcResult<{ added: string[]; removed: string[] }>>
   configInfo: (name: string, id: string) => Promise<IpcResult<{ default: string; current: string }>>
   /** Open the profile's `cordis.patch.yml` in the OS default editor. */

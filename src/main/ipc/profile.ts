@@ -17,7 +17,7 @@ import {
 } from '../core/combo.ts'
 import {
   cloneProfile, createProfile, exportProfile, importProfile, listLocalBundles, listProfileSummaries,
-  PROFILE_TEMPLATES, removeBundle, softDeleteProfile, type ProfileSummary,
+  PROFILE_TEMPLATES, removeBundle, reorderBundle, softDeleteProfile, type ProfileSummary,
 } from '../core/profile.ts'
 import { activeDshEntry, pluginDir } from '../core/appState.ts'
 import { baseLaunch } from '../core/dsh.ts'
@@ -344,6 +344,17 @@ export function registerProfileIpc(): void {
   ipcMain.handle('profile:removeBundle', async (_event, name: string, bundle: string): Promise<IpcResult<boolean>> => {
     try {
       await removeBundle(name, bundle)
+      return { ok: true, value: true }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Move one bundle layer to `toIndex` within `dsh.profile.bundles`.
+  ipcMain.handle('profile:reorderBundle', (_event, name: string, bundle: string, toIndex: number): IpcResult<boolean> => {
+    try {
+      if (!Number.isInteger(toIndex)) return fail('name.invalid', [], 'toIndex 必须是整数')
+      reorderBundle(name, bundle, toIndex)
       return { ok: true, value: true }
     } catch (error) {
       return failFromError(error)

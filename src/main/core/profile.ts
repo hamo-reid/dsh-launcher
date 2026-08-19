@@ -135,6 +135,24 @@ export async function removeBundle(profile: string, bundle: string): Promise<voi
   logger.info(`profile bundle removed: ${profile} · ${bundle}`)
 }
 
+/** Move one bundle layer within `dsh.profile.bundles` to `toIndex` (0..len-1,
+ * clamped). Matches drag-to-position semantics: remove then insert. */
+export function reorderBundle(profile: string, bundle: string, toIndex: number): void {
+  const manifestPath = join(profileDir(profile), 'package.json')
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+    dsh?: { profile?: { bundles?: string[] } }
+  }
+  const bundles = manifest.dsh?.profile?.bundles ?? []
+  const i = bundles.indexOf(bundle)
+  if (i < 0) throw new Error(`profile 中没有 bundle 层「${bundle}」`)
+  const clamped = Math.max(0, Math.min(toIndex, bundles.length - 1))
+  const next = [...bundles]
+  next.splice(i, 1)
+  next.splice(clamped, 0, bundle)
+  manifest.dsh = { ...manifest.dsh, profile: { ...manifest.dsh?.profile, bundles: next } }
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
+}
+
 /** Where a profile's bundle comes from — decides how import restores it. */
 export type BundleSource = 'dsh' | 'npm' | 'local'
 

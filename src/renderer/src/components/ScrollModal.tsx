@@ -35,6 +35,9 @@ export default function ScrollModal({
       title={title}
       open={open}
       onCancel={onCancel}
+      // These scroll-body dialogs hold long interactive lists (e.g. dnd-kit bundle
+      // reorder); a click on the mask that escapes the content must not close one.
+      maskClosable={false}
       width={width}
       footer={footer}
       okText={okText}
@@ -43,7 +46,7 @@ export default function ScrollModal({
       confirmLoading={confirmLoading}
       destroyOnClose={destroyOnClose}
     >
-      <div style={{ maxHeight: height, overflowY: 'auto' }}>{children}</div>
+      <div style={{ maxHeight: height, overflowY: 'auto', overflowX: 'hidden' }}>{children}</div>
     </Modal>
   )
 }

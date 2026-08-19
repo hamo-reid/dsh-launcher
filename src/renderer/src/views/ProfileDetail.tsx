@@ -3,6 +3,9 @@ import {
   Alert, Button, Input, List, Modal, Select, Space, Tag, theme, message,
 } from 'antd'
 import { FileTextOutlined } from '@ant-design/icons'
+import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core'
+import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
 import type { ProfileDetail, ProfileLayer, RowCreateInput } from '../../../shared/types.ts'
@@ -234,6 +237,28 @@ export default function ProfileDetailView({ name, onChanged }: Props) {
     })
   }
 
+  const onDragEnd = (event: DragEndEvent): void => {
+    const { active, over } = event
+    if (over === null || active.id === over.id) return
+    const from = bundles.indexOf(String(active.id))
+    const to = bundles.indexOf(String(over.id))
+    if (from < 0 || to < 0) return
+    const next = [...bundles]
+    const [moved] = next.splice(from, 1)
+    next.splice(to, 0, moved)
+    // Optimistic: apply the new order locally first (no full reload, so the dialog
+    // doesn't flicker on drop), then persist silently; only on failure reload to
+    // restore the authoritative order. `onChanged` is skipped — the bundle count in
+    // the profile summary is unchanged by a reorder.
+    setDetail(prev => (prev !== null ? { ...prev, bundles: next } : prev))
+    void (async () => {
+      const result = await window.api.reorderBundles(name, String(active.id), to)
+      if (result.ok) return
+      void message.error(apiErrorText(result))
+      void load()
+    })()
+  }
+
   const rowActions = (layer: ProfileLayer, id: string, disabled: boolean) => {
     if (layer.source === 'bundle') {
       return layer.bundle !== undefined
@@ -319,11 +344,13 @@ export default function ProfileDetailView({ name, onChanged }: Props) {
 
       <ScrollModal title={t('profile.detail.bundlesModal')} open={openBlock === 'bundles'} footer={null} width={MODAL.wide} onCancel={() => setOpenBlock(null)} bodyMax="md">
           {bundles.length === 0 ? <div style={{ color: token.colorTextTertiary }}>{t('common.none')}</div> : (
-            <List size="small" dataSource={bundles} renderItem={(bundle, idx) => (
-              <List.Item key={bundle} style={{ fontFamily: 'monospace' }} actions={[<Button key="rm" size="small" danger onClick={() => removeBundleRow(bundle)}>{t('profile.detail.removeBundle')}</Button>]}>
-                {idx + 1}. {bundle}
-              </List.Item>
-            )} />
+            <DndContext collisionDetection={closestCenter} autoScroll={false} onDragEnd={onDragEnd}>
+                <SortableContext items={bundles} strategy={verticalListSortingStrategy}>
+                  {bundles.map(bundle => (
+                    <SortableBundle key={bundle} bundle={bundle} onRemove={removeBundleRow} />
+                  ))}
+                </SortableContext>
+              </DndContext>
           )}
       </ScrollModal>
 
@@ -383,5 +410,43 @@ export default function ProfileDetailView({ name, onChanged }: Props) {
       </Modal>
     </div>
     </Loadable>
+  )
+}
+
+/** One sortable bundle row (dnd-kit) inside the Bundles modal — drag via the
+ * handle on the left; the Remove button on the right stays click-only. */
+function SortableBundle({ bundle, onRemove }: { bundle: string; onRemove: (b: string) => void }): JSX.Element {
+  const { t } = useTranslation()
+  const { token } = theme.useToken()
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: bundle })
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: transform !== null ? CSS.Transform.toString(transform) : undefined,
+        transition,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '6px 12px',
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+        background: token.colorBgContainer,
+        borderBottom: `1px solid ${token.colorSplit}`,
+        opacity: isDragging ? 0.4 : 1,
+        zIndex: isDragging ? 1 : undefined,
+      }}
+    >
+      <span
+        {...attributes}
+        {...listeners}
+        style={{ cursor: 'grab', flexShrink: 0, touchAction: 'none', color: token.colorTextTertiary }}
+      >
+        ⠿
+      </span>
+      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {bundle}
+      </span>
+      <Button size="small" danger onClick={() => onRemove(bundle)}>{t('profile.detail.removeBundle')}</Button>
+    </div>
   )
 }
