@@ -408,14 +408,15 @@ interface DshRemoveModalProps {
 export function DshRemoveModal(p: DshRemoveModalProps): JSX.Element {
   const { t } = useTranslation()
   const { token } = theme.useToken()
-  const [deleteFiles, setDeleteFiles] = useState(false)
   const [busy, setBusy] = useState(false)
 
-  const removeNow = async (df: boolean): Promise<void> => {
+  const removeNow = async (): Promise<void> => {
     if (p.dsh === null) return
     setBusy(true)
     try {
-      const r = await window.api.dsh.remove(p.dsh.id, df ? { deleteFiles: true } : undefined)
+      // 移除即删除安装文件（含官方安装的独立 home）。仅从列表脱管会让版本库自动发现
+      // 把它重新收录回来，故不再提供「仅移除」；不可逆保护交给 doRemove 的强确认。
+      const r = await window.api.dsh.remove(p.dsh.id, { deleteFiles: true })
       if (!r.ok) { void message.error(apiErrorText(r)); return }
       void message.success(t('dsh.removed'))
       p.onClose()
@@ -426,18 +427,14 @@ export function DshRemoveModal(p: DshRemoveModalProps): JSX.Element {
   }
 
   const doRemove = (): void => {
-    // 勾选删除文件时：先弹一次强确认，否则直接仅脱管。
-    if (deleteFiles) {
-      Modal.confirm({
-        title: t('dsh.remove.confirmDeleteTitle'),
-        content: t('dsh.remove.confirmDelete', { name: p.dsh?.name ?? '' }),
-        okText: t('common.confirm'),
-        okButtonProps: { danger: true },
-        onOk: () => void removeNow(true),
-      })
-    } else {
-      void removeNow(false)
-    }
+    // 两步确认：先在弹窗点「移除」，再经强确认后才真正删除文件。
+    Modal.confirm({
+      title: t('dsh.remove.confirmDeleteTitle'),
+      content: t('dsh.remove.confirmDelete', { name: p.dsh?.name ?? '' }),
+      okText: t('common.confirm'),
+      okButtonProps: { danger: true },
+      onOk: () => void removeNow(),
+    })
   }
 
   return (
@@ -453,9 +450,6 @@ export function DshRemoveModal(p: DshRemoveModalProps): JSX.Element {
         <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>
           {t('dsh.remove.hint')}
         </div>
-        <Checkbox checked={deleteFiles} onChange={e => setDeleteFiles(e.target.checked)}>
-          {t('dsh.remove.deleteFiles')}
-        </Checkbox>
       </Space>
     </Modal>
   )
