@@ -3,7 +3,7 @@ name: CI
 # 质量门禁：每次 push 到 main 或开 PR 时，跑一遍完整检查。
 on:
   push:
-    branches: [main]
+    branches: [main, dev, release]
   pull_request:
 
 concurrency:
