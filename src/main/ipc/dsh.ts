@@ -6,8 +6,8 @@ import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 import {
-  baseLaunch, defaultHome, entryFromPath, installDir, installOfficialDsh, probeDshs, readVersionFromPath,
-  resolveDshPackage, versionExists, type DshEntry,
+  baseLaunch, defaultHome, entryFromPath, installDir, installOfficialDsh, isDeletableDsh, probeDshs,
+  readVersionFromPath, resolveDshPackage, versionExists, type DshEntry,
 } from '../core/dsh.ts'
 import {
   dshVersionDir, effectiveProfileDir, readDshState, writeDshState,
@@ -32,7 +32,9 @@ function safeVersionName(name: string | undefined): string {
  * block the main process's event loop (which would make the whole app hang). */
 async function deleteDshFiles(entry: DshEntry): Promise<void> {
   const execDir = installDir(entry.execPath)
-  const versionRoot = dshVersionDir()
+  // Anchor on the repo this install actually landed in (set at install time),
+  // so cleanup still works after the current dshVersionDir setting changed.
+  const versionRoot = entry.versionDir ?? dshVersionDir()
   const targets: string[] = []
   const instanceNames: string[] = []
   if (existsSync(versionRoot)) {
@@ -84,6 +86,8 @@ export function registerDshIpc(): void {
             return {
               ...d,
               version: resolved?.version ?? d.version ?? readVersionFromPath(d.execPath),
+              // 派生 managed：persisted 标记 或 该安装根位于其版本库内（修复标记被覆盖的旧条目）。
+              managed: isDeletableDsh(d, d.versionDir ?? dshVersionDir()),
               launch: baseLaunch(d.execPath),
               profileDir: effectiveProfileDir(d),
               dir: resolved?.root ?? installDir(d.execPath),
@@ -129,7 +133,10 @@ export function registerDshIpc(): void {
         entry = { id: path, name: 'dsh (manual)', execPath: path, version: '', home: defaultHome() }
       }
       const { dshes } = readDshState()
-      writeDshState([...dshes.filter(d => d.id !== entry.id), entry])
+      // 保留被替换条目的 app-managed 标记：官方安装后若在「Add DSH」里用同一条 execPath
+      // 重新登记，不能把 managed:true 覆盖成未托管——否则该 dsh 会被当系统 dsh 保护而无法删除。
+      const existing = dshes.find(x => x.id === entry.id)
+      writeDshState([...dshes.filter(d => d.id !== entry.id), existing?.managed === true ? { ...entry, managed: true } : entry])
       return { ok: true, value: entry }
     } catch (error) {
       return failFromError(error)
@@ -142,7 +149,7 @@ export function registerDshIpc(): void {
       const entry = dshes.find(d => d.id === id)
       // 非 app 管理的（系统级/手动加入的用户已有安装）一律禁止删除，
       // 避免误删用户全局环境或绕过 UI 的 `dsh:remove` 调用。
-      if (entry !== undefined && entry.managed !== true) {
+      if (entry !== undefined && !isDeletableDsh(entry, entry.versionDir ?? dshVersionDir())) {
         return fail('dsh.protected')
       }
       logger.info(`dsh removed: ${entry?.name ?? id}${opts?.deleteFiles === true ? ' (delete files)' : ''}`)
@@ -230,7 +237,10 @@ export function registerDshIpc(): void {
         home: defaultHome(),
       }
       const { dshes } = readDshState()
-      writeDshState([...dshes.filter(d => d.id !== entry.id), entry])
+      // 保留被替换条目的 app-managed 标记：官方安装后若在「Add DSH」里用同一条 execPath
+      // 重新登记，不能把 managed:true 覆盖成未托管——否则该 dsh 会被当系统 dsh 保护而无法删除。
+      const existing = dshes.find(x => x.id === entry.id)
+      writeDshState([...dshes.filter(d => d.id !== entry.id), existing?.managed === true ? { ...entry, managed: true } : entry])
       return { ok: true, value: entry }
     } catch (error) {
       return failFromError(error)
@@ -249,9 +259,14 @@ export function registerDshIpc(): void {
 
   ipcMain.handle('dsh:installOfficial', async (event, options?: { versionDir?: string; name?: string; version?: string }): Promise<IpcResult<DshInstallResult>> => {
     try {
-      const versionDir = options?.versionDir?.trim() !== undefined && options.versionDir.trim() !== ''
-        ? options.versionDir.trim()
-        : dshVersionDir()
+      const currentRoot = dshVersionDir()
+      const requested = options?.versionDir?.trim()
+      const versionDir = requested !== undefined && requested !== '' ? requested : currentRoot
+      // 用户在安装对话框把版本库指向了非当前设置的目录：写回设置，让「官方安装到指定目录」
+      // 持久可锚定（删除/清理用 entry.versionDir 而不是之后可能变化的 dshVersionDir()）。
+      if (requested !== undefined && requested !== '' && requested !== currentRoot) {
+        saveSettings({ ...loadSettings(), dshVersionDir: versionDir })
+      }
       const name = safeVersionName(options?.name)
       // 重装同名冲突：沿用现有弹窗报错（不并入进度展示），避免覆盖既有实例。
       if (versionExists(join(versionDir, name))) return fail('dsh.versionExists', { name })
@@ -266,6 +281,8 @@ export function registerDshIpc(): void {
         home: info.home,
         // App-managed (in the version repo) — the only kind deletable from the DSH page.
         managed: true,
+        // The version-repo root this install actually landed in — cleanup anchors here.
+        versionDir,
       }
       event.sender.send('install:event', { kind: 'register', state: 'running' })
       try {

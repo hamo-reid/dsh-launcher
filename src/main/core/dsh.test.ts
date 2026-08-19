@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { detectExecutables, isDeletableDsh, resolveDshPackage } from './dsh.ts'
+import { detectExecutables, isDeletableDsh, isManagedInstall, resolveDshPackage } from './dsh.ts'
 
 let root: string
 
@@ -93,5 +93,35 @@ describe('isDeletableDsh', () => {
     // 缺省（检测/手动/路径添加都不打标）
     expect(isDeletableDsh(base)).toBe(false)
     expect(isDeletableDsh({ ...base, managed: false })).toBe(false)
+  })
+})
+
+describe('isManagedInstall / path-derived deletable', () => {
+  let repo = ''
+  let shim = ''
+  // Build the tree in a describe-level beforeAll (runs after the top-level one
+  // has created `root`), so dir() paths resolve into a real temp dir.
+  beforeAll(() => {
+    repo = dir('repo')
+    shim = join(dir('repo/official/node_modules/.bin'), 'dsh.cmd')
+    writeFileSync(shim, '@echo off')
+  })
+
+  const inside = (execPath: string) => ({ id: execPath, name: 'official', execPath, version: '1', home: join(root, 'homes', 'official') })
+
+  it('derives managed from the repo path when the marker was clobbered', () => {
+    // no persisted managed marker (e.g. overwritten by a manual re-registration),
+    // yet the executable still lives under the repo → derivable as deletable
+    expect(isDeletableDsh(inside(shim), repo)).toBe(true)
+  })
+
+  it('rejects an install whose root sits outside the repo', () => {
+    expect(isDeletableDsh(inside(join(dir('elsewhere'), 'dsh.cmd')), repo)).toBe(false)
+  })
+
+  it('isManagedInstall prefers the recorded entry.versionDir over the passed root', () => {
+    const other = join(root, 'other-repo')
+    expect(isManagedInstall({ ...inside(shim), versionDir: repo }, other)).toBe(true)
+    expect(isManagedInstall({ ...inside(shim), versionDir: other }, repo)).toBe(false)
   })
 })

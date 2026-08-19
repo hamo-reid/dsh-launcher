@@ -97,10 +97,14 @@ export interface DshEntry {
   home: string
   /** Optional override for this dsh's profiles directory (default `<home>/profiles`). */
   profilesDir?: string
-  /** True only for app-managed (official install in the version repo) dsh —
-   * the only kind deletable from the DSH page. System/globally-installed dsh
-   * (detected, added by path, or added manually) are never managed. */
+  /** Persisted app-managed marker (set on official install; the read side merges
+   * it with a path-derived check so a clobbered marker still leaves an app
+   * install deletable). System/globally-installed dsh are never managed. */
   managed?: boolean
+  /** The version-repo root this install landed in (official installs only).
+   * Lets delete/cleanup anchor to the actual install dir even when the current
+   * `dshVersionDir` setting has since changed. Absent on legacy entries. */
+  versionDir?: string
   /** User-friendly base launch command (e.g. `pnpm dsh`), derived at read time. */
   launch?: string
   /** Directory holding this dsh's executable (derived, for reveal-in-explorer). */

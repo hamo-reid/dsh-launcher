@@ -217,12 +217,26 @@ export function installDir(execPath: string): string {
   return resolveTargetPath(execPath)
 }
 
-/** A dsh is deletable from the DSH page only when it is an app-managed install
- * (official install in the version repo). System/globally-installed dsh we only
- * discovered or were added by path must never be removed — deleting would hit
- * the user's own environment. */
-export function isDeletableDsh(entry: DshEntry): boolean {
-  return entry.managed === true
+/** True when the entry's executable physically lives under `versionRoot` (the
+ * version repo this install landed in) — the structural signal of an
+ * app-managed install. Prefers the per-entry recorded repo (`entry.versionDir`)
+ * so undelete/cleanup still anchor correctly after the setting changes. */
+export function isManagedInstall(entry: DshEntry, versionRoot: string): boolean {
+  const root = entry.versionDir !== undefined && entry.versionDir.trim() !== '' ? entry.versionDir : versionRoot
+  if (root === '') return false
+  const rp = root.endsWith(sep) ? root.slice(0, -1) : root
+  const execDir = installDir(entry.execPath)
+  return execDir === rp || execDir.startsWith(rp + sep)
+}
+
+/** A dsh is deletable from the DSH page when it is an app-managed install:
+ * the persisted marker, OR (fallback for entries whose marker was clobbered by
+ * an id-colliding re-registration) its install root sits under its version repo.
+ * System/globally-installed dsh are never managed and thus never removed. */
+export function isDeletableDsh(entry: DshEntry, versionRoot?: string): boolean {
+  if (entry.managed === true) return true
+  if (versionRoot === undefined) return false
+  return isManagedInstall(entry, versionRoot)
 }
 
 // ── official install ─────────────────────────────────────────────────────────
