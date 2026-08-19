@@ -1,13 +1,14 @@
 /** Modal dialogs for the DSH page — each owns its own state, so `DshSection`
  * is left with just list + activation orchestration. */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Alert, Button, Checkbox, Input, List, Modal, Select, Space, Spin, Tag, message, theme } from 'antd'
+import { CheckCircleFilled, CloseCircleFilled, LoadingOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
 import FieldLabel from '../components/FieldLabel.tsx'
 import { MODAL } from '../theme.ts'
-import type { PackageVersionInfo } from '../../../shared/types.ts'
+import type { DshInstallResult, DshInstallStep, PackageVersionInfo } from '../../../shared/types.ts'
 
 // ── Add DSH ────────────────────────────────────────────────────────────────
 
@@ -151,6 +152,21 @@ export function AddDshModal(p: AddDshModalProps): JSX.Element {
 
 // ── Official install ───────────────────────────────────────────────────────
 
+/** One progress row of an official install (per `DshInstallStep`). */
+interface InstallRow {
+  key: string
+  label: string
+  status: 'running' | 'ok' | 'error'
+  /** Right-aligned version detail (pinned/resolved version once known). */
+  meta?: string
+  detail?: string
+}
+function StepIcon({ status }: { status: InstallRow['status'] }): JSX.Element {
+  if (status === 'running') return <LoadingOutlined spin style={{ color: '#faad14' }} />
+  if (status === 'ok') return <CheckCircleFilled style={{ color: '#52c41a' }} />
+  return <CloseCircleFilled style={{ color: '#ff4d4f' }} />
+}
+
 interface OfficialInstallModalProps {
   open: boolean
   onClose: () => void
@@ -158,20 +174,51 @@ interface OfficialInstallModalProps {
 }
 export function OfficialInstallModal(p: OfficialInstallModalProps): JSX.Element {
   const { t } = useTranslation()
+  const { token } = theme.useToken()
   const [installing, setInstalling] = useState(false)
-  const [officialDone, setOfficialDone] = useState(false)
+  const [done, setDone] = useState(false)
+  const [error, setError] = useState('')
+  const [result, setResult] = useState<DshInstallResult | null>(null)
+  const [detailView, setDetailView] = useState<string | null>(null)
   const [versionDir, setVersionDir] = useState('')
   const [installName, setInstallName] = useState('official')
   // npm 版本选择（官方包 @deepseek-ai/dsh）。
   const [pkgInfo, setPkgInfo] = useState<PackageVersionInfo | null>(null)
   const [version, setVersion] = useState('')
   const [versionsLoading, setVersionsLoading] = useState(false)
+  const rowsRef = useRef<InstallRow[]>([])
+  const [rows, setRows] = useState<InstallRow[]>([])
+
+  const upsert = (row: InstallRow): void => {
+    const next = [...rowsRef.current]
+    const at = next.findIndex(r => r.key === row.key)
+    if (at >= 0) next[at] = row
+    else next.push(row)
+    rowsRef.current = next
+    setRows(next)
+  }
+
+  // Stream per-step progress straight into the install rows.
+  useEffect(() => window.api.dsh.onInstallEvent((step: DshInstallStep) => {
+    upsert({
+      key: step.kind,
+      label: t(`dsh.official.step.${step.kind}`),
+      status: step.state,
+      meta: step.version !== undefined && step.version !== '' ? `v${step.version}` : undefined,
+      detail: step.detail,
+    })
+  }), [t])
 
   useEffect(() => {
     if (!p.open) return
-    // 重新打开时重置状态，避免残留「已安装」。
+    // 重新打开时重置状态，避免残留上一次的进度/结果。
     setInstalling(false)
-    setOfficialDone(false)
+    setDone(false)
+    setError('')
+    setResult(null)
+    rowsRef.current = []
+    setRows([])
+    setVersionDir('')
     setPkgInfo(null)
     setVersion('')
     setVersionsLoading(true)
@@ -192,61 +239,131 @@ export function OfficialInstallModal(p: OfficialInstallModalProps): JSX.Element 
   }, [p.open])
 
   const doInstallOfficial = async (): Promise<void> => {
+    rowsRef.current = []
+    setRows([])
+    setError('')
+    setResult(null)
+    setDone(false)
     setInstalling(true)
-    setOfficialDone(false)
-    const r = await window.api.dsh.installOfficial({
-      versionDir: versionDir.trim(),
-      name: installName.trim(),
-      version: version.trim() || undefined,
-    })
-    setInstalling(false)
-    if (!r.ok) { void message.error(apiErrorText(r)); return }
-    setOfficialDone(true)
-    void message.success(t('dsh.official.installedNow'))
-    await p.onDone()
+    try {
+      const r = await window.api.dsh.installOfficial({
+        versionDir: versionDir.trim(),
+        name: installName.trim(),
+        // 版本留空 → undefined → 核心层解析 latest（修复「版本留空」BUG）
+        // (version ?? '')：allowClear 清除后 Select 的 onChange 会传 undefined，
+        // 直接 trim() 会抛 TypeError。
+        version: (version ?? '').trim() || undefined,
+      })
+      if (!r.ok) { setError(apiErrorText(r)); setDone(true); return }
+      setResult(r.value)
+      setDone(true)
+      void message.success(t('dsh.official.installedNow', { version: r.value.version }))
+      await p.onDone()
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e))
+      setDone(true)
+    } finally {
+      // 兜底：任何异常都结束 loading，杜绝「一直显示正在安装」。
+      setInstalling(false)
+    }
   }
 
   return (
+    <>
     <Modal title={t('dsh.official.title')} open={p.open}
-      okText={officialDone ? t('dsh.official.done') : t('dsh.official.start')}
-      okButtonProps={{ loading: installing }}
-      onOk={() => { if (officialDone) p.onClose(); else void doInstallOfficial() }}
-      onCancel={p.onClose} width={MODAL.narrow}>
-      <Space direction="vertical" size="small" style={{ width: '100%' }}>
-        <FieldLabel>{t('dsh.official.dirLabel')}</FieldLabel>
-        <Input value={versionDir} onChange={e => setVersionDir(e.target.value)} placeholder={t('dsh.official.dirPlaceholder')} />
-        <FieldLabel>{t('dsh.official.nameLabel')}</FieldLabel>
-        <Input value={installName} onChange={e => setInstallName(e.target.value)} placeholder="official" />
-        <FieldLabel>{t('dsh.official.versionLabel')} <span style={{ fontWeight: 400, color: 'inherit' }}>{t('dsh.official.versionHint')}</span></FieldLabel>
-        {versionsLoading
-          ? <Spin size="small" />
+      onCancel={installing ? undefined : p.onClose}
+      closable={!installing} maskClosable={!installing} width={MODAL.wide}
+      footer={installing
+        ? <Button loading>{t('dsh.official.installing')}</Button>
+        : done
+          ? <Button type="primary" onClick={p.onClose}>{t('dsh.official.done')}</Button>
           : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {pkgInfo !== null && Object.keys(pkgInfo.distTags).length > 0 && (
-                <div>{Object.entries(pkgInfo.distTags).map(([tag, ver]) => (
-                  <Tag key={tag} style={{ marginBottom: 4 }}>{tag}={ver}</Tag>
-                ))}</div>
+              <Space>
+                <Button onClick={p.onClose}>{t('common.cancel')}</Button>
+                <Button type="primary" onClick={() => void doInstallOfficial()}>{t('dsh.official.start')}</Button>
+              </Space>
+            )}>
+      <Space direction="vertical" size="small" style={{ width: '100%' }}>
+        {!installing && !done && (
+          <>
+            <FieldLabel>{t('dsh.official.dirLabel')}</FieldLabel>
+            <Input value={versionDir} onChange={e => setVersionDir(e.target.value)} placeholder={t('dsh.official.dirPlaceholder')} />
+            <FieldLabel>{t('dsh.official.nameLabel')}</FieldLabel>
+            <Input value={installName} onChange={e => setInstallName(e.target.value)} placeholder="official" />
+            <FieldLabel>{t('dsh.official.versionLabel')} <span style={{ fontWeight: 400, color: 'inherit' }}>{t('dsh.official.versionHint')}</span></FieldLabel>
+            {versionsLoading
+              ? <Spin size="small" />
+              : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {pkgInfo !== null && Object.keys(pkgInfo.distTags).length > 0 && (
+                    <div>{Object.entries(pkgInfo.distTags).map(([tag, ver]) => (
+                      <Tag key={tag} style={{ marginBottom: 4 }}>{tag}={ver}</Tag>
+                    ))}</div>
+                  )}
+                  <Select
+                    placeholder={t('dsh.official.versionPlaceholder')}
+                    value={version || undefined}
+                    onChange={v => setVersion(v ?? '')}
+                    showSearch
+                    allowClear
+                    optionFilterProp="label"
+                    options={(pkgInfo?.versions ?? []).map(v => ({ value: v, label: v }))}
+                  />
+                </div>
               )}
-              <Select
-                placeholder={t('dsh.official.versionPlaceholder')}
-                value={version || undefined}
-                onChange={setVersion}
-                showSearch
-                allowClear
-                optionFilterProp="label"
-                options={(pkgInfo?.versions ?? []).map(v => ({ value: v, label: v }))}
-              />
-            </div>
-          )}
-        <Alert type="info" showIcon message={t('dsh.official.stepsIntro')} />
-        <ol style={{ paddingLeft: 20, margin: 0 }}>
-          <li>{t('dsh.official.step1')}</li>
-          <li>{t('dsh.official.step2')}</li>
-          <li>{t('dsh.official.step3')}</li>
-        </ol>
-        {officialDone && <Alert type="success" showIcon message={t('dsh.official.installed')} />}
+            <Alert type="info" showIcon message={t('dsh.official.stepsIntro')} />
+            <ol style={{ paddingLeft: 20, margin: 0 }}>
+              <li>{t('dsh.official.step1')}</li>
+              <li>{t('dsh.official.step2')}</li>
+              <li>{t('dsh.official.step3')}</li>
+            </ol>
+          </>
+        )}
+
+        {/* 逐行进度：转圈 / 绿勾 / 红叉；安装结束仍保留在下面。 */}
+        {rows.length > 0 && (
+          <div style={{ borderTop: `1px solid ${token.colorSplit}`, paddingTop: token.paddingSM }}>
+            {rows.map(row => (
+              <div key={row.key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0' }}>
+                <StepIcon status={row.status} />
+                <span style={{ flex: 1, minWidth: 0 }}>{row.label}</span>
+                {row.meta !== undefined && (
+                  <span style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' }}>{row.meta}</span>
+                )}
+                {row.status === 'error' && (
+                  <Button type="link" size="small" style={{ padding: 0, color: '#ff4d4f' }} onClick={() => setDetailView(row.detail ?? '')}>{t('dsh.official.errorLabel')}</Button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {done && error !== '' && (
+          <Alert type="error" showIcon message={t('dsh.official.failed')} description={error} />
+        )}
+
+        {done && result !== null && (
+          <Alert type="success" showIcon
+            message={t('dsh.official.installedVersion', { version: result.version })}
+            description={`${t('dsh.official.resultPath')} ${result.execPath}\n${t('dsh.official.resultHome')} ${result.home}`} />
+        )}
       </Space>
     </Modal>
+
+    {/* 失败详情：点击某行的 Error 弹出完整错误文本。 */}
+    <Modal title={t('dsh.official.failDetailTitle')} open={detailView !== null} onOk={() => setDetailView(null)} onCancel={() => setDetailView(null)}
+      okText={t('common.close')} width={MODAL.wide}
+      footer={(
+        <Space>
+          <Button onClick={() => { if (detailView !== null) void navigator.clipboard.writeText(detailView) }}>{t('common.copy')}</Button>
+          <Button type="primary" onClick={() => setDetailView(null)}>{t('common.close')}</Button>
+        </Space>
+      )}>
+      <pre style={{ margin: 0, maxHeight: 400, overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: token.colorFillTertiary, padding: token.paddingSM, borderRadius: token.borderRadius }}>
+        {detailView}
+      </pre>
+    </Modal>
+    </>
   )
 }
 

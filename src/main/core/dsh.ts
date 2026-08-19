@@ -6,12 +6,15 @@
  * runs `apps/cli/src/bin.ts` via `node --import tsx/esm`). We locate the dsh
  * *package root* (not the `.bin` shim's neighbours) to read the real version. */
 
-import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
 import { basename, dirname, join, sep } from 'node:path'
 import { spawn } from 'node:child_process'
 import os from 'node:os'
 import { logger } from './logger.ts'
-import type { DshEntry } from '../../shared/types.ts'
+import { runPnpm } from './pnpm.ts'
+import { fetchPackageVersions } from './npm.ts'
+import type { DshEntry, DshInstallResult, DshInstallStep } from '../../shared/types.ts'
 
 /** Re-export the shared dsh shape for existing core/ipc callers. */
 export type { DshEntry } from '../../shared/types.ts'
@@ -220,4 +223,120 @@ export function installDir(execPath: string): string {
  * the user's own environment. */
 export function isDeletableDsh(entry: DshEntry): boolean {
   return entry.managed === true
+}
+
+// ── official install ─────────────────────────────────────────────────────────
+
+/** Resolve the npm spec + pinned version for an official install. A specified
+ * version is used verbatim; an empty version resolves `latest`. Pure (no I/O),
+ * so the spec/version assembly is unit-testable. Returns `undefined` when no
+ * version could be pinned (both inputs empty/blank). */
+export function resolveInstallSpec(
+  version: string | undefined,
+  latest: string | undefined,
+): { spec: string; resolvedVersion: string } | undefined {
+  const trimmed = version?.trim()
+  if (trimmed !== undefined && trimmed !== '') {
+    return { spec: `@deepseek-ai/dsh@${trimmed}`, resolvedVersion: trimmed }
+  }
+  const latestTrimmed = latest?.trim()
+  if (latestTrimmed !== undefined && latestTrimmed !== '') {
+    return { spec: `@deepseek-ai/dsh@${latestTrimmed}`, resolvedVersion: latestTrimmed }
+  }
+  return undefined
+}
+
+/** Whether a version name already owns a non-empty target dir — the conflict
+ * guard against overwriting an existing install. */
+export function versionExists(targetDir: string): boolean {
+  return existsSync(targetDir) && readdirSync(targetDir).length > 0
+}
+
+/** Read the installed version from a package manifest, falling back to
+ * `unknown` when the file is missing or malformed. */
+export function readInstalledVersion(manifestPath: string): string {
+  try {
+    const pkg = JSON.parse(readFileSync(manifestPath, 'utf8')) as { version?: string }
+    return pkg.version ?? 'unknown'
+  } catch {
+    return 'unknown'
+  }
+}
+
+/** The first existing bin candidate for an installed dsh (`.bin/dsh.cmd` on
+ * win, then the POSIX shim, then the in-package bin). */
+export function pickBinCandidate(target: string): string {
+  const candidates = [
+    join(target, 'node_modules', '.bin', 'dsh.cmd'),
+    join(target, 'node_modules', '.bin', 'dsh'),
+    join(target, 'node_modules', 'dsh', 'bin', 'dsh'),
+  ]
+  return candidates.find(candidate => existsSync(candidate)) ?? join(target, 'node_modules', '.bin', 'dsh')
+}
+
+/** Install the official `@deepseek-ai/dsh` into `<versionDir>/<name>` with its
+ * own home under `<versionDir>/../homes/<name>`. `version` may be a published
+ * npm version or empty — empty pins `latest` via the registry (so the install
+ * always runs `pnpm add @deepseek-ai/dsh@<pinned>` and never a bare, slow,
+ * end-rendered package spec). `onProgress` streams `DshInstallStep`s, mirroring
+ * `importProfile`'s progress callback. On failure the target + home dirs are
+ * best-effort cleaned up so a retry never trips a stale non-empty target. */
+export async function installOfficialDsh(
+  versionDir: string,
+  name: string,
+  version?: string,
+  onProgress?: (step: DshInstallStep) => void,
+): Promise<DshInstallResult> {
+  const emit: (step: DshInstallStep) => void = onProgress ?? (() => {})
+  const target = join(versionDir, name)
+  const home = join(dirname(versionDir), 'homes', name)
+
+  // Resolve the version (explicit, or latest) before touching any state.
+  emit({ kind: 'version', state: 'running' })
+  let resolved: string
+  if (version !== undefined && version.trim() !== '') {
+    resolved = version.trim()
+    emit({ kind: 'version', state: 'ok', version: resolved })
+  } else {
+    let latest: string | undefined
+    try {
+      const info = await fetchPackageVersions('@deepseek-ai/dsh')
+      latest = info.distTags.latest ?? info.versions[0]
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error)
+      emit({ kind: 'version', state: 'error', detail: text })
+      throw new Error(`解析 @deepseek-ai/dsh 最新版本失败：${text}`)
+    }
+    const spec = resolveInstallSpec(undefined, latest)
+    if (spec === undefined) {
+      emit({ kind: 'version', state: 'error', detail: '未能从 npm 解析 @deepseek-ai/dsh 的最新版本' })
+      throw new Error('未能从 npm 解析 @deepseek-ai/dsh 的最新版本')
+    }
+    resolved = spec.resolvedVersion
+    emit({ kind: 'version', state: 'ok', version: resolved })
+  }
+
+  let created = false
+  try {
+    mkdirSync(target, { recursive: true })
+    created = true
+
+    emit({ kind: 'install', state: 'running' })
+    const result = await runPnpm(target, ['add', `@deepseek-ai/dsh@${resolved}`])
+    if (!result.ok) {
+      emit({ kind: 'install', state: 'error', detail: result.text })
+      throw new Error(`安装官方 dsh 失败：${result.text}`)
+    }
+
+    const execPath = pickBinCandidate(target)
+    const installedVersion = readInstalledVersion(join(target, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'))
+    emit({ kind: 'install', state: 'ok', version: installedVersion })
+    return { name, version: installedVersion, execPath, home, dir: target }
+  } catch (error) {
+    // Best-effort cleanup: a failed install must not leave a non-empty target
+    // dir that would trip the versionExists guard on a later retry.
+    if (created) await rm(target, { recursive: true, force: true }).catch(() => {})
+    await rm(home, { recursive: true, force: true }).catch(() => {})
+    throw error
+  }
 }

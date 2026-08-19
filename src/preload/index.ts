@@ -6,6 +6,8 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type {
   ComboPlugin,
   DshEntry,
+  DshInstallResult,
+  DshInstallStep,
   ImportProfileResult,
   ImportStep,
   InstalledOverviewRow,
@@ -171,8 +173,13 @@ const api = {
       ipcRenderer.invoke('dsh:setHome', id, home),
     setProfileDir: (id: string, dir: string): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('dsh:setProfileDir', id, dir),
-    installOfficial: (options?: { versionDir?: string; name?: string; version?: string }): Promise<IpcResult<boolean>> =>
+    installOfficial: (options?: { versionDir?: string; name?: string; version?: string }): Promise<IpcResult<DshInstallResult>> =>
       ipcRenderer.invoke('dsh:installOfficial', options),
+    onInstallEvent: (callback: (step: DshInstallStep) => void): (() => void) => {
+      const handler = (_: unknown, step: DshInstallStep): void => callback(step)
+      ipcRenderer.on('install:event', handler)
+      return () => { ipcRenderer.removeListener('install:event', handler) }
+    },
     pkgVersions: (): Promise<IpcResult<PackageVersionInfo>> =>
       ipcRenderer.invoke('dsh:pkgVersions'),
     getVersionDir: (): Promise<IpcResult<{ dir: string }>> =>

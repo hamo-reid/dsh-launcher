@@ -107,6 +107,31 @@ export interface DshEntry {
   dir?: string
 }
 
+// ── dsh official install ─────────────────────────────────────────────────────
+
+/** Successful official-install payload, returned to the renderer so the dialog
+ * can show the installed version + paths. */
+export interface DshInstallResult {
+  /** Directory name under the version repo (e.g. `official`). */
+  name: string
+  /** Actual npm version installed (read from the installed package.json). */
+  version: string
+  /** Executable path (`.bin/dsh.cmd` shim). */
+  execPath: string
+  /** Dedicated home (`<versionRepo>/../homes/<name>`). */
+  home: string
+  /** Install root directory (`<versionRepo>/<name>`). */
+  dir: string
+}
+
+/** Streamed per-step progress of an official dsh install, pushed main → renderer
+ * (`install:event`) so the dialog can render one status row per step. Mirrors
+ * `ImportStep`: resolve the version first, then `pnpm add`, then register. */
+export type DshInstallStep =
+  | { kind: 'version'; state: 'running' | 'ok' | 'error'; version?: string; detail?: string }
+  | { kind: 'install'; state: 'running' | 'ok' | 'error'; version?: string; detail?: string }
+  | { kind: 'register'; state: 'running' | 'ok' | 'error'; version?: string; detail?: string }
+
 // ── npm search ──────────────────────────────────────────────────────────────
 
 /** One hit from the npm registry search. */

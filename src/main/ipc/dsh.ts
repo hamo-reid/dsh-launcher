@@ -2,59 +2,26 @@
  * official installation. */
 
 import { ipcMain, shell } from 'electron'
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 import {
-  baseLaunch, defaultHome, entryFromPath, installDir, probeDshs, readVersionFromPath, resolveDshPackage, type DshEntry,
+  baseLaunch, defaultHome, entryFromPath, installDir, installOfficialDsh, probeDshs, readVersionFromPath,
+  resolveDshPackage, versionExists, type DshEntry,
 } from '../core/dsh.ts'
 import {
   dshVersionDir, effectiveProfileDir, readDshState, writeDshState,
 } from '../core/appState.ts'
 import { loadSettings, saveSettings } from '../core/settings.ts'
-import { runPnpm } from '../core/pnpm.ts'
 import { fetchPackageVersions } from '../core/npm.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
 import { logger } from '../core/logger.ts'
-import type { IpcResult, PackageVersionInfo } from '../../shared/types.ts'
+import type { DshInstallResult, IpcResult, PackageVersionInfo } from '../../shared/types.ts'
 
 /** A filesystem-safe version name (defaults to `official`). */
 function safeVersionName(name: string | undefined): string {
   const cleaned = (name ?? '').replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, '-').trim()
   return cleaned === '' ? 'official' : cleaned
-}
-
-/** Install the official `@deepseek-ai/dsh` into `<versionDir>/<name>` with its
- * own home under `<versionDir>/../homes/<name>`. `version` selects a published
- * version from npm (`@deepseek-ai/dsh@<v>`); when empty, the latest is installed. */
-async function installOfficialDsh(versionDir: string, name: string, version?: string): Promise<{ execPath: string; version: string; home: string; dir: string }> {
-  const target = join(versionDir, name)
-  const home = join(dirname(versionDir), 'homes', name)
-  mkdirSync(target, { recursive: true })
-  // 版本可空（回落 latest），指定则装 npm 上的对应发布版。
-  const spec = version !== undefined && version.trim() !== ''
-    ? `@deepseek-ai/dsh@${version.trim()}`
-    : '@deepseek-ai/dsh'
-  const result = await runPnpm(target, ['add', spec])
-  if (!result.ok) throw new Error(`安装官方 dsh 失败：${result.text}`)
-
-  const binCandidates = [
-    join(target, 'node_modules', '.bin', 'dsh.cmd'),
-    join(target, 'node_modules', '.bin', 'dsh'),
-    join(target, 'node_modules', 'dsh', 'bin', 'dsh'),
-  ]
-  const execPath = binCandidates.find(candidate => existsSync(candidate))
-    ?? join(target, 'node_modules', '.bin', 'dsh')
-
-  let installedVersion = 'unknown'
-  try {
-    const manifestPath = join(target, 'node_modules', '@deepseek-ai', 'dsh', 'package.json')
-    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { version?: string }
-    installedVersion = manifest.version ?? installedVersion
-  } catch {
-    // fall back to 'unknown'
-  }
-  return { execPath, version: installedVersion, home, dir: target }
 }
 
 /** Physically delete a dsh install. App-managed version instances (under the
@@ -280,18 +247,16 @@ export function registerDshIpc(): void {
     }
   })
 
-  ipcMain.handle('dsh:installOfficial', async (_event, options?: { versionDir?: string; name?: string; version?: string }): Promise<IpcResult<boolean>> => {
+  ipcMain.handle('dsh:installOfficial', async (event, options?: { versionDir?: string; name?: string; version?: string }): Promise<IpcResult<DshInstallResult>> => {
     try {
       const versionDir = options?.versionDir?.trim() !== undefined && options.versionDir.trim() !== ''
         ? options.versionDir.trim()
         : dshVersionDir()
       const name = safeVersionName(options?.name)
-      // 版本名冲突检测：target 目录已存在且非空则拒绝（避免覆盖既有实例）。
-      const target = join(versionDir, name)
-      if (existsSync(target) && readdirSync(target).length > 0) {
-        return fail('dsh.versionExists', { name })
-      }
-      const info = await installOfficialDsh(versionDir, name, options?.version)
+      // 重装同名冲突：沿用现有弹窗报错（不并入进度展示），避免覆盖既有实例。
+      if (versionExists(join(versionDir, name))) return fail('dsh.versionExists', { name })
+      const info = await installOfficialDsh(versionDir, name, options?.version,
+        step => event.sender.send('install:event', step))
       const { dshes } = readDshState()
       const entry: DshEntry = {
         id: info.execPath,
@@ -302,9 +267,16 @@ export function registerDshIpc(): void {
         // App-managed (in the version repo) — the only kind deletable from the DSH page.
         managed: true,
       }
-      writeDshState([...dshes.filter(d => d.id !== entry.id), entry], entry.id)
+      event.sender.send('install:event', { kind: 'register', state: 'running' })
+      try {
+        writeDshState([...dshes.filter(d => d.id !== entry.id), entry], entry.id)
+      } catch (writeError) {
+        event.sender.send('install:event', { kind: 'register', state: 'error', detail: String(writeError) })
+        throw writeError
+      }
+      event.sender.send('install:event', { kind: 'register', state: 'ok', version: info.version })
       logger.info(`dsh official installed: ${name} (v${info.version})`)
-      return { ok: true, value: true }
+      return { ok: true, value: info }
     } catch (error) {
       return failFromError(error)
     }

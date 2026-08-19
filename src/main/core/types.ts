@@ -16,6 +16,8 @@ export type {
   IpcResult,
   RunEvent,
   DshEntry,
+  DshInstallResult,
+  DshInstallStep,
   NpmSearchHit,
   ProfileSummary,
   ImportProfileResult,
