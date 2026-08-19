@@ -188,6 +188,10 @@ const api = {
       ipcRenderer.invoke('dsh:revealDir', id),
   },
 
+  logs: {
+    reveal: (): Promise<IpcResult<boolean>> => ipcRenderer.invoke('logs:reveal'),
+  },
+
   window: {
     minimize: (): Promise<IpcResult<boolean>> => ipcRenderer.invoke('window:minimize'),
     toggleMaximize: (): Promise<IpcResult<boolean>> => ipcRenderer.invoke('window:toggleMaximize'),

@@ -104,6 +104,11 @@ export interface WindowApi {
     completeOnboarding: (payload: OnboardingPayload) => Promise<IpcResult<boolean>>
   }
 
+  logs: {
+    /** Open the log directory in the OS file explorer. */
+    reveal: () => Promise<IpcResult<boolean>>
+  }
+
   window: {
     minimize: () => Promise<IpcResult<boolean>>
     toggleMaximize: () => Promise<IpcResult<boolean>>

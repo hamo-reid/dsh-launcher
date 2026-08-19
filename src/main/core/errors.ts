@@ -5,6 +5,7 @@
  * raw original message as a fallback during migration and for detail display.
  */
 import type { IpcResult } from '../../shared/types.ts'
+import { logger } from './logger.ts'
 
 export interface IpcFail extends Record<string, unknown> {
   code: string
@@ -44,8 +45,15 @@ export function fail(code: string, params?: FailParams, message?: string): IpcRe
  * anything else becomes the generic `internal` code (raw message in `error` +
  * `detail` param). */
 export function failFromError(error: unknown): IpcResult<never> {
-  if (error instanceof AppError) return { ok: false, code: error.code, params: error.params, error: error.message }
+  if (error instanceof AppError) {
+    // Deliberate business error — record at warn so failures stay greppable
+    // without spamming the daily file.
+    logger.warn(`app error (${error.code})`, error)
+    return { ok: false, code: error.code, params: error.params, error: error.message }
+  }
   const message = error instanceof Error ? error.message : String(error)
+  // Unknown/unexpected exception — full log with stack (the envelope drops it).
+  logger.error('internal error', error)
   return { ok: false, code: 'internal', params: { detail: message }, error: message }
 }
 

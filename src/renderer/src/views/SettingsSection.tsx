@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Segmented, Select, Space, theme } from 'antd'
+import { Button, Segmented, Select, Space, message, theme } from 'antd'
+import { FolderOpenOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import Panel from '../components/Panel.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
@@ -91,6 +92,24 @@ export default function SettingsSection() {
             value={pluginDir}
             onSave={savePluginDir}
           />
+        </Panel>
+
+        <Panel title={t('settings.section.logs')}>
+          <div style={{ maxWidth: 560 }}>
+            <div style={{ fontWeight: 600 }}>{t('settings.logs.title')}</div>
+            <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, margin: '4px 0 12px' }}>
+              {t('settings.logs.desc')}
+            </div>
+            <Button
+              icon={<FolderOpenOutlined />}
+              onClick={async () => {
+                const r = await window.api.logs.reveal()
+                if (!r.ok) void message.error(apiErrorText(r))
+              }}
+            >
+              {t('settings.logs.reveal')}
+            </Button>
+          </div>
         </Panel>
       </Space>
     </div>

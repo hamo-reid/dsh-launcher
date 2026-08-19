@@ -12,8 +12,14 @@ import { registerDshIpc } from './ipc/dsh.ts'
 import { registerTrashIpc } from './ipc/trash.ts'
 import { registerSettingsIpc } from './ipc/settings.ts'
 import { hookWindowMaximize, registerWindowIpc } from './ipc/window.ts'
+import { registerLogsIpc } from './ipc/logs.ts'
+import { initLogger, logger } from './core/logger.ts'
 import { openDatabase } from './core/settings.ts'
 import { configureAppState } from './core/appState.ts'
+
+// Process-level breadcrumbs for anything that escapes the IPC try/catch.
+process.on('uncaughtException', (error) => logger.error('uncaughtException', error))
+process.on('unhandledRejection', (reason) => logger.error('unhandledRejection', reason))
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -73,11 +79,16 @@ function registerIpc(): void {
   registerTrashIpc()
   registerSettingsIpc()
   registerWindowIpc()
+  registerLogsIpc()
 }
 
 app.whenReady().then(async () => {
   // 统一默认数据目录到用户主目录下，避免 %APPDATA% 长路径。
   app.setPath('userData', join(os.homedir(), 'dsh-launcher'))
+
+  // 数据目录确定后立即初始化日志，早于任何业务/数据库工作。
+  initLogger(join(app.getPath('userData'), 'logs'))
+  logger.info('app starting', { version: app.getVersion() != null ? `v${app.getVersion()}` : '' })
 
   // Open the SQLite settings database before any IPC touches it.
   await openDatabase(join(app.getPath('userData'), 'app.sqlite'))
@@ -86,6 +97,7 @@ app.whenReady().then(async () => {
 
   registerIpc()
   createWindow()
+  logger.info('main window created')
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
