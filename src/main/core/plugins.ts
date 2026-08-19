@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, wri
 import { basename, join } from 'node:path'
 import AdmZip from 'adm-zip'
 import { runPnpm, type PnpmResult } from './pnpm.ts'
+import { logger } from './logger.ts'
 import { profilesDir } from './home.ts'
 import type { InstalledOverviewRow } from './types.ts'
 import type { DshScope } from './appState.ts'
@@ -44,6 +45,7 @@ interface StoreManifest {
 
 /** Ensure the store directory is a pnpm project with an empty manifest. */
 export function initStore(dir: string): void {
+  logger.debug(`plugin store ensured: ${dir}`)
   mkdirSync(dir, { recursive: true })
   const manifestPath = join(dir, 'package.json')
   if (!existsSync(manifestPath)) {
@@ -65,14 +67,18 @@ export function listPlugins(dir: string): { name: string; version: string }[] {
 export async function addPlugin(dir: string, source: string): Promise<PnpmResult> {
   if (dir === '') return { ok: false, text: '未配置插件保存位置 —— 请在「设置」中指定' }
   initStore(dir)
-  return runPnpm(dir, ['add', source])
+  const result = await runPnpm(dir, ['add', source])
+  if (result.ok) logger.info(`plugin store add: ${source}`)
+  return result
 }
 
 /** Uninstall one plugin by package name from the store. */
 export async function removePlugin(dir: string, name: string): Promise<PnpmResult> {
   if (dir === '') return { ok: false, text: '未配置插件保存位置 —— 请在「设置」中指定' }
   initStore(dir)
-  return runPnpm(dir, ['remove', name])
+  const result = await runPnpm(dir, ['remove', name])
+  if (result.ok) logger.info(`plugin store remove: ${name}`)
+  return result
 }
 
 /** Locate the top-most directory holding a `package.json`, walking one level

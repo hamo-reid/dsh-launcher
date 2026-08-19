@@ -9,6 +9,7 @@ import { existsSync, readdirSync, readFileSync, rmSync, renameSync, statSync, ut
 import { join } from 'node:path'
 import { profilesDir } from './home.ts'
 import { parsePatchRows } from './patch.ts'
+import { logger } from './logger.ts'
 import type { TrashItem } from '../../shared/types.ts'
 
 /** The trash root for the active dsh. */
@@ -112,11 +113,13 @@ export function restoreTrashItem(name: string): void {
   // but avoids any confusion from the trash-stamp carried over).
   const now = new Date()
   utimesSync(dst, now, now)
+  logger.info(`trash restore: ${name}`)
 }
 
 /** Permanently delete one soft-deleted profile from the trash. */
 export function deleteTrashItem(name: string): void {
   rmSync(trashItemDir(name), { recursive: true, force: true })
+  logger.info(`trash delete (permanent): ${name}`)
 }
 
 /** Permanently delete every entry in the trash; keeps the `.trash` dir itself.
@@ -128,5 +131,6 @@ export function emptyTrash(): number {
     .filter(entry => entry.name !== '.' && entry.name !== '..')
     .map(entry => entry.name)
   for (const name of names) rmSync(join(dir, name), { recursive: true, force: true })
+  logger.info(`trash emptied: ${names.length} item(s)`)
   return names.length
 }

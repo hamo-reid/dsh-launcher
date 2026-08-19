@@ -11,6 +11,7 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import initSqlJs, { type Database } from 'sql.js'
+import { logger } from './logger.ts'
 import type { DshEntry } from './dsh.ts'
 
 export interface AppSettings {
@@ -49,6 +50,7 @@ export async function openDatabase(dbPath: string): Promise<void> {
   db.run('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT)')
   dbFile = dbPath
   migrateLegacyJson()
+  logger.info(`settings db opened: ${dbPath}`)
 }
 
 /** One-time import from the pre-SQLite settings.json when the DB is empty. */
@@ -95,4 +97,5 @@ export function saveSettings(settings: AppSettings): void {
     [JSON.stringify(settings)],
   )
   writeFileSync(dbFile, Buffer.from(ensureDb().export()))
+  logger.debug('settings saved')
 }

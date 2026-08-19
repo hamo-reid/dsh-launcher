@@ -9,6 +9,7 @@ import { join } from 'node:path'
 import { baseLaunch, resolveInstallAnchor } from '../core/dsh.ts'
 import { activeDshEntry } from '../core/appState.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
+import { logger } from '../core/logger.ts'
 import type { IpcResult, RunEvent } from '../../shared/types.ts'
 
 /** The currently running embedded profile runtime (single instance). */
@@ -82,6 +83,7 @@ export function registerRunIpc(): void {
         // A user-initiated abort is a normal stop, not a failure.
         if (intentionalStop) { code = 0; signal = null }
         intentionalStop = false
+        logger.info(`run exited: ${running?.profile ?? '?'} (code ${String(code)}${signal ? `, sig ${signal}` : ''})`)
         broadcastRun({ type: 'exited', code, signal, command })
         running = null
       }
@@ -101,6 +103,7 @@ export function registerRunIpc(): void {
             env,
             cwd,
           })
+      logger.info(`run started: ${profile} (${mode}, ${entry.name})`)
       running = { profile, child }
       if (shellMode) {
         child.on('error', () => finish(1, null))
@@ -130,6 +133,7 @@ export function registerRunIpc(): void {
 
   ipcMain.handle('run:stop', (): IpcResult<boolean> => {
     if (running === null) return fail('run.notRunning')
+    logger.info(`run stopped: ${running.profile}`)
     intentionalStop = true
     terminateAndClear(running.child)
     return { ok: true, value: true }

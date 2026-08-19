@@ -10,6 +10,7 @@ import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { basename, dirname, join, sep } from 'node:path'
 import { spawn } from 'node:child_process'
 import os from 'node:os'
+import { logger } from './logger.ts'
 import type { DshEntry } from '../../shared/types.ts'
 
 /** Re-export the shared dsh shape for existing core/ipc callers. */
@@ -170,6 +171,7 @@ export async function detectExecutables(): Promise<string[]> {
     }
   }
 
+  logger.debug(`dsh executables detected: ${found.size}`)
   return [...found]
 }
 

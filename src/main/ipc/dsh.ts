@@ -15,6 +15,7 @@ import { loadSettings, saveSettings } from '../core/settings.ts'
 import { runPnpm } from '../core/pnpm.ts'
 import { fetchPackageVersions } from '../core/npm.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
+import { logger } from '../core/logger.ts'
 import type { IpcResult, PackageVersionInfo } from '../../shared/types.ts'
 
 /** A filesystem-safe version name (defaults to `official`). */
@@ -177,6 +178,7 @@ export function registerDshIpc(): void {
       if (entry !== undefined && entry.managed !== true) {
         return fail('dsh.protected')
       }
+      logger.info(`dsh removed: ${entry?.name ?? id}${opts?.deleteFiles === true ? ' (delete files)' : ''}`)
       // 先从列表移除（脱管 — 始终执行）。
       writeDshState(dshes.filter(d => d.id !== id), activeDshId === id ? undefined : activeDshId)
       // 可选的物理删除：app 管理的版本实例（含其独立 home），其它则删可执行所属目录。
@@ -196,6 +198,7 @@ export function registerDshIpc(): void {
       const d = dshes.find(candidate => candidate.id === id)
       if (d === undefined) return fail(E.dshNotFound)
       writeDshState(dshes, id)
+      logger.info(`dsh activated: ${d.name}`)
       return { ok: true, value: true }
     } catch (error) {
       return failFromError(error)
@@ -300,6 +303,7 @@ export function registerDshIpc(): void {
         managed: true,
       }
       writeDshState([...dshes.filter(d => d.id !== entry.id), entry], entry.id)
+      logger.info(`dsh official installed: ${name} (v${info.version})`)
       return { ok: true, value: true }
     } catch (error) {
       return failFromError(error)

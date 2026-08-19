@@ -14,6 +14,7 @@ import { addLocalPlugin, addPlugin, installIntoProfile, installedStoreVersion } 
 import { satisfiesRange } from './version.ts'
 import { uniqueTrashName } from './trash.ts'
 import type { ImportBundleSource, ImportProfileResult, ImportStep, ProfileSummary } from '../../shared/types.ts'
+import { logger } from './logger.ts'
 
 /** Re-export the shared profile-summary shape. */
 export type { ProfileSummary } from '../../shared/types.ts'
@@ -71,6 +72,7 @@ export function createProfile(name: string, bundles: string[] = PROFILE_TEMPLATE
   writeFileSync(join(dir, 'package.json'), JSON.stringify(manifest, null, 2) + '\n')
   writeFileSync(join(dir, 'cordis.patch.yml'), PATCH_TEMPLATE)
   writeFileSync(join(dir, 'pnpm-workspace.yaml'), PROFILE_PNPM_WORKSPACE)
+  logger.info(`profile created: ${name} (${bundles.length} bundles)`)
 }
 
 /** Clone a profile's configuration (without installed node_modules). */
@@ -85,6 +87,7 @@ export function cloneProfile(name: string, newName: string): void {
     recursive: true,
     filter: source => !source.includes('node_modules'),
   })
+  logger.info(`profile cloned: ${name} → ${newName}`)
 }
 
 /** Soft-delete: move the profile to `.trash` (never destroys the bundle layers).
@@ -101,6 +104,7 @@ export function softDeleteProfile(name: string): void {
   // surface an accurate "deleted at" without an extra metadata file.
   const now = new Date()
   utimesSync(dst, now, now)
+  logger.info(`profile soft-deleted: ${name}`)
 }
 
 /** Remove one bundle layer from a profile's `dsh.profile.bundles`, and drop its
@@ -128,6 +132,7 @@ export async function removeBundle(profile: string, bundle: string): Promise<voi
   }
   // Prune the now-orphaned link from node_modules.
   await runPnpm(profileDir(profile), ['install'])
+  logger.info(`profile bundle removed: ${profile} · ${bundle}`)
 }
 
 /** Where a profile's bundle comes from — decides how import restores it. */
@@ -335,6 +340,7 @@ export async function importProfile(
 
   const installed: string[] = []
   const missing: string[] = []
+  logger.debug(`profile import: ${target} (${bundles.length} bundles, ${Object.keys(deps).length} deps)`)
   for (const bundle of bundles) {
     // In-box dsh bundles need no store install — nothing to report.
     if (bundle.source === 'dsh') continue
@@ -382,5 +388,6 @@ export async function importProfile(
   emit({ kind: 'install', state: 'ok' })
 
   const text = installed.length > 0 ? `已导入「${target}」，已入库插件 ${installed.length} 个` : `已导入「${target}」`
+  logger.info(`profile imported: ${target} (installed ${installed.length}, missing ${missing.length})`)
   return { ok: true, text, dshMismatch: false, installed, missing }
 }
