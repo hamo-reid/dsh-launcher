@@ -41,7 +41,9 @@ export default function SettingsSection() {
   }
 
   return (
-    <div style={{ padding: token.paddingLG }}>
+    // Content (App.tsx) 是 flex:1 + overflow:hidden;这里占满其高度并自行滚动,
+    // 否则窗口调小时设置内容会被裁剪而无法滚到。
+    <div style={{ height: '100%', overflowY: 'auto', padding: token.paddingLG }}>
       <SectionHeading title={t('app.tab.settings')} description="外观与目录配置。" />
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
         <Panel title={t('settings.section.appearance')}>
