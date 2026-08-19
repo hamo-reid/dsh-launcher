@@ -58,7 +58,9 @@ export async function npmSearch(
   const res = await fetch(url)
   if (!res.ok) throw new Error(`npm search failed: HTTP ${res.status}`)
   const data = await res.json() as RawSearchResponse
-  return normalizeSearchResults(data)
+  const result = normalizeSearchResults(data)
+  logger.debug(`npm search: ${result.hits.length}/${result.total} hits for "${query}"`)
+  return result
 }
 
 /** Fetch the full version list + dist-tags for a package (for the version picker). */
@@ -70,8 +72,10 @@ export async function fetchPackageVersions(name: string): Promise<PackageVersion
     'dist-tags'?: Record<string, string>
     versions?: Record<string, unknown>
   }
-  return {
+  const info = {
     distTags: data['dist-tags'] ?? {},
     versions: Object.keys(data.versions ?? {}),
   }
+  logger.debug(`npm versions: "${name}" → ${info.versions.length} available, dist-tags ${Object.keys(info.distTags).join(',') || 'none'}`)
+  return info
 }
