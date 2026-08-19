@@ -5,8 +5,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { detectExecutables, isDeletableDsh, isManagedInstall, resolveDshPackage } from './dsh.ts'
+import { dirname, join } from 'node:path'
+import { detectExecutables, discoverVersionRepo, isDeletableDsh, isManagedInstall, resolveDshPackage, type DshEntry } from './dsh.ts'
 
 let root: string
 
@@ -123,5 +123,48 @@ describe('isManagedInstall / path-derived deletable', () => {
     const other = join(root, 'other-repo')
     expect(isManagedInstall({ ...inside(shim), versionDir: repo }, other)).toBe(true)
     expect(isManagedInstall({ ...inside(shim), versionDir: other }, repo)).toBe(false)
+  })
+})
+
+describe('discoverVersionRepo', () => {
+  it('returns [] when the version dir is missing', () => {
+    expect(discoverVersionRepo([], join(root, 'no-repo'))).toEqual([])
+  })
+
+  it('finds an unregistered dsh install on disk', () => {
+    const repo = dir('vrepo')
+    const pkgDir = dir('vrepo/v2/node_modules/@deepseek-ai/dsh')
+    writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: '2.0.0' }))
+    writeFileSync(join(dir('vrepo/v2/node_modules/.bin'), 'dsh.cmd'), '@echo off')
+
+    const found = discoverVersionRepo([], repo)
+    expect(found).toHaveLength(1)
+    expect(found[0].name).toBe('v2')
+    expect(found[0].version).toBe('2.0.0')
+    expect(found[0].managed).toBe(true)
+    expect(found[0].versionDir).toBe(repo)
+    expect(found[0].home).toBe(join(dirname(repo), 'homes', 'v2'))
+  })
+
+  it('skips already-registered installs and unrelated dirs', () => {
+    const repo = dir('vrepo2')
+    writeFileSync(join(dir('vrepo2/known/node_modules/@deepseek-ai/dsh'), 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: '1.0.0' }))
+    const execPath = join(dir('vrepo2/known/node_modules/.bin'), 'dsh.cmd')
+    writeFileSync(execPath, '@echo off')
+    dir('vrepo2/notes') // unrelated: no dsh manifest → skipped
+
+    const known: DshEntry = { id: execPath, name: 'known', execPath, version: '1.0.0', home: '/h' }
+    expect(discoverVersionRepo([known], repo)).toEqual([])
+  })
+
+  it('finds multiple versions, one per subdir', () => {
+    const repo = dir('vrepo3')
+    for (const v of ['a', 'b']) {
+      writeFileSync(join(dir(`vrepo3/${v}/node_modules/@deepseek-ai/dsh`), 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: `0.${v}.0` }))
+      writeFileSync(join(dir(`vrepo3/${v}/node_modules/.bin`), 'dsh.cmd'), '@echo off')
+    }
+    const found = discoverVersionRepo([], repo)
+    expect(found.map(x => x.name).sort()).toEqual(['a', 'b'])
+    expect(found.every(x => x.managed === true)).toBe(true)
   })
 })

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
-  Button, Descriptions, Divider, Space, theme, Typography, message,
+  Button, Descriptions, Divider, Modal, Space, Tag, theme, Typography, message,
 } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
@@ -40,6 +40,8 @@ export default function DshSection() {
   const [activeId, setActiveId] = useState<string>()
   const [homeInput, setHomeInput] = useState('')
   const [profileDirInput, setProfileDirInput] = useState('')
+  // Exec paths that no longer exist on disk (stale = lacks the remove-guard).
+  const [stalePaths, setStalePaths] = useState<Set<string>>(new Set())
 
   const [officialOpen, setOfficialOpen] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
@@ -58,6 +60,9 @@ export default function DshSection() {
     setHomeInput(active?.home ?? '')
     setProfileDirInput(active?.profilesDir ?? '')
     setLoading(false)
+    // Track which dsh executables no longer exist on disk, for stale marking.
+    const h = await window.api.settings.checkHealth()
+    if (h.ok) setStalePaths(new Set(h.value.filter(x => x.kind === 'dsh-exec').map(x => x.path ?? '')))
   }
 
   useEffect(() => { void refresh() }, [])
@@ -93,9 +98,15 @@ export default function DshSection() {
     if (!r.ok) void message.error(apiErrorText(r))
   }
 
+  const isStale = (d: DshEntry): boolean => d.execPath !== '' && stalePaths.has(d.execPath)
+
   const actionsFor = (d: DshEntry): MenuAction[] => [
     { key: 'rename', label: t('dsh.action.rename') },
     { key: 'activate', label: t('dsh.action.setCurrent') },
+    // 失效条目（磁盘上可执行已不存在）允许脱管清理。
+    ...(isStale(d)
+      ? [{ key: 'remove-stale', label: t('dsh.action.removeStale'), danger: true } as MenuAction]
+      : []),
     // 仅 app 管理的（官方安装）可删除；系统级/手动加入的用户全局 dsh 不给删除入口。
     ...(d.managed === true
       ? [{ key: 'remove', label: t('dsh.action.remove'), danger: true } as MenuAction]
@@ -106,6 +117,19 @@ export default function DshSection() {
     if (key === 'rename') setRenameTarget({ id: d.id, name: d.name })
     else if (key === 'activate') void activate(d.id, d.name)
     else if (key === 'remove') setRemoveDsh({ id: d.id, name: d.name })
+    else if (key === 'remove-stale') {
+      Modal.confirm({
+        title: t('dsh.action.removeStaleConfirmTitle'),
+        content: t('dsh.action.removeStaleConfirm', { name: d.name, path: d.execPath }),
+        okText: t('common.confirm'),
+        okButtonProps: { danger: true },
+        onOk: async () => {
+          const r = await window.api.dsh.remove(d.id)
+          if (!r.ok) void message.error(apiErrorText(r))
+          else { void message.success(t('dsh.removed')); await refresh() }
+        },
+      })
+    }
   }
 
   const active = dshes.find(d => d.id === activeId)
@@ -142,6 +166,7 @@ export default function DshSection() {
                   title={d.dir ?? d.execPath}
                 >
                   {d.dir ?? d.execPath}
+                  {isStale(d) && <Tag color="error" style={{ marginInlineStart: 6 }}>{t('dsh.stale')}</Tag>}
                 </span>
               )}
               actions={d => <ConfirmMenu actions={actionsFor(d)} onAction={key => handleAction(d, key)} />}

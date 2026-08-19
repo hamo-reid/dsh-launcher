@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  Alert, Button, Input, List, Menu, Space, Table, Tag, theme, message,
+  Alert, Button, Input, List, Menu, Modal, Space, Table, Tag, theme, message,
 } from 'antd'
 import { LoadingOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
@@ -35,6 +35,8 @@ export default function PluginsSection() {
   const [overview, setOverview] = useState<InstalledOverviewRow[]>([])
   const [target, setTarget] = useState<InstalledOverviewRow | null>(null)
   const [overviewLoading, setOverviewLoading] = useState(false)
+  // Store plugin names whose node_modules dir is missing on disk (stale).
+  const [staleStoreNames, setStaleStoreNames] = useState<Set<string>>(new Set())
 
   // Download center.
   const [dq, setDq] = useState('dsh')
@@ -68,6 +70,9 @@ export default function PluginsSection() {
     setOverviewLoading(false)
     if (r.ok) setOverview(r.value)
     else void message.error(apiErrorText(r))
+    // Which store plugins have a missing node_modules dir (for stale marking).
+    const h = await window.api.settings.checkHealth()
+    if (h.ok) setStaleStoreNames(new Set(h.value.filter(x => x.kind === 'plugin-missing').map(x => x.label)))
   }
 
   const refreshStoreNames = useCallback(async (): Promise<void> => {
@@ -114,6 +119,24 @@ export default function PluginsSection() {
     setTarget(null)
     void message.success(t('plugin.uninstalled', { name }))
     await Promise.all([load(), refreshStoreNames()])
+  }
+
+  // Remove a stale store plugin (its dir is missing on disk): confirm, then the
+  // existing remove flow drops it from the store manifest (safe without files).
+  const deleteStale = (name: string): void => {
+    Modal.confirm({
+      title: t('plugin.removeStaleConfirmTitle'),
+      content: t('plugin.removeStaleConfirm', { name }),
+      okText: t('common.confirm'),
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setBusy(true)
+        const res = await window.api.plugins.remove(name)
+        setBusy(false)
+        if (!res.ok) void message.error(apiErrorText(res))
+        else { void message.success(t('plugin.uninstalled', { name })); await Promise.all([load(), refreshStoreNames()]) }
+      },
+    })
   }
 
   const revealDir = async (name: string): Promise<void> => {
@@ -185,7 +208,21 @@ export default function PluginsSection() {
             locale={{ emptyText: t('plugin.overview.empty') }}
             onRow={r => ({ onClick: () => setTarget(r), style: { cursor: 'pointer' } })}
             columns={[
-              { title: t('plugin.overview.colName'), dataIndex: 'name', ellipsis: true },
+              {
+                title: t('plugin.overview.colName'),
+                dataIndex: 'name',
+                ellipsis: true,
+                render: (name: string) => {
+                  const stale = staleStoreNames.has(name)
+                  return (
+                    <Space size={4} wrap>
+                      <span>{name}</span>
+                      {stale && <Tag color="error">{t('plugin.stale')}</Tag>}
+                      {stale && <Button size="small" danger type="link" style={{ padding: 0 }} onClick={e => { e.stopPropagation(); deleteStale(name) }}>{t('plugin.removeStale')}</Button>}
+                    </Space>
+                  )
+                },
+              },
               {
                 title: t('plugin.overview.colVersions'),
                 dataIndex: 'versions',

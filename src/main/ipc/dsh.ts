@@ -6,8 +6,9 @@ import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 import {
-  baseLaunch, defaultHome, entryFromPath, installDir, installOfficialDsh, isDeletableDsh, probeDshs,
-  readVersionFromPath, resolveDshPackage, versionExists, type DshEntry,
+  baseLaunch, defaultHome, discoverVersionRepo, entryFromPath, existsExecutable, installDir,
+  installOfficialDsh, isDeletableDsh, probeDshs, readVersionFromPath, resolveDshPackage,
+  versionExists, type DshEntry,
 } from '../core/dsh.ts'
 import {
   dshVersionDir, effectiveProfileDir, readDshState, writeDshState,
@@ -76,10 +77,19 @@ export function registerDshIpc(): void {
   ipcMain.handle('dsh:list', (): IpcResult<{ dshes: DshEntry[]; activeDshId?: string }> => {
     try {
       const { dshes, activeDshId } = readDshState()
+      // Surface dsh versions already on disk in the version repo but not yet
+      // registered: auto-register them so they appear in the DSH list (and stop
+      // invisibly blocking an official install of the same name). Idempotent.
+      const discovered = discoverVersionRepo(dshes, dshVersionDir())
+      if (discovered.length > 0) {
+        writeDshState([...dshes, ...discovered], activeDshId)
+        logger.info(`discovered ${discovered.length} repo version(s): ${discovered.map(x => x.name).join(',')}`)
+      }
+      const merged = [...dshes, ...discovered]
       return {
         ok: true,
         value: {
-          dshes: dshes.map(d => {
+          dshes: merged.map(d => {
             // 精确定位 dsh 包根：版本读 `@deepseek-ai/dsh`（或 apps/cli）的 package.json，
             // 所在位置指向包根而非 `.bin` shim 目录。shim 上旧式暴力上溯会读错版本。
             const resolved = resolveDshPackage(d.execPath)
@@ -147,9 +157,11 @@ export function registerDshIpc(): void {
     try {
       const { dshes, activeDshId } = readDshState()
       const entry = dshes.find(d => d.id === id)
-      // 非 app 管理的（系统级/手动加入的用户已有安装）一律禁止删除，
-      // 避免误删用户全局环境或绕过 UI 的 `dsh:remove` 调用。
-      if (entry !== undefined && !isDeletableDsh(entry, entry.versionDir ?? dshVersionDir())) {
+      // 非 app 管理的（系统级/手动加入的用户已有安装）一律禁止删除，避免误删用户全局
+      // 环境或绕过 UI 的 `dsh:remove` 调用。唯一例外：该可执行已不存在（磁盘与 app 不同步）
+      // —— 此刻允许脱管（仍不删文件），让用户能清理失效条目。
+      const stale = entry !== undefined && !existsExecutable(entry.execPath)
+      if (entry !== undefined && !stale && !isDeletableDsh(entry, entry.versionDir ?? dshVersionDir())) {
         return fail('dsh.protected')
       }
       logger.info(`dsh removed: ${entry?.name ?? id}${opts?.deleteFiles === true ? ' (delete files)' : ''}`)
