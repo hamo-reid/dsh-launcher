@@ -1,7 +1,7 @@
 /** Main process: window lifecycle + IPC wiring. Every handler lives in its own
  * domain module under `src/main/ipc/`; this file only assembles them. */
 
-import { app, BrowserWindow, dialog } from 'electron'
+import { app, BrowserWindow, dialog, shell } from 'electron'
 import { join } from 'node:path'
 import os from 'node:os'
 import { currentRun, registerRunIpc, terminateAndClear } from './ipc/run.ts'
@@ -37,6 +37,20 @@ function createWindow(): void {
     },
   })
   hookWindowMaximize(win)
+
+  // Every browsing link goes to the system default browser — never open a bare
+  // Electron window (window.open / target=_blank) or navigate the app away to an
+  // external http(s) page. Mirrors how the run-console opens links.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:/i.test(url)) void shell.openExternal(url)
+    return { action: 'deny' }
+  })
+  win.webContents.on('will-navigate', (event, url) => {
+    if (/^https?:/i.test(url)) {
+      event.preventDefault()
+      void shell.openExternal(url)
+    }
+  })
 
   // Guard exit while a profile process is still running: ask first, and only
   // terminate if the user chooses to.

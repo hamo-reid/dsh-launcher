@@ -8,6 +8,10 @@ const en: typeof zh = {
     'app.tab.profile': 'Profile',
     'app.tab.plugins': 'Plugins',
     'app.tab.settings': 'Settings',
+    'app.tab.about': 'About',
+    'about.about': 'DSH Launcher — manage dsh profiles, plugins and runtimes.',
+    'about.version': 'Version: {{version}}',
+    'about.github': 'View source on GitHub',
 
     'common.cancel': 'Cancel',
     'common.ok': 'OK',

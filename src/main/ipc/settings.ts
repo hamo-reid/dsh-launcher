@@ -1,7 +1,7 @@
 /** IPC for app-level UI preferences + the first-run onboarding wizard
  * (`settings:*`). */
 
-import { ipcMain, dialog } from 'electron'
+import { app, ipcMain, dialog } from 'electron'
 import { loadSettings, saveSettings } from '../core/settings.ts'
 import { dshVersionDir, pluginDir, readDshState, shouldRunOnboarding } from '../core/appState.ts'
 import { failFromError } from '../core/errors.ts'
@@ -88,6 +88,15 @@ export function registerSettingsIpc(): void {
   ipcMain.handle('settings:checkHealth', (): IpcResult<HealthIssue[]> => {
     try {
       return { ok: true, value: checkHealth(readDshState().dshes, pluginDir()) }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // The packaged app version, for the About page.
+  ipcMain.handle('app:version', (): IpcResult<string> => {
+    try {
+      return { ok: true, value: app.getVersion() }
     } catch (error) {
       return failFromError(error)
     }

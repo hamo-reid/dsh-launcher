@@ -213,6 +213,10 @@ const api = {
       return () => { ipcRenderer.removeListener('window:maximized', handler) }
     },
   },
+
+  app: {
+    version: (): Promise<IpcResult<string>> => ipcRenderer.invoke('app:version'),
+  },
 } satisfies WindowApi
 
 contextBridge.exposeInMainWorld('api', api)

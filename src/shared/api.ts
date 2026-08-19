@@ -143,4 +143,9 @@ export interface WindowApi {
     rename: (id: string, name: string) => Promise<IpcResult<boolean>>
     revealDir: (id: string) => Promise<IpcResult<boolean>>
   }
+
+  app: {
+    /** The packaged app version (for the About page). */
+    version: () => Promise<IpcResult<string>>
+  }
 }

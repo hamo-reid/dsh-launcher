@@ -2,7 +2,7 @@ import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { Alert, Button, ConfigProvider, Layout, Space, Tabs, theme, Typography } from 'antd'
 import {
   AppstoreOutlined, CloseOutlined, FullscreenExitOutlined, FullscreenOutlined,
-  MinusOutlined, ProfileOutlined, RobotOutlined, SettingOutlined,
+  InfoOutlined, MinusOutlined, ProfileOutlined, RobotOutlined, SettingOutlined,
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { useAppLang } from './i18n'
@@ -11,9 +11,10 @@ import ProfileSection from './views/ProfileSection.tsx'
 import PluginsSection from './views/PluginsSection.tsx'
 import SettingsSection from './views/SettingsSection.tsx'
 import DshSection from './views/DshSection.tsx'
+import AboutView from './views/AboutView.tsx'
 import type { HealthIssue } from '../../shared/types.ts'
 
-type Tab = 'profile' | 'plugins' | 'settings' | 'dsh'
+type Tab = 'profile' | 'plugins' | 'settings' | 'dsh' | 'about'
 
 const { Content } = Layout
 
@@ -68,6 +69,7 @@ export default function App() {
     { key: 'profile', label: t('app.tab.profile'), icon: <ProfileOutlined /> },
     { key: 'plugins', label: t('app.tab.plugins'), icon: <AppstoreOutlined /> },
     { key: 'settings', label: t('app.tab.settings'), icon: <SettingOutlined /> },
+    { key: 'about', label: t('app.tab.about'), icon: <InfoOutlined /> },
   ]
 
   return (
@@ -142,6 +144,7 @@ export default function App() {
         {tab === 'plugins' && <PluginsSection />}
         {tab === 'settings' && <SettingsSection />}
         {tab === 'dsh' && <DshSection />}
+        {tab === 'about' && <AboutView />}
       </Content>
     </Layout>
     {onboarding === 'open' && (

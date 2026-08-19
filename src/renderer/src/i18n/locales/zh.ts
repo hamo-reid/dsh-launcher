@@ -6,6 +6,10 @@ const zh = {
     'app.tab.profile': 'Profile',
     'app.tab.plugins': '插件管理',
     'app.tab.settings': '设置',
+    'app.tab.about': '关于',
+    'about.about': 'DSH Launcher —— 管理 dsh profiles、插件与运行时。',
+    'about.version': '版本：{{version}}',
+    'about.github': 'GitHub 项目主页',
 
     'common.cancel': '取消',
     'common.ok': '确定',
