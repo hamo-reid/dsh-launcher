@@ -1,6 +1,6 @@
 {
   "name": "dsh-launcher",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "DSH Launcher — manage dsh profiles, plugins and runtimes",
   "main": "./out/main/index.js",
   "scripts": {
