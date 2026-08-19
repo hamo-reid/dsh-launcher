@@ -6,7 +6,7 @@ import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { baseLaunch, resolveInstallAnchor } from '../core/dsh.ts'
+import { baseLaunch, existsExecutable, resolveInstallAnchor } from '../core/dsh.ts'
 import { activeDshEntry } from '../core/appState.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
 import { logger } from '../core/logger.ts'
@@ -67,6 +67,7 @@ export function registerRunIpc(): void {
     if (running !== null) return fail('run.alreadyRunning', { profile: running.profile })
     const entry = activeDshEntry()
     if (entry === undefined) return fail(E.needActiveDsh)
+    if (!existsExecutable(entry.execPath)) return fail('run.execMissing', { path: entry.execPath })
     try {
       const command = `${baseLaunch(entry.execPath)} --profile ${profile}`
       const env = { ...process.env, DSH_HOME: entry.home }

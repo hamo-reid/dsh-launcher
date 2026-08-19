@@ -10,6 +10,7 @@ import type {
   DshEntry,
   DshInstallResult,
   DshInstallStep,
+  HealthIssue,
   ImportProfileResult,
   ImportStep,
   InstalledOverviewRow,
@@ -104,6 +105,8 @@ export interface WindowApi {
     getOnboardingState: () => Promise<IpcResult<OnboardingState>>
     pickDir: (opts?: { title?: string; defaultPath?: string }) => Promise<IpcResult<string>>
     completeOnboarding: (payload: OnboardingPayload) => Promise<IpcResult<boolean>>
+    /** Disk-vs-app sync health: missing dsh executables / homes / store / plugins. */
+    checkHealth: () => Promise<IpcResult<HealthIssue[]>>
   }
 
   logs: {

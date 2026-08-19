@@ -8,6 +8,7 @@ import type {
   DshEntry,
   DshInstallResult,
   DshInstallStep,
+  HealthIssue,
   ImportProfileResult,
   ImportStep,
   InstalledOverviewRow,
@@ -146,6 +147,8 @@ const api = {
       ipcRenderer.invoke('settings:pickDir', opts),
     completeOnboarding: (payload: OnboardingPayload): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('settings:completeOnboarding', payload),
+    checkHealth: (): Promise<IpcResult<HealthIssue[]>> =>
+      ipcRenderer.invoke('settings:checkHealth'),
   },
 
   trash: {

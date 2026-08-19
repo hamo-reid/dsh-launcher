@@ -111,6 +111,28 @@ export interface DshEntry {
   dir?: string
 }
 
+// ── health check (disk ↔ app sync) ───────────────────────────────────────────
+
+/** What a health check flagged on the disk vs. the app's recorded state. */
+export type HealthIssueKind =
+  /** A registered dsh's executable no longer exists on disk. */
+  | 'dsh-exec'
+  /** No plugin store location is configured. */
+  | 'store-unconfigured'
+  /** The plugin store dir is configured but does not exist on disk. */
+  | 'store-missing'
+  /** A catalogued store plugin's node_modules dir is missing on disk. */
+  | 'plugin-missing'
+
+/** One flagged discrepancy, surfaced by `settings:checkHealth`. */
+export interface HealthIssue {
+  kind: HealthIssueKind
+  /** Dsh name / plugin name / 'plugin store'. */
+  label: string
+  path?: string
+  missing: boolean
+}
+
 // ── dsh official install ─────────────────────────────────────────────────────
 
 /** Successful official-install payload, returned to the renderer so the dialog

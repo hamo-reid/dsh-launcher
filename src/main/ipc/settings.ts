@@ -3,11 +3,12 @@
 
 import { ipcMain, dialog } from 'electron'
 import { loadSettings, saveSettings } from '../core/settings.ts'
-import { dshVersionDir, pluginDir, shouldRunOnboarding } from '../core/appState.ts'
+import { dshVersionDir, pluginDir, readDshState, shouldRunOnboarding } from '../core/appState.ts'
 import { failFromError } from '../core/errors.ts'
+import { checkHealth } from '../core/health.ts'
 import { setPluginStoreDir } from './plugins.ts'
 import { setVersionDirValue } from './dsh.ts'
-import type { IpcResult, OnboardingPayload, OnboardingState } from '../../shared/types.ts'
+import type { HealthIssue, IpcResult, OnboardingPayload, OnboardingState } from '../../shared/types.ts'
 
 export function registerSettingsIpc(): void {
   ipcMain.handle('settings:getUiLanguage', (): IpcResult<string | null> => {
@@ -77,6 +78,16 @@ export function registerSettingsIpc(): void {
         onboarded: true,
       })
       return { ok: true, value: true }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  /** Path health: does what the app recorded still exist on disk (dsh executables,
+   * store dir, store plugins)? Drives the top "disk vs. app" sync banner. */
+  ipcMain.handle('settings:checkHealth', (): IpcResult<HealthIssue[]> => {
+    try {
+      return { ok: true, value: checkHealth(readDshState().dshes, pluginDir()) }
     } catch (error) {
       return failFromError(error)
     }

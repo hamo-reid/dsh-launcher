@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
-import { ConfigProvider, Layout, Tabs, theme, Typography } from 'antd'
+import { Alert, Button, ConfigProvider, Layout, Space, Tabs, theme, Typography } from 'antd'
 import {
   AppstoreOutlined, CloseOutlined, FullscreenExitOutlined, FullscreenOutlined,
   MinusOutlined, ProfileOutlined, RobotOutlined, SettingOutlined,
@@ -11,6 +11,7 @@ import ProfileSection from './views/ProfileSection.tsx'
 import PluginsSection from './views/PluginsSection.tsx'
 import SettingsSection from './views/SettingsSection.tsx'
 import DshSection from './views/DshSection.tsx'
+import type { HealthIssue } from '../../shared/types.ts'
 
 type Tab = 'profile' | 'plugins' | 'settings' | 'dsh'
 
@@ -24,6 +25,7 @@ export default function App() {
   const [onboardDefaults, setOnboardDefaults] = useState({ pluginDir: '', dshVersionDir: '' })
   const { token } = theme.useToken()
   const [maximized, setMaximized] = useState(false)
+  const [issues, setIssues] = useState<HealthIssue[]>([])
 
   // Decide once whether the first-run wizard is required (fresh install).
   useEffect(() => {
@@ -42,6 +44,24 @@ export default function App() {
     void window.api.window.isMaximized().then(r => { if (r.ok) setMaximized(r.value) })
     return window.api.window.onMaximizeState(setMaximized)
   }, [])
+
+  // Disk-vs-app sync health: stale/missing dsh + store paths. Check on mount,
+  // and again when entering the DSH / plugins views so a fix shows up promptly.
+  const refreshHealth = async (): Promise<void> => {
+    const r = await window.api.settings.checkHealth()
+    if (r.ok) setIssues(r.value)
+  }
+
+  // Jump to the page that can actually act on the current issues: store/plugin
+  // issues land on the plugins page, executable issues on the DSH page.
+  const goFix = (): void => {
+    const target = issues.find(x => x.kind === 'store-unconfigured' || x.kind === 'store-missing' || x.kind === 'plugin-missing')
+    setTab(target !== undefined ? 'plugins' : 'dsh')
+  }
+  useEffect(() => { void refreshHealth() }, [])
+  useEffect(() => {
+    if (tab === 'dsh' || tab === 'plugins') void refreshHealth()
+  }, [tab])
 
   const TABS: { key: Tab; label: string; icon: ReactNode }[] = [
     { key: 'dsh', label: t('app.tab.dsh'), icon: <RobotOutlined /> },
@@ -89,6 +109,33 @@ export default function App() {
           tabBarStyle={{ marginBottom: 0, padding: '0 16px', background: token.colorBgContainer, WebkitAppRegion: 'no-drag' } as CSSProperties}
         />
       </div>
+
+      {/* Disk-vs-app sync banner: non-blocking summary of stale/ missing paths. */}
+      {issues.length > 0 && (
+        <div style={{ padding: '8px 16px', borderBottom: `1px solid ${token.colorSplit}` }}>
+          <Alert type="warning" showIcon closable onClose={() => setIssues([])}
+            message={(
+              <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                <span>{t('health.summary', { count: issues.length })}</span>
+                <Space>
+                  <Button size="small" onClick={() => void refreshHealth()}>{t('health.refresh')}</Button>
+                  <Button size="small" onClick={() => goFix()}>{t('health.goFix')}</Button>
+                </Space>
+              </Space>
+            )}
+            description={(
+              <ul style={{ margin: '6px 0 0', paddingInlineStart: 18 }}>
+                {issues.map((it, i) => (
+                  <li key={i}>
+                    {t(`health.kind.${it.kind}`)}：{it.label}
+                    {it.path !== undefined ? <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' }}> — {it.path}</span> : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          />
+        </div>
+      )}
 
       <Content style={{ flex: 1, overflow: 'hidden', background: token.colorBgLayout }}>
         {tab === 'profile' && <ProfileSection />}
