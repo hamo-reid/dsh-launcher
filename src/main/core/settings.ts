@@ -25,6 +25,9 @@ export interface AppSettings {
   activeDshId?: string
   /** Persisted UI language (`'zh'`/`'en'` …). */
   uiLanguage?: string
+  /** Whether clicking close minimizes to the system tray instead of quitting.
+   * Defaults to `true`; a false (or absent-on-older-schema) value quits. */
+  closeToTray?: boolean
   /** Whether the first-run onboarding wizard has been completed. */
   onboarded?: boolean
 }
@@ -87,6 +90,12 @@ export function loadSettings(): AppSettings {
   } catch {
     return {}
   }
+}
+
+/** Whether closing the window should minimize to tray rather than quit.
+ * Absent / unspecified → tray (the default close behaviour). */
+export function closeToTrayEnabled(): boolean {
+  return loadSettings().closeToTray !== false
 }
 
 /** Persist settings (upsert one row) and flush the database file to disk. */

@@ -109,6 +109,9 @@ export interface WindowApi {
     completeOnboarding: (payload: OnboardingPayload) => Promise<IpcResult<boolean>>
     /** Disk-vs-app sync health: missing dsh executables / homes / store / plugins. */
     checkHealth: () => Promise<IpcResult<HealthIssue[]>>
+    /** Whether clicking close minimizes to tray instead of quitting. */
+    getCloseToTray: () => Promise<IpcResult<boolean>>
+    setCloseToTray: (enabled: boolean) => Promise<IpcResult<boolean>>
   }
 
   logs: {

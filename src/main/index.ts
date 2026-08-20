@@ -1,7 +1,7 @@
 /** Main process: window lifecycle + IPC wiring. Every handler lives in its own
  * domain module under `src/main/ipc/`; this file only assembles them. */
 
-import { app, BrowserWindow, dialog, shell } from 'electron'
+import { app, BrowserWindow, dialog, Menu, nativeImage, shell, Tray } from 'electron'
 import { join } from 'node:path'
 import os from 'node:os'
 import { currentRun, registerRunIpc, terminateAndClear } from './ipc/run.ts'
@@ -14,12 +14,19 @@ import { registerSettingsIpc } from './ipc/settings.ts'
 import { hookWindowMaximize, registerWindowIpc } from './ipc/window.ts'
 import { registerLogsIpc } from './ipc/logs.ts'
 import { initLogger, logger } from './core/logger.ts'
-import { openDatabase } from './core/settings.ts'
+import { closeToTrayEnabled, openDatabase } from './core/settings.ts'
 import { configureAppState } from './core/appState.ts'
 
 // Process-level breadcrumbs for anything that escapes the IPC try/catch.
 process.on('uncaughtException', (error) => logger.error('uncaughtException', error))
 process.on('unhandledRejection', (reason) => logger.error('unhandledRejection', reason))
+
+/** Owned at module scope so the OS tray icon isn't garbage-collected away. */
+let tray: Tray | null = null
+/** Set once a real quit is requested (via tray 退出 / app.quit), so the window
+ * close handler doesn't re-intercept it into another hide-to-tray. */
+let quitting = false
+app.on('before-quit', () => { quitting = true })
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -37,6 +44,37 @@ function createWindow(): void {
     },
   })
   hookWindowMaximize(win)
+
+  // ── 系统托盘（Windows 左下角）托管 ────────────────────────────────────────
+  // 图标复用 build/icon.ico;右键菜单含运行状态 + 显示/隐藏 + 退出。
+  const showWindow = (): void => {
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
+  }
+  const buildTrayMenu = (): void => {
+    const running = currentRun()
+    tray?.setContextMenu(Menu.buildFromTemplate([
+      { label: running === null ? '状态：空闲' : `运行中：${running.profile}`, enabled: false },
+      { type: 'separator' },
+      { label: '显示主窗口', click: () => showWindow() },
+      { label: '隐藏到托盘', click: () => win.hide() },
+      { type: 'separator' },
+      {
+        label: '退出 DSH Launcher',
+        click: () => {
+          quitting = true
+          if (running !== null) terminateAndClear(running.child)
+          app.quit()
+        },
+      },
+    ]))
+  }
+  tray = new Tray(nativeImage.createFromPath(join(app.getAppPath(), 'build', 'icon.ico')))
+  tray.setToolTip('DSH Launcher')
+  buildTrayMenu()
+  tray.on('click', () => { if (win.isVisible()) win.hide(); else showWindow() })
+  tray.on('right-click', buildTrayMenu)
 
   // Every browsing link goes to the system default browser — never open a bare
   // Electron window (window.open / target=_blank) or navigate the app away to an
@@ -56,7 +94,14 @@ function createWindow(): void {
   // terminate if the user chooses to.
   let allowClose = false
   win.on('close', (event) => {
-    if (allowClose) return
+    if (allowClose || quitting) return
+    // 默认关闭行为：最小化到托盘（窗口隐藏，app 继续后台运行）。
+    // 在设置里可改为「直接退出」，此时才走下面的运行中进程保护。
+    if (closeToTrayEnabled()) {
+      event.preventDefault()
+      win.hide()
+      return
+    }
     const active = currentRun()
     if (active === null) return
     event.preventDefault()
