@@ -1,10 +1,12 @@
 /** Profile instance management: summaries, create, clone, soft-delete, export. */
 
 import {
-  cpSync, existsSync, mkdirSync, readFileSync, renameSync, utimesSync, writeFileSync,
+  cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync,
 } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { listProfiles, profileDir, profilesDir } from './home.ts'
+import { profilesRootFor, type DshContext } from './appState.ts'
 import { readManifest } from './manifest.ts'
 import { listComboPlugins } from './combo.ts'
 import { parsePatchRows } from './patch.ts'
@@ -186,6 +188,18 @@ export function activeDshVersion(): string {
   return active?.version ?? ''
 }
 
+/** The version tag to stamp on an export / gate an import: an explicit context's
+ * version when given (migration), else the active dsh's. */
+function dshVersionOf(ctx: DshContext | undefined): string {
+  return ctx === undefined ? activeDshVersion() : ctx.version
+}
+
+/** Profiles root for an explicit context, else the active dsh's. Lets
+ * export/import/mirror target a non-active dsh during migration. */
+function profilesRootForCtx(ctx: DshContext | undefined): string {
+  return ctx === undefined ? profilesDir() : profilesRootFor(ctx)
+}
+
 /** Plugin store's recorded dependency specs — the source of truth for
  * telling "downloaded from npm" apart from "installed from a local folder". */
 function readStoreDeps(storeDir: string): Record<string, string> {
@@ -227,8 +241,9 @@ function majorOf(version: string): number {
 /** Export a profile as portable, versioned JSON (schema v2). Classifies each
  * bundle by source and strips `link:`/`file:` absolute paths — the file is safe
  * to move across machines. */
-export function exportProfile(name: string): string {
-  const manifest = JSON.parse(readFileSync(join(profileDir(name), 'package.json'), 'utf8')) as {
+export function exportProfile(name: string, ctx?: DshContext): string {
+  const root = profilesRootForCtx(ctx)
+  const manifest = JSON.parse(readFileSync(join(root, name, 'package.json'), 'utf8')) as {
     name?: string
     dependencies?: Record<string, string>
     dsh?: { profile?: { bundles?: string[] } }
@@ -242,12 +257,12 @@ export function exportProfile(name: string): string {
     if (bundleNames.has(key) || spec.startsWith('link:') || spec.startsWith('file:')) continue
     dependencies[key] = spec
   }
-  const patchPath = join(profileDir(name), 'cordis.patch.yml')
+  const patchPath = join(root, name, 'cordis.patch.yml')
   const patchText = existsSync(patchPath) ? readFileSync(patchPath, 'utf8') : ''
   const payload: ProfileExport = {
     schemaVersion: 2,
     name: manifest.name ?? name,
-    dshVersion: activeDshVersion(),
+    dshVersion: dshVersionOf(ctx),
     bundles,
     dependencies,
     userPatch: patchText,
@@ -257,8 +272,8 @@ export function exportProfile(name: string): string {
 
 /** The locally-linked bundles of a profile (their on-disk code dirs), which the
  * export dialog offers to pack into a zip. `storeDir` is the plugin store root. */
-export function listLocalBundles(name: string, storeDir: string): { name: string; dir: string }[] {
-  const manifest = JSON.parse(readFileSync(join(profileDir(name), 'package.json'), 'utf8')) as {
+export function listLocalBundles(name: string, storeDir: string, ctx?: DshContext): { name: string; dir: string }[] {
+  const manifest = JSON.parse(readFileSync(join(profilesRootForCtx(ctx), name, 'package.json'), 'utf8')) as {
     dependencies?: Record<string, string>
     dsh?: { profile?: { bundles?: string[] } }
   }
@@ -277,6 +292,41 @@ export function listLocalBundles(name: string, storeDir: string): { name: string
 /** Re-export the shared import-result shape. */
 export type { ImportProfileResult } from '../../shared/types.ts'
 
+/** Copy a profile (its config layers + bundle deps) from one dsh to another and
+ * rebuild it under the target dsh — the cross-version profile migration path.
+ *
+ * The source profile is exported as schema-v2 JSON (version-tagged at its dsh),
+ * its locally-linked bundles are packed into a temp dir as `localSource`, and the
+ * payload is imported into the target dsh's profiles root with `forceDsh`
+ * (migration is the point, so a major mismatch is not a refusal here). In-box
+ * bundles (`source: dsh`) are fulfilled by the target installation itself —
+ * `normalizeShippedProfile` rewrites them to the target's shipped template on its
+ * next load. The source profile is left intact (`removeSource` is not offered;
+ * migration is a copy). */
+export async function mirrorProfile(
+  source: DshContext,
+  target: DshContext,
+  name: string,
+  opts: { forceDsh?: boolean } = {},
+  onProgress?: (step: ImportStep) => void,
+): Promise<ImportProfileResult> {
+  const json = exportProfile(name, source)
+  const storeDir = loadSettings().pluginDir ?? ''
+  // Pack the source's locally-linked bundles into a temp dir that importProfile
+  // consumes as `localSource/<name>` (mirroring the zip-export unpack layout).
+  const locals = listLocalBundles(name, storeDir, source)
+  let localSource = ''
+  if (locals.length > 0) {
+    localSource = mkdtempSync(join(tmpdir(), 'profile-mirror-'))
+    for (const b of locals) cpSync(b.dir, join(localSource, b.name), { recursive: true })
+  }
+  try {
+    return await importProfile(json, { name, forceDsh: opts.forceDsh ?? true, localSource }, onProgress, target)
+  } finally {
+    if (localSource !== '') rmSync(localSource, { recursive: true, force: true })
+  }
+}
+
 /** Rebuild a profile in the active dsh from an exported payload. `opts.localSource`
  * is a path holding unpacked `plugins/<name>` dirs (a zip export) so local bundles
  * restore offline; otherwise they are attempted from npm and any failure lands in
@@ -285,6 +335,7 @@ export async function importProfile(
   json: string,
   opts: { name?: string; forceDsh?: boolean; localSource?: string } = {},
   onProgress?: (step: ImportStep) => void,
+  ctx?: DshContext,
 ): Promise<ImportProfileResult> {
   const emit: (step: ImportStep) => void = onProgress ?? (() => {})
   const data = JSON.parse(json) as Record<string, unknown>
@@ -323,12 +374,12 @@ export async function importProfile(
 
   const target = (opts.name ?? (typeof data.name === 'string' ? data.name : '')).trim()
   if (!/^[a-z0-9][a-z0-9-]*$/.test(target)) throw new Error('invalid profile name (use kebab-case)')
-  const dir = profileDir(target)
+  const dir = join(profilesRootForCtx(ctx), target)
   if (existsSync(dir)) throw new Error(`profile "${target}" already exists`)
 
   // dsh version gate (refuse before writing anything, unless forced).
   const want = typeof data.dshVersion === 'string' ? data.dshVersion : ''
-  const cur = activeDshVersion()
+  const cur = dshVersionOf(ctx)
   if (want !== '' && majorOf(cur) !== majorOf(want) && opts.forceDsh !== true) {
     return { ok: false, text: `该 profile 导出自 dsh ${want}，当前为 ${cur}，major 不匹配。`, dshMismatch: true, installed: [], missing: [] }
   }
@@ -390,7 +441,10 @@ export async function importProfile(
         if (!added.ok) throw new Error(added.text)
       } // else：复用插件库已有的，跳过下载
 
-      const linked = await installIntoProfile(target, bundle.name, storeDir)
+      const linked = await installIntoProfile(
+        target, bundle.name, storeDir,
+        ...(ctx !== undefined ? [profilesRootForCtx(ctx)] : []),
+      )
       if (!linked.ok) throw new Error(linked.text)
     } catch (error) {
       missing.push(bundle.name)

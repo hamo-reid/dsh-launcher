@@ -18,6 +18,20 @@ function cmp(a: SemVer, b: SemVer): number {
   return a.major - b.major || a.minor - b.minor || a.patch - b.patch
 }
 
+/** Compare two dotted numeric versions. Returns -1 when `a < b`, 1 when
+ * `a > b`, 0 when equal. An unparseable version (incl. pre-release suffixes)
+ * compares as less than a parseable one (conservative); two unparseable ones
+ * compare equal. Used for update checks and cross-version migration spans. */
+export function compareVersions(a: string, b: string): number {
+  const pa = parseVersion(a)
+  const pb = parseVersion(b)
+  if (pa === null && pb === null) return 0
+  if (pa === null) return -1
+  if (pb === null) return 1
+  const c = cmp(pa, pb)
+  return c < 0 ? -1 : c > 0 ? 1 : 0
+}
+
 /** Whether `version` satisfies `spec` under the common operators
  * (`^ ~ > >= < <= =` and exact / `*` / `x`). A missing component in the
  * constraint counts as 0. Conservative by design: an unparseable version or an

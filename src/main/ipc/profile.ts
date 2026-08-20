@@ -17,9 +17,9 @@ import {
 } from '../core/combo.ts'
 import {
   cloneProfile, createProfile, exportProfile, importProfile, listLocalBundles, listProfileSummaries,
-  PROFILE_TEMPLATES, removeBundle, reorderBundle, softDeleteProfile, type ProfileSummary,
+  mirrorProfile, PROFILE_TEMPLATES, removeBundle, reorderBundle, softDeleteProfile, type ProfileSummary,
 } from '../core/profile.ts'
-import { activeDshEntry, pluginDir } from '../core/appState.ts'
+import { activeDshEntry, contextForEntry, pluginDir, readDshState } from '../core/appState.ts'
 import { baseLaunch } from '../core/dsh.ts'
 import { addDirToZip, dedentRowBlock, verifyDisabledState } from '../core/app-util.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
@@ -258,6 +258,22 @@ export function registerProfileIpc(): void {
       const result = await importProfile(json, { name, forceDsh, localSource },
         step => event.sender.send('import:event', step))
       if (localSource !== undefined && localSource !== '') rmSync(localSource, { recursive: true, force: true })
+      return { ok: true, value: result }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Copy a profile from one dsh to another (cross-version profile migration).
+  // Source stays intact; target rebuilds the bundle layers under its own dsh.
+  ipcMain.handle('profile:mirror', async (event, sourceDshId: string, targetDshId: string, profileName: string): Promise<IpcResult<ImportProfileResult>> => {
+    try {
+      const { dshes } = readDshState()
+      const src = dshes.find(d => d.id === sourceDshId)
+      const tgt = dshes.find(d => d.id === targetDshId)
+      if (src === undefined || tgt === undefined) return fail(E.dshNotFound)
+      const result = await mirrorProfile(contextForEntry(src), contextForEntry(tgt), profileName,
+        {}, step => event.sender.send('import:event', step))
       return { ok: true, value: result }
     } catch (error) {
       return failFromError(error)

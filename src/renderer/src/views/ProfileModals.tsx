@@ -295,6 +295,137 @@ export function ImportProfileModal(p: ImportProfileModalProps): JSX.Element {
   )
 }
 
+interface MirrorProfileModalProps {
+  open: boolean
+  /** The owning (source) dsh id — excluded from the target picker. */
+  sourceDshId: string
+  profileName: string
+  onClose: () => void
+  /** Called once the profile is present in the target dsh; parent refreshes. */
+  onMirrored: () => void | Promise<void>
+}
+/** Copy a profile from the active dsh to another dsh (cross-version migration;
+ * source stays intact). Streams the same `import:event` step rows the import
+ * dialog renders. */
+export function MirrorProfileModal(p: MirrorProfileModalProps): JSX.Element {
+  const { t } = useTranslation()
+  const { token } = theme.useToken()
+  const [targetId, setTargetId] = useState<string>()
+  const [targets, setTargets] = useState<{ id: string; name: string }[]>([])
+  const [running, setRunning] = useState(false)
+  const [done, setDone] = useState(false)
+  const [error, setError] = useState('')
+  const [result, setResult] = useState<ImportProfileResult | null>(null)
+  const rowsRef = useRef<ImportRow[]>([])
+  const [rows, setRows] = useState<ImportRow[]>([])
+
+  const upsert = (row: ImportRow): void => {
+    const next = [...rowsRef.current]
+    const at = next.findIndex(r => r.key === row.key)
+    if (at >= 0) next[at] = row
+    else next.push(row)
+    rowsRef.current = next
+    setRows(next)
+  }
+
+  useEffect(() => window.api.onImportEvent((step: ImportStep) => {
+    if (step.kind === 'bundle') {
+      upsert({
+        key: `bundle:${step.name}`,
+        section: 'bundle',
+        label: `${step.name}`,
+        status: step.state,
+        meta: step.version !== undefined && step.version !== '' ? `v${step.version}` : undefined,
+        detail: step.detail,
+      })
+    }
+  }), [])
+
+  useEffect(() => {
+    if (!p.open) return
+    setTargets([]); setTargetId(undefined); setRunning(false); setDone(false); setError(''); setResult(null)
+    rowsRef.current = []; setRows([])
+    void (async () => {
+      const r = await window.api.dsh.list()
+      if (r.ok) {
+        setTargets(r.value.dshes.filter(d => d.id !== p.sourceDshId))
+      }
+    })()
+  }, [p.open])
+
+  const doMirror = async (): Promise<void> => {
+    if (targetId === undefined) { void message.warning(t('profile.migrate.noTarget')); return }
+    setRunning(true); setError('')
+    try {
+      const r = await window.api.mirrorProfile(p.sourceDshId, targetId, p.profileName)
+      if (!r.ok) { setError(apiErrorText(r)); setDone(true); return }
+      setResult(r.value)
+      setDone(true)
+      await p.onMirrored()
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  const footer = running
+    ? <Button loading>{t('profile.migrate.running')}</Button>
+    : done
+      ? <Button type="primary" onClick={p.onClose}>{t('common.close')}</Button>
+      : (
+        <Space>
+          <Button onClick={p.onClose}>{t('common.cancel')}</Button>
+          <Button type="primary" disabled={targetId === undefined} onClick={() => void doMirror()}>{t('profile.migrate.start')}</Button>
+        </Space>
+      )
+
+  return (
+    <Modal title={t('profile.migrate.title', { name: p.profileName })} open={p.open}
+      onCancel={running ? undefined : p.onClose} closable={!running} maskClosable={!running}
+      width={MODAL.wide} footer={footer}>
+      <Space direction="vertical" size="small" style={{ width: '100%' }}>
+        {!running && !done && (
+          <>
+            <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>
+              {t('profile.migrate.prompt')}
+            </div>
+            <Select
+              style={{ width: '100%' }}
+              placeholder={t('profile.migrate.targetPlaceholder')}
+              value={targetId}
+              onChange={v => setTargetId(v)}
+              showSearch optionFilterProp="label"
+              options={targets.map(d => ({ value: d.id, label: d.name }))}
+            />
+          </>
+        )}
+
+        {rows.length > 0 && (
+          <div style={{ borderTop: `1px solid ${token.colorSplit}`, paddingTop: token.paddingSM }}>
+            {rows.map(row => (
+              <div key={row.key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0' }}>
+                <StepIcon status={row.status} />
+                <span style={{ flex: 1, minWidth: 0 }}>{row.label}</span>
+                {row.meta !== undefined && (
+                  <span style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' }}>{row.meta}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {done && error !== '' && <Alert type="error" showIcon message={error} />}
+        {done && result !== null && (
+          <Alert type={result.missing.length > 0 ? 'warning' : 'success'} showIcon
+            message={t('profile.migrate.done')}
+            description={result.missing.length > 0
+              ? t('profile.migrate.missing', { missing: result.missing.join('、') })
+              : undefined} />
+        )}
+      </Space>
+    </Modal>
+  )
+}
+
 interface MissingPluginsModalProps {
   list: string[]
   onClose: () => void

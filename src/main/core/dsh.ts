@@ -14,7 +14,9 @@ import os from 'node:os'
 import { logger } from './logger.ts'
 import { runPnpm } from './pnpm.ts'
 import { fetchPackageVersions } from './npm.ts'
-import type { DshEntry, DshInstallResult, DshInstallStep } from '../../shared/types.ts'
+import { compareVersions, parseVersion } from './version.ts'
+import { archiveHome } from './home-data.ts'
+import type { DshEntry, DshInstallResult, DshInstallStep, DshUpdateInfo, DshUpdateResult } from '../../shared/types.ts'
 
 /** Re-export the shared dsh shape for existing core/ipc callers. */
 export type { DshEntry } from '../../shared/types.ts'
@@ -435,6 +437,72 @@ export async function installOfficialDsh(
     await rm(home, { recursive: true, force: true }).catch(() => {})
     throw error
   }
+}
+
+// ── update (in-place upgrade of a managed dsh) ───────────────────────────────
+
+/** Whether a newer release is available for `current`. `null` when already on
+ * the latest (or the latest cannot be resolved). The current version may be a
+ * spec/coerce string; only the parseable part counts for the comparison. */
+export async function checkForDshUpdate(current: string): Promise<DshUpdateInfo | null> {
+  const cur = current.trim()
+  if (cur === '') return null
+  const info = await fetchPackageVersions('@deepseek-ai/dsh')
+  const latest = (info.distTags.latest ?? info.versions[0] ?? '').trim()
+  if (latest === '') return null
+  if (compareVersions(latest, cur) <= 0) return null
+  const majorOf = (v: string): number => parseVersion(v)?.major ?? -1
+  const a = majorOf(latest)
+  const b = majorOf(cur)
+  return { current: cur, latest, majorBump: a !== b && a !== -1 && b !== -1 }
+}
+
+/** The version-repo sub-directory owning `entry`'s executable (its install-dir
+ * basename), or `''` when not under `root`. Same structural probe the delete
+ * path uses, so update anchors on the real install even after a rename. */
+export function installSubName(entry: DshEntry, root: string): string {
+  if (root === '' || !existsSync(root)) return ''
+  const execDir = installDir(entry.execPath)
+  for (const sub of readdirSync(root, { withFileTypes: true })) {
+    if (!sub.isDirectory()) continue
+    const p = join(root, sub.name)
+    let rp = p
+    try { rp = realpathSync(p) } catch { /* fall back to literal path */ }
+    if (execDir === rp || execDir.startsWith(rp + sep)) return sub.name
+  }
+  return ''
+}
+
+/** Update a managed dsh in place: back up its home, reinstall the named version
+ * into the same version-repo slot, and leave the home live. The version choice
+ * and any major-bump confirmation are the caller's job (the IPC layer gates
+ * those); this only requires the install to be app-managed. Home is archived to
+ * `<versionRepo>/../backups/<name>-<ts>/` first as the breaking-change safety
+ * net, so even a failed reinstall (which discards the now-cleared target) leaves
+ * the user's data recoverable from the reported `backupDir`. */
+export async function updateDsh(
+  entry: DshEntry,
+  versionDir: string,
+  opts: { version?: string } = {},
+  onProgress?: (step: DshInstallStep) => void,
+): Promise<DshUpdateResult> {
+  if (!isDeletableDsh(entry, entry.versionDir ?? versionDir)) {
+    throw new Error('该 dsh 不是 app 管理的版本实例，无法更新')
+  }
+  const root = entry.versionDir !== undefined && entry.versionDir.trim() !== '' ? entry.versionDir : versionDir
+  const name = installSubName(entry, root)
+  if (name === '') throw new Error('无法定位该 dsh 在版本库中的安装目录')
+
+  const backupDir = join(dirname(root), 'backups', `${name}-${Date.now()}`)
+  archiveHome(entry.home, backupDir)
+  logger.info(`dsh update backup: ${name} → ${backupDir}`)
+
+  // Clear the old install tree, then reinstall the target version in place. The
+  // home is deliberately not touched here — it survives a clean update; on a
+  // failed one it is recoverable from `backupDir`.
+  await rm(join(root, name), { recursive: true, force: true })
+  const result = await installOfficialDsh(root, name, opts.version, onProgress)
+  return { backupDir, version: result.version }
 }
 
 /** Scan the version repo for dsh installs that exist on disk but are not yet

@@ -15,7 +15,7 @@ import { useRunRuntime } from './useRunRuntime.tsx'
 import { useTrash } from './useTrash.ts'
 import TrashPanel from './TrashPanel.tsx'
 import {
-  CloneProfileModal, CreateProfileModal, ExportProfileModal, ImportProfileModal, RunFailModal,
+  CloneProfileModal, CreateProfileModal, ExportProfileModal, ImportProfileModal, MirrorProfileModal, RunFailModal,
 } from './ProfileModals.tsx'
 import { LAYOUT } from '../theme.ts'
 import type { TrashItem } from '../../../shared/types.ts'
@@ -51,6 +51,8 @@ export default function ProfileSection() {
   const [createTemplate, setCreateTemplate] = useState(OFFICIAL_BASE)
 
   const [cloneTarget, setCloneTarget] = useState<string | null>(null)
+  // Profile 迁移（复制到其他 DSH）：选中 profile 名。
+  const [mirrorTarget, setMirrorTarget] = useState<string | null>(null)
   const [cloneName, setCloneName] = useState('')
   const [exportText, setExportText] = useState<string | null>(null)
   const [exportName, setExportName] = useState('')
@@ -207,12 +209,14 @@ export default function ProfileSection() {
 
   const handleAction = (summary: ProfileSummary, key: string): void => {
     if (key === 'clone') { setCloneTarget(summary.name); setCloneName('') }
+    else if (key === 'migrate') { setMirrorTarget(summary.name) }
     else if (key === 'export') { void doExport(summary.name) }
     else if (key === 'delete') { void doDelete(summary.name) }
   }
 
   const actionsFor = (summary: ProfileSummary): MenuAction[] => [
     { key: 'clone', label: t('profile.action.clone') },
+    { key: 'migrate', label: t('profile.action.migrate') },
     { key: 'export', label: t('profile.action.export') },
     { key: 'delete', label: t('profile.action.softDelete'), danger: true, confirmText: t('profile.action.softDeleteConfirm', { name: summary.name }) },
   ]
@@ -447,6 +451,13 @@ export default function ProfileSection() {
       logs={run.logs}
       eaddrinuse={run.eaddrinuse}
       onClose={run.clearFail}
+    />
+    <MirrorProfileModal
+      open={mirrorTarget !== null}
+      sourceDshId={activeDshId ?? ''}
+      profileName={mirrorTarget ?? ''}
+      onClose={() => setMirrorTarget(null)}
+      onMirrored={async () => { await refresh(); await trash.load() }}
     />
     </>
   )

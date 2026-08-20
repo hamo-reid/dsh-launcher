@@ -2,13 +2,17 @@
  * is left with just list + activation orchestration. */
 
 import { useEffect, useRef, useState } from 'react'
-import { Alert, Button, Checkbox, Input, List, Modal, Select, Space, Spin, Tag, message, theme } from 'antd'
+import {
+  Alert, Button, Checkbox, Descriptions, Input, List, Modal, Select, Space, Spin, Tag, message, theme,
+} from 'antd'
 import { CheckCircleFilled, CloseCircleFilled, LoadingOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
 import FieldLabel from '../components/FieldLabel.tsx'
 import { MODAL } from '../theme.ts'
-import type { DshInstallResult, DshInstallStep, PackageVersionInfo } from '../../../shared/types.ts'
+import type {
+  DshDataImportResult, DshInstallResult, DshInstallStep, DshUpdateInfo, DshUpdateResult, PackageVersionInfo,
+} from '../../../shared/types.ts'
 
 // ── Add DSH ────────────────────────────────────────────────────────────────
 
@@ -369,6 +373,211 @@ export function OfficialInstallModal(p: OfficialInstallModalProps): JSX.Element 
       </pre>
     </Modal>
     </>
+  )
+}
+
+// ── Update (in-place version upgrade of a managed dsh) ───────────────────────
+
+interface UpdateDshModalProps {
+  /** The managed dsh to update; `null` hides the modal. */
+  dsh: { id: string; name: string } | null
+  onClose: () => void
+  onDone: () => void | Promise<void>
+}
+export function UpdateDshModal(p: UpdateDshModalProps): JSX.Element {
+  const { t } = useTranslation()
+  const [info, setInfo] = useState<DshUpdateInfo | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [ackMajor, setAckMajor] = useState(false)
+  const [applying, setApplying] = useState(false)
+  const [result, setResult] = useState<DshUpdateResult | null>(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (p.dsh === null) return
+    setInfo(null); setChecking(true); setAckMajor(false); setResult(null); setError('')
+    let alive = true
+    void (async () => {
+      const r = await window.api.dsh.checkUpdate(p.dsh!.id)
+      if (!alive) return
+      setChecking(false)
+      if (r.ok) setInfo(r.value)
+      else setError(apiErrorText(r))
+    })()
+    return () => { alive = false }
+  }, [p.dsh?.id])
+
+  const doUpdate = async (): Promise<void> => {
+    if (p.dsh === null || info === null) return
+    setApplying(true)
+    setError('')
+    try {
+      const r = await window.api.dsh.update(p.dsh.id, { ackMajorRisk: ackMajor })
+      if (!r.ok) { setError(apiErrorText(r)); return }
+      setResult(r.value)
+      void message.success(t('dsh.update.newVersion', { version: r.value.version }))
+      await p.onDone()
+    } catch (e) {
+      setError(String(e instanceof Error ? e.message : e))
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  const footer = applying
+    ? <Button loading>{t('dsh.update.applying')}</Button>
+    : result !== null
+      ? <Button type="primary" onClick={p.onClose}>{t('common.close')}</Button>
+      : (
+        <Space>
+          <Button onClick={p.onClose}>{t('common.close')}</Button>
+          {info !== null && (
+            <Button type="primary" disabled={info.majorBump && !ackMajor} onClick={() => void doUpdate()}>
+              {t('dsh.update.start')}
+            </Button>
+          )}
+        </Space>
+      )
+
+  return (
+    <Modal title={t('dsh.update.title', { name: p.dsh?.name ?? '' })} open={p.dsh !== null}
+      onCancel={applying ? undefined : p.onClose} closable={!applying} maskClosable={!applying}
+      width={MODAL.narrow} footer={footer} destroyOnClose>
+      <Space direction="vertical" size="small" style={{ width: '100%' }}>
+        {checking && <div><Spin size="small" /> {t('dsh.update.checking')}</div>}
+
+        {!checking && error !== '' && <Alert type="error" showIcon message={error} />}
+        {!checking && error === '' && info === null && checking === false && (
+          <Alert type="success" showIcon message={t('dsh.update.upToDate')} />
+        )}
+
+        {!checking && error === '' && info !== null && (
+          <>
+            <Descriptions size="small" column={1} bordered>
+              <Descriptions.Item label={t('dsh.update.current')}>{info.current || t('common.unknown')}</Descriptions.Item>
+              <Descriptions.Item label={t('dsh.update.latest')}>{info.latest}</Descriptions.Item>
+            </Descriptions>
+            {info.majorBump && (
+              <>
+                <Alert type="warning" showIcon message={t('dsh.update.majorWarn')} />
+                <Checkbox checked={ackMajor} onChange={e => setAckMajor(e.target.checked)}>
+                  {t('dsh.update.ackMajor')}
+                </Checkbox>
+              </>
+            )}
+          </>
+        )}
+
+        {result !== null && (
+          <Alert type="success" showIcon
+            message={t('dsh.update.newVersion', { version: result.version })}
+            description={`${t('dsh.update.backup')}: ${result.backupDir}`} />
+        )}
+      </Space>
+    </Modal>
+  )
+}
+
+// ── Data mirror (migrate a dsh's data to another dsh's home) ────────────────
+
+/** Leading major of a version string, or `null`. */
+function majorOf(version: string): number | null {
+  const m = /^(\d+)/.exec(version.trim())
+  return m === null ? null : Number(m[1])
+}
+
+interface DataMirrorModalProps {
+  open: boolean
+  /** The source dsh (whose data migrates); `null` hides the modal. */
+  source: { id: string; name: string; version: string } | null
+  onClose: () => void
+  onDone: () => void | Promise<void>
+}
+export function DataMirrorModal(p: DataMirrorModalProps): JSX.Element {
+  const { t } = useTranslation()
+  const { token } = theme.useToken()
+  const [targets, setTargets] = useState<{ id: string; name: string; version: string }[]>([])
+  const [targetId, setTargetId] = useState<string>()
+  const [ackCross, setAckCross] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [result, setResult] = useState<DshDataImportResult | null>(null)
+
+  useEffect(() => {
+    if (!p.open) return
+    setTargets([]); setTargetId(undefined); setAckCross(false); setBusy(false); setError(''); setResult(null)
+    void (async () => {
+      const r = await window.api.dsh.list()
+      if (r.ok) setTargets(r.value.dshes.filter(d => d.id !== p.source?.id))
+    })()
+  }, [p.open])
+
+  const target = targets.find(d => d.id === targetId)
+  const crossMajor = target !== undefined && p.source !== null
+    && majorOf(target.version) !== null && majorOf(p.source.version) !== null
+    && majorOf(target.version) !== majorOf(p.source.version)
+
+  const doMirror = async (): Promise<void> => {
+    if (p.source === null || targetId === undefined) { void message.warning(t('data.mirror.noTarget')); return }
+    if (crossMajor && !ackCross) return
+    setBusy(true); setError('')
+    try {
+      const r = await window.api.data.mirror(p.source.id, targetId)
+      if (!r.ok) { setError(apiErrorText(r)); return }
+      setResult(r.value)
+      void message.success(t('data.mirror.done'))
+      await p.onDone()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const footer = busy
+    ? <Space><Button loading>{t('data.mirror.running')}</Button></Space>
+    : result !== null
+      ? <Button type="primary" onClick={p.onClose}>{t('common.close')}</Button>
+      : (
+        <Space>
+          <Button onClick={p.onClose} disabled={busy}>{t('common.cancel')}</Button>
+          <Button type="primary" disabled={targetId === undefined || (crossMajor && !ackCross)} onClick={() => void doMirror()}>
+            {t('data.mirror.start')}
+          </Button>
+        </Space>
+      )
+
+  return (
+    <Modal title={t('data.mirror.title', { name: p.source?.name ?? '' })} open={p.open}
+      onCancel={busy ? undefined : p.onClose} closable={!busy} maskClosable={!busy}
+      width={MODAL.narrow} footer={footer}>
+      <Space direction="vertical" size="small" style={{ width: '100%' }}>
+        {result === null && (
+          <>
+            <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>
+              {t('data.mirror.prompt')}
+            </div>
+            <Select
+              style={{ width: '100%' }} showSearch optionFilterProp="label"
+              placeholder={t('data.mirror.targetPlaceholder')}
+              value={targetId} onChange={v => { setTargetId(v); setAckCross(false) }}
+              options={targets.map(d => ({ value: d.id, label: d.name }))}
+            />
+            {crossMajor && (
+              <>
+                <Alert type="warning" showIcon message={t('data.mirror.crossMajor')} />
+                <Checkbox checked={ackCross} onChange={e => setAckCross(e.target.checked)}>
+                  {t('data.mirror.ack')}
+                </Checkbox>
+              </>
+            )}
+          </>
+        )}
+
+        {error !== '' && <Alert type="error" showIcon message={error} />}
+        {result !== null && (
+          <Alert type="success" showIcon message={t('data.mirror.done')} description={result.text} />
+        )}
+      </Space>
+    </Modal>
   )
 }
 
