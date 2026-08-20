@@ -4,7 +4,10 @@
  * on install-output markers rather than the exit code. Pure string logic.
  */
 import { describe, expect, it } from 'vitest'
-import { installSucceeded } from './pnpm.ts'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { installSucceeded, runPnpm } from './pnpm.ts'
 
 describe('installSucceeded', () => {
   it('is true when output shows added packages', () => {
@@ -19,5 +22,18 @@ describe('installSucceeded', () => {
   it('is false for a pure error / empty output', () => {
     expect(installSucceeded('ERR_PNPM_OUTDATED_LOCKFILE: Cannot install with frozen-lockfile')).toBe(false)
     expect(installSucceeded('')).toBe(false)
+  })
+})
+
+describe('runPnpm', () => {
+  it('resolves ok=true with version text for a clean invocation', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pm-pnpm-'))
+    try {
+      const { ok, text } = await runPnpm(dir, ['--version'])
+      expect(ok).toBe(true)
+      expect(text.trim()).toMatch(/^\d+\.\d+\.\d+/)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

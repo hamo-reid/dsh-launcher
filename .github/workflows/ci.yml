@@ -37,6 +37,10 @@ jobs:
         run: pnpm run typecheck
       - name: Unit tests
         run: pnpm test
+      - name: Coverage gate
+        # 附带覆盖率门禁（vitest.config.ts 的 thresholds）：core 非渲染层
+        # 平均覆盖率须 >70%，否则构建失败。lcov 报告生成于 coverage/。
+        run: pnpm run test:coverage
       - name: Build
         run: pnpm run build
       - name: Verify packaged layout

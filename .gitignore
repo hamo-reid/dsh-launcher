@@ -6,6 +6,10 @@ out/
 release/
 dist/
 
+# Test coverage output
+coverage/
+coverage-report/
+
 # TypeScript incremental info
 *.tsbuildinfo
 

@@ -6,7 +6,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { detectExecutables, discoverVersionRepo, isDeletableDsh, isManagedInstall, resolveDshPackage, type DshEntry } from './dsh.ts'
+import {
+  baseLaunch, defaultHome, detectExecutables, discoverVersionRepo, entryFromPath,
+  existsExecutable, installDir, isDeletableDsh, isManagedInstall, readVersionFromPath,
+  resolveDshPackage, type DshEntry,
+} from './dsh.ts'
 
 let root: string
 
@@ -166,5 +170,75 @@ describe('discoverVersionRepo', () => {
     const found = discoverVersionRepo([], repo)
     expect(found.map(x => x.name).sort()).toEqual(['a', 'b'])
     expect(found.every(x => x.managed === true)).toBe(true)
+  })
+})
+describe('baseLaunch', () => {
+  it('maps a source checkout to a node/tsx command', () => {
+    const checkout = dir('launch-src')
+    mkdirSync(join(checkout, 'apps', 'cli', 'src'), { recursive: true })
+    writeFileSync(join(checkout, 'apps', 'cli', 'src', 'bin.ts'), '')
+    const cmd = baseLaunch(checkout)
+    expect(cmd).toBe(`node --import tsx/esm "${join(checkout, 'apps', 'cli', 'src', 'bin.ts')}"`)
+  })
+
+  it('passes a plain executable through unchanged', () => {
+    const plain = dir('launch-plain')
+    expect(baseLaunch(plain)).toBe(plain)
+  })
+})
+
+describe('defaultHome / readVersionFromPath', () => {
+  it('defaultHome points at ~/.dsh', () => {
+    expect(defaultHome()).toContain('.dsh')
+  })
+
+  it('readVersionFromPath walks up to the version manifest', () => {
+    writeJson('walk/dir/.dsh/versions/v1', { version: '9.9.9' })
+    const inner = dir('walk/dir/.dsh/versions/v1/deep/nest')
+    expect(readVersionFromPath(inner)).toBe('9.9.9')
+  })
+})
+
+describe('installDir / existsExecutable', () => {
+  it('installDir resolves a quoted command to its real dir', () => {
+    const bin = writeJson('inst/cmd/real-dsh', { version: '1.0.0' })
+    const target = join(bin, 'real-dsh')
+    writeFileSync(target, '#!/usr/bin/env node')
+    expect(installDir(`node "${target}"`)).toBe(target)
+  })
+
+  it('existsExecutable is true for a real file and false for a miss', () => {
+    const bin = dir('exec')
+    const file = join(bin, 'dsh.bin')
+    writeFileSync(file, '')
+    expect(existsExecutable(file)).toBe(true)
+    expect(existsExecutable(join(bin, 'missing'))).toBe(false)
+    expect(existsExecutable(`node "${file}"`)).toBe(true)
+  })
+})
+
+describe('entryFromPath', () => {
+  it('builds an entry from a plain file (version from manifest)', async () => {
+    const bin = writeJson('entry/bin', { version: '2.3.4' })
+    const file = join(bin, 'dsh.bin')
+    writeFileSync(file, '')
+    const entry = await entryFromPath(file)
+    expect(entry.execPath).toBe(file)
+    expect(entry.version).toBe('2.3.4')
+    expect(entry.name).toBe('dsh@2.3.4')
+  })
+
+  it('builds an entry from a source checkout dir', async () => {
+    const checkout = dir('entry-src')
+    mkdirSync(join(checkout, 'apps', 'cli', 'src'), { recursive: true })
+    writeFileSync(join(checkout, 'apps', 'cli', 'src', 'bin.ts'), '')
+    writeJson('entry-src/apps/cli', { name: '@deepseek-ai/dsh', version: '1.2.3' })
+    const entry = await entryFromPath(checkout)
+    expect(entry.execPath).toContain('node --import tsx/esm')
+    expect(entry.version).toBe('1.2.3')
+  })
+
+  it('throws for a missing path', async () => {
+    await expect(entryFromPath(join(root, 'nope'))).rejects.toThrow(/path not found/)
   })
 })

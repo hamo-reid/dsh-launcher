@@ -2,8 +2,8 @@
  * Tests for the npm registry normalization (pure logic; the fetch is exercised
  * via the IPC layer at runtime, so here we feed canned raw payloads).
  */
-import { describe, it, expect } from 'vitest'
-import { normalizeSearchResults, type RawSearchPackage } from './npm.ts'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { fetchPackageVersions, normalizeSearchResults, npmSearch, type RawSearchPackage } from './npm.ts'
 
 describe('normalizeSearchResults', () => {
   it('maps name/description/version and reads total', () => {
@@ -51,5 +51,62 @@ describe('normalizeSearchResults', () => {
     const { hits } = normalizeSearchResults({ objects: [{ package: {} }, { package: { name: 'z' } }] })
     expect(hits).toHaveLength(1)
     expect(hits[0].name).toBe('z')
+  })
+})
+
+/** Mock `fetch` (the registry calls) so the HTTP layer stays out of tests. */
+function stubFetch(resp: () => { status: number; body: unknown }): void {
+  vi.stubGlobal('fetch', vi.fn(async () => ({
+    ok: resp().status < 400,
+    status: resp().status,
+    json: async () => resp().body,
+  })))
+}
+
+describe('fetchPackageVersions', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('reads dist-tags and versions', async () => {
+    stubFetch(() => ({ status: 200, body: { 'dist-tags': { latest: '1.0.0' }, versions: { '1.0.0': {}, '1.1.0': {} } } }))
+    const info = await fetchPackageVersions('@deepseek-ai/dsh')
+    expect(info.distTags).toEqual({ latest: '1.0.0' })
+    expect(info.versions).toEqual(['1.0.0', '1.1.0'])
+  })
+
+  it('handles a package with no versions', async () => {
+    stubFetch(() => ({ status: 200, body: {} }))
+    const info = await fetchPackageVersions('empty')
+    expect(info).toEqual({ distTags: {}, versions: [] })
+  })
+
+  it('throws on a non-OK registry response', async () => {
+    stubFetch(() => ({ status: 404, body: {} }))
+    await expect(fetchPackageVersions('nope')).rejects.toThrow(/HTTP 404/)
+  })
+})
+
+describe('npmSearch', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('maps a search response and defers to the registry total', async () => {
+    stubFetch(() => ({
+      status: 200,
+      body: { total: 42, objects: [{ package: { name: 'pkg-a', description: 'd' } }] },
+    }))
+    const { hits, total } = await npmSearch('dsh')
+    expect(total).toBe(42)
+    expect(hits).toHaveLength(1)
+    expect(hits[0].name).toBe('pkg-a')
+  })
+
+  it('falls back to hits length when total is absent', async () => {
+    stubFetch(() => ({ status: 200, body: { objects: [{ package: { name: 'x' } }] } }))
+    const { total } = await npmSearch('dsh')
+    expect(total).toBe(1)
+  })
+
+  it('throws on a non-OK search response', async () => {
+    stubFetch(() => ({ status: 500, body: {} }))
+    await expect(npmSearch('dsh')).rejects.toThrow(/HTTP 500/)
   })
 })
