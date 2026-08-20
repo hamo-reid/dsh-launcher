@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import {
-  Alert, Button, Checkbox, Descriptions, Input, List, Modal, Select, Space, Spin, Tag, message, theme,
+  Alert, Button, Checkbox, Input, List, Modal, Select, Space, Spin, Tag, message, theme,
 } from 'antd'
 import { CheckCircleFilled, CloseCircleFilled, LoadingOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
@@ -317,6 +317,19 @@ export function OfficialInstallModal(p: OfficialInstallModalProps): JSX.Element 
                     allowClear
                     optionFilterProp="label"
                     options={(pkgInfo?.versions ?? []).map(v => ({ value: v, label: v }))}
+                    optionRender={({ label }) => {
+                      const tags = pkgInfo?.distTags ?? {}
+                      const marks: string[] = []
+                      if (tags['latest'] === String(label)) marks.push('latest')
+                      if (tags['next'] === String(label)) marks.push('next')
+                      return (
+                        <Space size={6}>
+                          {marks.includes('latest') && <Tag color="blue">{t('dsh.update.track.latest')}</Tag>}
+                          {marks.includes('next') && <Tag color="purple">{t('dsh.update.track.next')}</Tag>}
+                          {label}
+                        </Space>
+                      )
+                    }}
                   />
                 </div>
               )}
@@ -386,6 +399,7 @@ interface UpdateDshModalProps {
 }
 export function UpdateDshModal(p: UpdateDshModalProps): JSX.Element {
   const { t } = useTranslation()
+  const { token } = theme.useToken()
   const [info, setInfo] = useState<DshUpdateInfo | null>(null)
   const [checking, setChecking] = useState(false)
   const [ackMajor, setAckMajor] = useState(false)
@@ -407,12 +421,12 @@ export function UpdateDshModal(p: UpdateDshModalProps): JSX.Element {
     return () => { alive = false }
   }, [p.dsh?.id])
 
-  const doUpdate = async (): Promise<void> => {
-    if (p.dsh === null || info === null) return
+  const doUpdate = async (version: string): Promise<void> => {
+    if (p.dsh === null) return
     setApplying(true)
     setError('')
     try {
-      const r = await window.api.dsh.update(p.dsh.id, { ackMajorRisk: ackMajor })
+      const r = await window.api.dsh.update(p.dsh.id, { version, ackMajorRisk: ackMajor })
       if (!r.ok) { setError(apiErrorText(r)); return }
       setResult(r.value)
       void message.success(t('dsh.update.newVersion', { version: r.value.version }))
@@ -424,20 +438,21 @@ export function UpdateDshModal(p: UpdateDshModalProps): JSX.Element {
     }
   }
 
+  // The update tracks offered (oldest → newest): `latest` stable and/or `next`
+  // prerelease, each with its own button + major-bump gate.
+  const tracks = info === null
+    ? []
+    : [
+        ...(info.latest !== undefined ? [{ key: 'latest' as const, ...info.latest }] : []),
+        ...(info.next !== undefined ? [{ key: 'next' as const, ...info.next }] : []),
+      ]
+  const hasBump = tracks.some(t => t.majorBump)
+
   const footer = applying
     ? <Button loading>{t('dsh.update.applying')}</Button>
     : result !== null
       ? <Button type="primary" onClick={p.onClose}>{t('common.close')}</Button>
-      : (
-        <Space>
-          <Button onClick={p.onClose}>{t('common.close')}</Button>
-          {info !== null && (
-            <Button type="primary" disabled={info.majorBump && !ackMajor} onClick={() => void doUpdate()}>
-              {t('dsh.update.start')}
-            </Button>
-          )}
-        </Space>
-      )
+      : <Button onClick={p.onClose}>{t('common.close')}</Button>
 
   return (
     <Modal title={t('dsh.update.title', { name: p.dsh?.name ?? '' })} open={p.dsh !== null}
@@ -453,11 +468,42 @@ export function UpdateDshModal(p: UpdateDshModalProps): JSX.Element {
 
         {!checking && error === '' && info !== null && (
           <>
-            <Descriptions size="small" column={1} bordered>
-              <Descriptions.Item label={t('dsh.update.current')}>{info.current || t('common.unknown')}</Descriptions.Item>
-              <Descriptions.Item label={t('dsh.update.latest')}>{info.latest}</Descriptions.Item>
-            </Descriptions>
-            {info.majorBump && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ color: token.colorTextSecondary }}>{t('dsh.update.current')}</span>
+              <code>{info.current || t('common.unknown')}</code>
+            </div>
+            {info.latest === undefined && info.next !== undefined && (
+              <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>
+                {t('dsh.update.latestCurrent')}
+              </div>
+            )}
+            <Space direction="vertical" style={{ width: '100%' }}>
+              {tracks.map(trk => (
+                <div
+                  key={trk.key}
+                  style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+                    border: `1px solid ${token.colorBorder}`, borderRadius: token.borderRadiusLG, padding: '10px 12px',
+                  }}
+                >
+                  <Space size={6}>
+                    <Tag color={trk.key === 'latest' ? 'blue' : 'purple'}>
+                      {trk.key === 'latest' ? t('dsh.update.track.latest') : t('dsh.update.track.next')}
+                    </Tag>
+                    <code>{trk.version}</code>
+                    {trk.majorBump && <Tag color="orange">{t('dsh.update.bump')}</Tag>}
+                  </Space>
+                  <Button
+                    size="small" type="primary"
+                    disabled={applying || (trk.majorBump && !ackMajor)}
+                    onClick={() => void doUpdate(trk.version)}
+                  >
+                    {t('dsh.update.go')}
+                  </Button>
+                </div>
+              ))}
+            </Space>
+            {hasBump && (
               <>
                 <Alert type="warning" showIcon message={t('dsh.update.majorWarn')} />
                 <Checkbox checked={ackMajor} onChange={e => setAckMajor(e.target.checked)}>

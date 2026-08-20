@@ -50,6 +50,9 @@ importers:
       remark-gfm:
         specifier: ^4.0.1
         version: 4.0.1
+      semver:
+        specifier: ^7.8.5
+        version: 7.8.5
       sql.js:
         specifier: ^1.14.1
         version: 1.14.1
@@ -75,6 +78,9 @@ importers:
       '@types/react-dom':
         specifier: ^18.3.1
         version: 18.3.7(@types/react@18.3.31)
+      '@types/semver':
+        specifier: ^7.8.0
+        version: 7.8.0
       '@types/sql.js':
         specifier: ^1.4.11
         version: 1.4.11
@@ -1028,6 +1034,9 @@ packages:
 
   '@types/responselike@1.0.3':
     resolution: {integrity: sha512-H/+L+UkTV33uf49PH5pCAUBVPNj2nDBXTN+qS1dOwyyg24l3CcicicCA7ca+HMvJBZcFgl5r8e+RR6elsb4Lyw==}
+
+  '@types/semver@7.8.0':
+    resolution: {integrity: sha512-1mAINjtQCXXeLkJ9ehXkwOcBpqtLxiVtKhpUf83DdRNdQKV0iXZpaHYqRr7nj+wvxuJzoAmAwXI+sCNMv1CzLQ==}
 
   '@types/sql.js@1.4.11':
     resolution: {integrity: sha512-QXIx38p2ZThJaK9vP5ZdqdlRe1FG9I8SmCZOS7FHfB/2qPAjZwkL7/vlfPg6N/oWHuuOaGg/P/IRwfP2W0kWVQ==}
@@ -3712,6 +3721,8 @@ snapshots:
   '@types/responselike@1.0.3':
     dependencies:
       '@types/node': 22.20.1
+
+  '@types/semver@7.8.0': {}
 
   '@types/sql.js@1.4.11':
     dependencies:

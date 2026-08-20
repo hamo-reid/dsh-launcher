@@ -15,7 +15,7 @@ import {
 } from '../core/appState.ts'
 import { loadSettings, saveSettings } from '../core/settings.ts'
 import { fetchPackageVersions } from '../core/npm.ts'
-import { parseVersion } from '../core/version.ts'
+import { majorOfVersion } from '../core/version.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
 import { logger } from '../core/logger.ts'
 import type { DshInstallResult, DshUpdateInfo, DshUpdateResult, IpcResult, PackageVersionInfo } from '../../shared/types.ts'
@@ -131,14 +131,14 @@ export function registerDshIpc(): void {
       const entry = dshes.find(d => d.id === id)
       if (entry === undefined) return fail(E.dshNotFound)
       if (!isDeletableDsh(entry, entry.versionDir ?? dshVersionDir())) return fail(E.dshNotManaged)
-      // Resolve the target version: explicit, else the latest release.
+      // Resolve the target version: explicit, else the latest stable release.
       let target = opts?.version?.trim()
       if (target === undefined || target === '') {
-        target = (await checkForDshUpdate(entry.version))?.latest
+        target = (await checkForDshUpdate(entry.version))?.latest?.version
       }
       if (target === undefined || target === '') return fail(E.dshUpToDate)
       // Cross-major → require explicit acknowledgement of the breaking-change risk.
-      const majorBump = parseVersion(target)?.major !== parseVersion(entry.version)?.major
+      const majorBump = majorOfVersion(target) !== majorOfVersion(entry.version)
       if (majorBump && opts?.ackMajorRisk !== true) {
         return fail(E.dshMajorRisk, { current: entry.version, latest: target })
       }

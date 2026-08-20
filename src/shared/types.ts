@@ -177,14 +177,25 @@ export type DshInstallStep =
   | { kind: 'install'; state: 'running' | 'ok' | 'error'; version?: string; detail?: string }
   | { kind: 'register'; state: 'running' | 'ok' | 'error'; version?: string; detail?: string }
 
-/** Update availability for a managed dsh, from `dsh:checkUpdate`. */
+/** One available update track for a managed dsh. */
+export interface DshUpdateTrack {
+  /** The version to install (a dist-tag value: `latest` or `next`). */
+  version: string
+  /** Whether this track crosses a major version from the current install
+   * (breaking-change warning). */
+  majorBump: boolean
+}
+
+/** Update availability for a managed dsh, from `dsh:checkUpdate`. `latest` and
+ * `next` are the dist-tag tracks that are newer than the current install;
+ * either may be absent. At least one is present when non-`null`. */
 export interface DshUpdateInfo {
   /** Currently installed version. */
   current: string
-  /** Newest available (dist-tag `latest`). */
-  latest: string
-  /** Whether the update crosses a major version (breaking-change warning). */
-  majorBump: boolean
+  /** Newer stable release (dist-tag `latest`), when available. */
+  latest?: DshUpdateTrack
+  /** Newer prerelease (dist-tag `next`), when available; distinct from `latest`. */
+  next?: DshUpdateTrack
 }
 
 /** Result of a completed in-place dsh update. */

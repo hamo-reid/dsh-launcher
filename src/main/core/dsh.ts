@@ -14,9 +14,9 @@ import os from 'node:os'
 import { logger } from './logger.ts'
 import { runPnpm } from './pnpm.ts'
 import { fetchPackageVersions } from './npm.ts'
-import { compareVersions, parseVersion } from './version.ts'
+import { compareVersionsLoose, majorOfVersion } from './version.ts'
 import { archiveHome } from './home-data.ts'
-import type { DshEntry, DshInstallResult, DshInstallStep, DshUpdateInfo, DshUpdateResult } from '../../shared/types.ts'
+import type { DshEntry, DshInstallResult, DshInstallStep, DshUpdateInfo, DshUpdateResult, DshUpdateTrack } from '../../shared/types.ts'
 
 /** Re-export the shared dsh shape for existing core/ipc callers. */
 export type { DshEntry } from '../../shared/types.ts'
@@ -441,20 +441,33 @@ export async function installOfficialDsh(
 
 // ── update (in-place upgrade of a managed dsh) ───────────────────────────────
 
-/** Whether a newer release is available for `current`. `null` when already on
- * the latest (or the latest cannot be resolved). The current version may be a
- * spec/coerce string; only the parseable part counts for the comparison. */
+/** Available update tracks for `current`: the stable `latest` tag and/or the
+ * prerelease `next` tag, each only when it is newer than the install. `null`
+ * when nothing is newer (or the dist-tags cannot be resolved). Prerelease
+ * comparison (the `next` track) uses semver's own semantics via
+ * `compareVersionsLoose`, so `2.0.0-beta.1` reads as newer than `1.9.x` but
+ * older than `2.0.0`. */
 export async function checkForDshUpdate(current: string): Promise<DshUpdateInfo | null> {
   const cur = current.trim()
   if (cur === '') return null
   const info = await fetchPackageVersions('@deepseek-ai/dsh')
-  const latest = (info.distTags.latest ?? info.versions[0] ?? '').trim()
-  if (latest === '') return null
-  if (compareVersions(latest, cur) <= 0) return null
-  const majorOf = (v: string): number => parseVersion(v)?.major ?? -1
-  const a = majorOf(latest)
-  const b = majorOf(cur)
-  return { current: cur, latest, majorBump: a !== b && a !== -1 && b !== -1 }
+  const stable = (info.distTags.latest ?? info.versions[0] ?? '').trim()
+  const track = (version: string | undefined): DshUpdateTrack | undefined => {
+    const v = version?.trim()
+    if (v === undefined || v === '') return undefined
+    if (compareVersionsLoose(v, cur) <= 0) return undefined
+    return { version: v, majorBump: majorOfVersion(v) !== majorOfVersion(cur) }
+  }
+  const latest = track(stable)
+  // Only offer `next` when it is a genuinely different version than stable.
+  const nextTag = info.distTags.next
+  const next = track(nextTag !== undefined && nextTag === stable ? undefined : nextTag)
+  if (latest === undefined && next === undefined) return null
+  return {
+    current: cur,
+    ...(latest !== undefined ? { latest } : {}),
+    ...(next !== undefined ? { next } : {}),
+  }
 }
 
 /** The version-repo sub-directory owning `entry`'s executable (its install-dir

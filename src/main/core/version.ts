@@ -1,66 +1,68 @@
 /**
- * Lightweight semver comparison — enough to decide whether a store-installed
- * plugin already satisfies a bundle's version constraint, without pulling in
- * the full `semver` dependency.
+ * Version comparison & range checking, backed by the `semver` package instead of
+ * a hand-rolled comparator. Keeps the small API surface the rest of the app
+ * uses (`parseVersion`, `compareVersions`, `satisfiesRange`, …) — which are
+ * conservative-by-design in places (an unparseable token never forces a wrong
+ * choice) — while delegating the actual semantics to semver, notably its native
+ * prerelease handling for the update `next` track.
  */
+import semver from 'semver'
 
 export interface SemVer { major: number; minor: number; patch: number }
 
-/** Parse a dotted numeric version (`1.2.3`). `null` for anything else
- * (including pre-release suffixes — those are conservatively unmatched). */
+/** Parse a dotted numeric version into its parts. `null` when unt parseable
+ * (mirrors semver's strict three-part requirement, so `1.2` and junk → null). */
 export function parseVersion(v: string): SemVer | null {
-  const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(v.trim())
-  if (m === null) return null
-  return { major: Number(m[1]), minor: Number(m[2]), patch: Number(m[3]) }
+  const parsed = semver.parse(v.trim())
+  if (parsed === null) return null
+  return { major: parsed.major, minor: parsed.minor, patch: parsed.patch }
 }
 
-function cmp(a: SemVer, b: SemVer): number {
-  return a.major - b.major || a.minor - b.minor || a.patch - b.patch
-}
-
-/** Compare two dotted numeric versions. Returns -1 when `a < b`, 1 when
- * `a > b`, 0 when equal. An unparseable version (incl. pre-release suffixes)
- * compares as less than a parseable one (conservative); two unparseable ones
- * compare equal. Used for update checks and cross-version migration spans. */
+/** Compare two versions: -1 / 0 / 1. An unparseable version compares as less
+ * than a parseable one (conservative); two unparseable ones compare equal. */
 export function compareVersions(a: string, b: string): number {
   const pa = parseVersion(a)
   const pb = parseVersion(b)
   if (pa === null && pb === null) return 0
   if (pa === null) return -1
   if (pb === null) return 1
-  const c = cmp(pa, pb)
-  return c < 0 ? -1 : c > 0 ? 1 : 0
+  // Both parseable → safe to hand the original strings to semver.
+  return semver.compare(a.trim(), b.trim())
 }
 
-/** Whether `version` satisfies `spec` under the common operators
- * (`^ ~ > >= < <= =` and exact / `*` / `x`). A missing component in the
- * constraint counts as 0. Conservative by design: an unparseable version or an
- * unsupported operator simply returns `false` (fall back to downloading). */
+/** Compare versions by their full semver semantics, including prerelease
+ * handling (`2.0.0-beta.1` > `1.9.0`, but < `2.0.0`). Falls back to `0` when
+ * either side is unparseable as a real version. */
+export function compareVersionsLoose(a: string, b: string): number {
+  try {
+    return semver.compare(a.trim(), b.trim())
+  } catch {
+    return 0
+  }
+}
+
+/** Leading major component of a version (`2.0.0-beta` → 2), or `-1` unparseable. */
+export function majorOfVersion(v: string): number {
+  try {
+    return semver.major(v.trim())
+  } catch {
+    return -1
+  }
+}
+
+/**
+ * Whether `version` satisfies `spec` using semver's range semantics
+ * (`^ ~ > >= < <= =`, ranges, `||`, `x`). Conservative by design: an unparseable
+ * version or an unsupported spec simply returns `false` (callers fall back to a
+ * fetch rather than wrongly reusing the store copy). Blank / `*` / `x` /
+ * `latest` match anything.
+ */
 export function satisfiesRange(version: string, spec: string): boolean {
-  const v = parseVersion(version)
-  if (v === null) return false
   const s = spec.trim()
   if (s === '' || s === '*' || s === 'x' || s === 'latest') return true
-  let op = '='
-  let body = s
-  for (const candidate of ['>=', '<=', '>', '<', '^', '~', '=']) {
-    if (body.startsWith(candidate)) { op = candidate; body = body.slice(candidate.length).trim(); break }
-  }
-  const m = /^(\d+)(?:\.(\d+))?(?:\.(\d+))?/.exec(body)
-  if (m === null) return false
-  const want: SemVer = {
-    major: Number(m[1]),
-    minor: Number(m[2] ?? '0'),
-    patch: Number(m[3] ?? '0'),
-  }
-  const c = cmp(v, want)
-  switch (op) {
-    case '>': return c > 0
-    case '>=': return c >= 0
-    case '<': return c < 0
-    case '<=': return c <= 0
-    case '^': return v.major === want.major && c >= 0
-    case '~': return v.major === want.major && v.minor === want.minor && c >= 0
-    default: return c === 0
+  try {
+    return semver.satisfies(version.trim(), s)
+  } catch {
+    return false
   }
 }

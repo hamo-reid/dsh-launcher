@@ -34,22 +34,44 @@ afterAll(() => {
 })
 
 describe('checkForDshUpdate', () => {
-  const setLatest = (latest: string, versions: string[] = []): void => {
+  const setTags = (distTags: Record<string, string>, versions: string[] = []): void => {
     mockFetch.mockReset()
-    mockFetch.mockImplementation(() => Promise.resolve({ distTags: { latest }, versions }))
+    mockFetch.mockImplementation(() => Promise.resolve({ distTags, versions }))
   }
+  const setLatest = (latest: string, versions: string[] = []): void => setTags({ latest }, versions)
 
-  it('reports a newer release with majorBump', async () => {
+  it('reports a newer stable major', async () => {
     setLatest('2.0.0', ['1.0.0', '2.0.0'])
-    expect(await checkForDshUpdate('1.0.0')).toEqual({ current: '1.0.0', latest: '2.0.0', majorBump: true })
+    expect(await checkForDshUpdate('1.0.0')).toEqual({
+      current: '1.0.0', latest: { version: '2.0.0', majorBump: true },
+    })
   })
 
-  it('reports a patch bump without majorBump', async () => {
+  it('reports a stable patch bump without majorBump', async () => {
     setLatest('1.0.1', ['1.0.1'])
-    expect(await checkForDshUpdate('1.0.0')).toEqual({ current: '1.0.0', latest: '1.0.1', majorBump: false })
+    expect(await checkForDshUpdate('1.0.0')).toEqual({
+      current: '1.0.0', latest: { version: '1.0.1', majorBump: false },
+    })
   })
 
-  it('returns null when already up to date', async () => {
+  it('offers the next prerelease track when already on latest stable', async () => {
+    // current == latest stable, but a next prerelease exists → a next track only.
+    setTags({ latest: '1.0.0', next: '1.1.0-beta.1' }, ['1.0.0', '1.1.0-beta.1'])
+    expect(await checkForDshUpdate('1.0.0')).toEqual({
+      current: '1.0.0', next: { version: '1.1.0-beta.1', majorBump: false },
+    })
+  })
+
+  it('offers both tracks when both are newer', async () => {
+    setTags({ latest: '1.0.1', next: '2.0.0-beta.1' }, ['1.0.0', '1.0.1', '2.0.0-beta.1'])
+    expect(await checkForDshUpdate('1.0.0')).toEqual({
+      current: '1.0.0',
+      latest: { version: '1.0.1', majorBump: false },
+      next: { version: '2.0.0-beta.1', majorBump: true },
+    })
+  })
+
+  it('returns null when already on the latest stable (no next)', async () => {
     setLatest('1.0.0', ['1.0.0'])
     expect(await checkForDshUpdate('1.0.0')).toBeNull()
   })
@@ -59,14 +81,8 @@ describe('checkForDshUpdate', () => {
     expect(await checkForDshUpdate('')).toBeNull()
   })
 
-  it('treats an unparseable current as outdated (non-null)', async () => {
-    setLatest('2.0.0', ['2.0.0'])
-    expect(await checkForDshUpdate('dev')).not.toBeNull()
-  })
-
-  it('returns null when no latest is resolvable', async () => {
-    mockFetch.mockReset()
-    mockFetch.mockImplementation(() => Promise.resolve({ distTags: {}, versions: [] }))
+  it('returns null when no latest or next tag is resolvable', async () => {
+    setTags({}, [])
     expect(await checkForDshUpdate('1.0.0')).toBeNull()
   })
 })
