@@ -57,10 +57,13 @@ jobs:
         shell: pwsh
         run: Compress-Archive -Path release/win-unpacked -DestinationPath release/Dsh-Launcher-win-unpacked.zip
 
+      # Release 正文读取仓库内 docs/releases/<tag>.md（中英两份、中文在前），
+      # 与 annotated tag 的 message 用同一份，保证 GitHub tag 页与 Release 页一致。
+      # 若该版本没有 changelog 文件，退回自动生成，避免发版被卡死。
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             release/Dsh-Launcher-*.exe
             release/Dsh-Launcher-win-unpacked.zip
-          generate_release_notes: true
+          body_file: docs/releases/${{ github.ref_name }}.md
