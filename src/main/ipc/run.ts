@@ -112,9 +112,11 @@ export function registerRunIpc(): void {
         return fail('run.execLaunchResolve', { path: entry.execPath }, error instanceof Error ? error.message : String(error))
       }
       const { script, tsx, cwd } = launch
+      // dsh's HMR service (cordis-plugin-hmr) requires the Node `--expose-internals`
+      // flag; harmless for every other profile. Applies to both bundled & system node.
       const argv = tsx
-        ? ['--import', 'tsx/esm', script, '--profile', profile]
-        : [script, '--profile', profile]
+        ? ['--expose-internals', '--import', 'tsx/esm', script, '--profile', profile]
+        : ['--expose-internals', script, '--profile', profile]
       const { exe } = resolveNodeExe()
       // ELECTRON_RUN_AS_NODE is only meaningful for electron.exe; a system `node`
       // ignores it, so it can be set unconditionally.
