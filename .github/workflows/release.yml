@@ -57,15 +57,21 @@ jobs:
         shell: pwsh
         run: Compress-Archive -Path release/win-unpacked -DestinationPath release/Dsh-Launcher-win-unpacked.zip
 
-      # GitHub Release 正文读取仓库内 docs/releases/<tag>.md（中英两份、中文在前），
-      # 与 annotated tag 的 message 用同一份，保证 GitHub tag 页与 Release 页一致。
-      # body_file 必须用绝对路径（相对路径在 windows runner 上读取会失效 → 空 body）；
-      # update_release_body 让重跑可修正已有 release 的正文。
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            release/Dsh-Launcher-*.exe
-            release/Dsh-Launcher-win-unpacked.zip
-          body_file: ${{ github.workspace }}/docs/releases/${{ github.ref_name }}.md
-          update_release_body: true
+      # 用 gh CLI 创建 Release：正文从 docs/releases/<tag>.md 读取（中英、中文在前），
+      # 与 annotated tag 的 message 一致，保证 tag 页与 Release 页同步。
+      # gh 在 GitHub-hosted runner 预装；--notes-file 读文件可靠，且沿用 github.token。
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $notes = "docs/releases/$tag.md"
+          if (-not (Test-Path $notes)) { throw "changelog not found: $notes" }
+          gh release delete $tag --yes 2>$null
+          if ($LASTEXITCODE -ne 0) { Write-Host "no existing release to delete" }
+          $files = @()
+          $files += Get-ChildItem -Path release -Filter 'Dsh-Launcher-*.exe' | ForEach-Object { $_.FullName }
+          $files += (Get-Item 'release/Dsh-Launcher-win-unpacked.zip').FullName
+          gh release create $tag @files --notes-file $notes --title $tag
