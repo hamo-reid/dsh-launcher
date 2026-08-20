@@ -18,6 +18,8 @@ import type { IpcResult, RunEvent } from '../../shared/types.ts'
 export interface RuntimeState {
   profile: string
   child: ChildProcess
+  /** When the run started (epoch ms) — for the tray "running since" display. */
+  startedAt: number
 }
 
 let running: RuntimeState | null = null
@@ -36,6 +38,37 @@ const RUN_LOG_CAP = 512 * 1024
 /** The currently running child, for the window-close guard. */
 export function currentRun(): RuntimeState | null {
   return running
+}
+
+// ── run-state subscription (tray status monitoring) ──────────────────────────
+
+/** Listened to on every run start / stop (the tray updates its tooltip live). */
+export type RunStateListener = (state: RuntimeState | null) => void
+const runListeners = new Set<RunStateListener>()
+
+function notifyRunState(): void {
+  const state = running
+  for (const listener of runListeners) listener(state)
+}
+
+/** Subscribe to run-state changes (start → running state, stop → `null`). The
+ * callback fires immediately with the current state, then on every change.
+ * Returns an unsubscribe. */
+export function subscribeRunState(listener: RunStateListener): () => void {
+  runListeners.add(listener)
+  listener(running)
+  return () => { runListeners.delete(listener) }
+}
+
+/** Human-readable run duration from a `startedAt` epoch, e.g. `3 分 12 秒`. */
+export function formatRunDuration(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000))
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = total % 60
+  if (h > 0) return `${h} 时 ${m} 分 ${s} 秒`
+  if (m > 0) return `${m} 分 ${s} 秒`
+  return `${s} 秒`
 }
 
 /**
@@ -58,7 +91,10 @@ export function terminateAndClear(child: ChildProcess): void {
   } else {
     child.kill()
   }
-  if (running !== null && running.child === child) running = null
+  if (running !== null && running.child === child) {
+    running = null
+    notifyRunState()
+  }
 }
 
 function broadcastRun(event: RunEvent): void {
@@ -121,6 +157,7 @@ export function registerRunIpc(): void {
         logger.info(`run exited: ${running?.profile ?? '?'} (code ${String(code)}${signal ? `, sig ${signal}` : ''})`)
         broadcastRun({ type: 'exited', code, signal, command: runCommand })
         running = null
+        notifyRunState()
       }
       // The process stays owned by the app in BOTH modes (so it can be stopped
       // and its state tracked). Only the I/O destination differs:
@@ -140,7 +177,8 @@ export function registerRunIpc(): void {
             windowsHide: true,
           })
       logger.info(`run started: ${profile} (${mode}, ${entry.name})`)
-      running = { profile, child }
+      running = { profile, child, startedAt: Date.now() }
+      notifyRunState()
       if (shellMode) {
         child.on('error', () => finish(1, null))
       } else {

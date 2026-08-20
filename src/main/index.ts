@@ -4,7 +4,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, Tray } from 'electron'
 import { join } from 'node:path'
 import os from 'node:os'
-import { currentRun, registerRunIpc, terminateAndClear, type RuntimeState } from './ipc/run.ts'
+import { currentRun, formatRunDuration, registerRunIpc, subscribeRunState, terminateAndClear, type RuntimeState } from './ipc/run.ts'
 import { registerProfileIpc } from './ipc/profile.ts'
 import { registerHomeIpc } from './ipc/home.ts'
 import { registerPluginsIpc } from './ipc/plugins.ts'
@@ -53,10 +53,18 @@ function createWindow(): void {
     win.show()
     win.focus()
   }
-  const buildTrayMenu = (): void => {
+  // Build the tray context menu. On Windows we can NOT rely on `setContextMenu`,
+  // which would let the OS auto-show a STALE cached copy and swallow the
+  // `right-click` event. Instead the menu is built fresh and popped up on every
+  // right-click, so the status line always reflects `currentRun()` at that moment.
+  const showTrayMenu = (): void => {
     const running = currentRun()
-    tray?.setContextMenu(Menu.buildFromTemplate([
-      { label: running === null ? '状态：空闲' : `运行中：${running.profile}`, enabled: false },
+    // 状态监控：右击瞬间取最新状态；运行中追加已运行时长。
+    const status = running === null
+      ? '状态：空闲'
+      : `运行中：${running.profile} · ${formatRunDuration(Date.now() - running.startedAt)}`
+    Menu.buildFromTemplate([
+      { label: status, enabled: false },
       { type: 'separator' },
       { label: '显示主窗口', click: () => showWindow() },
       { label: '隐藏到托盘', click: () => win.hide() },
@@ -69,13 +77,21 @@ function createWindow(): void {
           app.quit()
         },
       },
-    ]))
+    ]).popup()
   }
   tray = new Tray(nativeImage.createFromPath(join(app.getAppPath(), 'build', 'icon.ico')))
   tray.setToolTip('DSH Launcher')
-  buildTrayMenu()
+  // No persistent context menu on Windows — see `showTrayMenu` above.
+  tray.setContextMenu(null)
   tray.on('click', () => { if (win.isVisible()) win.hide(); else showWindow() })
-  tray.on('right-click', buildTrayMenu)
+  tray.on('right-click', showTrayMenu)
+
+  // 实时状态监控（tooltip 通道）：run 启动/停止时立即更新托盘悬浮提示，无需等右击。
+  const updateTrayState = (state: RuntimeState | null): void => {
+    if (tray === null) return
+    tray.setToolTip(state === null ? 'DSH Launcher' : `运行中：${state.profile}`)
+  }
+  subscribeRunState(updateTrayState)
 
   // Every browsing link goes to the system default browser — never open a bare
   // Electron window (window.open / target=_blank) or navigate the app away to an
