@@ -31,6 +31,62 @@ export function baseLaunch(execPath: string): string {
   return execPath
 }
 
+/** The exact node invocation to launch a dsh with the app's BUNDLED Node
+ * (`process.execPath` + `ELECTRON_RUN_AS_NODE`) — never a system `node` nor a
+ * shell. A source checkout runs through `tsx`; a published install runs its
+ * `bin` entry directly; a raw `.js` target runs as-is; anything else throws
+ * (callers report it as `dsh-broken` / `run.execLaunchResolve`). The returned
+ * script is verified to exist so this doubles as a "can it launch?" probe. */
+export interface LaunchEntry {
+  script: string
+  /** Run the script via node's `--import tsx/esm` loader in the child cwd. */
+  tsx: boolean
+  /** Child working dir — where the tsx loader / module graph resolves from. */
+  cwd: string
+}
+
+export function resolveLaunchEntry(execPath: string): LaunchEntry {
+  const resolved = resolveDshPackage(execPath)
+  if (resolved !== undefined) {
+    if (resolved.kind === 'source') {
+      const script = join(resolved.root, 'src', 'bin.ts')
+      if (!existsSync(script)) throw new Error(`源码签出缺少入口：${script}`)
+      return { script, tsx: true, cwd: resolved.root }
+    }
+    const bin = readPackageBin(resolved.root)
+    if (bin === undefined) throw new Error(`dsh 包缺少 bin 入口：${resolved.root}`)
+    const script = join(resolved.root, bin)
+    if (!existsSync(script)) throw new Error(`dsh 包入口不存在：${script}`)
+    return { script, tsx: false, cwd: resolved.root }
+  }
+  if (isScriptFile(execPath)) return { script: execPath, tsx: false, cwd: dirname(execPath) }
+  throw new Error(`无法解析 dsh 启动入口：${execPath}`)
+}
+
+/** The `bin` file of a published dsh package (string, or the `dsh` entry of an
+ * object), normalized for joining against the package root. */
+function readPackageBin(pkgRoot: string): string | undefined {
+  try {
+    const manifest = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8')) as {
+      bin?: string | Record<string, string>
+    }
+    if (typeof manifest.bin === 'string') return manifest.bin
+    if (manifest.bin !== null && typeof manifest.bin === 'object') {
+      const value = manifest.bin['dsh'] ?? Object.values(manifest.bin)[0]
+      return typeof value === 'string' ? value : undefined
+    }
+    return undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Whether `path` is an existing `.js` / `.cjs` / `.mjs` file (bundle-node-runnable). */
+function isScriptFile(path: string): boolean {
+  if (!existsSync(path)) return false
+  try { return statSync(path).isFile() && /\.(?:js|cjs|mjs)$/i.test(path) } catch { return false }
+}
+
 /** Standard home for auto-detected installs. */
 export function defaultHome(): string {
   return join(os.homedir(), '.dsh')
@@ -345,13 +401,27 @@ export async function installOfficialDsh(
     created = true
 
     emit({ kind: 'install', state: 'running' })
-    const result = await runPnpm(target, ['add', `@deepseek-ai/dsh@${resolved}`])
+    // 网络差时让 pnpm 重试，避免一次抖动就产生残缺安装。
+    const result = await runPnpm(target, [
+      'add', `@deepseek-ai/dsh@${resolved}`,
+      '--fetch-retries=3', '--fetch-retry-maxtimeout=60000',
+    ])
     if (!result.ok) {
       emit({ kind: 'install', state: 'error', detail: result.text })
       throw new Error(`安装官方 dsh 失败：${result.text}`)
     }
 
     const execPath = pickBinCandidate(target)
+    // 装后可用性冒烟（浅）：确认能解析出捆绑 node 可直启的入口。bin/入口
+    // 一旦缺失（网络残装），本次安装判失败、给出可读错误，避免留下一个
+    // “假装成功”却没法用的残缺 dsh，也便于用户走「重新安装」修复。
+    try {
+      resolveLaunchEntry(execPath)
+    } catch (probeError) {
+      const detail = probeError instanceof Error ? probeError.message : String(probeError)
+      emit({ kind: 'install', state: 'error', detail })
+      throw new Error(`官方 dsh 安装不完整：${detail}`)
+    }
     const installedVersion = readInstalledVersion(join(target, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'))
     emit({ kind: 'install', state: 'ok', version: installedVersion })
     return { name, version: installedVersion, execPath, home, dir: target }

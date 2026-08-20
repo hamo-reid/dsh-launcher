@@ -133,7 +133,7 @@ export interface WindowApi {
     setActive: (id: string) => Promise<IpcResult<boolean>>
     setHome: (id: string, home: string) => Promise<IpcResult<boolean>>
     setProfileDir: (id: string, dir: string) => Promise<IpcResult<boolean>>
-    installOfficial: (options?: { versionDir?: string; name?: string; version?: string }) => Promise<IpcResult<DshInstallResult>>
+    installOfficial: (options?: { versionDir?: string; name?: string; version?: string; force?: boolean }) => Promise<IpcResult<DshInstallResult>>
     /** Streamed per-step progress of an official install (for the dialog). Returns an unsubscribe fn. */
     onInstallEvent: (callback: (step: DshInstallStep) => void) => () => void
     /** Published `@deepseek-ai/dsh` versions + dist-tags (for the official-install picker). */

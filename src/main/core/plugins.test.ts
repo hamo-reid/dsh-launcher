@@ -71,7 +71,7 @@ describe('store basics', () => {
 
   it('addPlugin/removePlugin hand the source to pnpm', async () => {
     await addPlugin(store(), 'foo@^1')
-    expect(runPnpm).toHaveBeenCalledWith(store(), ['add', 'foo@^1'])
+    expect(runPnpm).toHaveBeenCalledWith(store(), ['add', 'foo@^1', '--fetch-retries=3', '--fetch-retry-maxtimeout=60000'])
     await removePlugin(store(), 'foo')
     expect(runPnpm).toHaveBeenCalledWith(store(), ['remove', 'foo'])
   })

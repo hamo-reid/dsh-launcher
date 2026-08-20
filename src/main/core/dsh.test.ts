@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path'
 import {
   baseLaunch, defaultHome, detectExecutables, discoverVersionRepo, entryFromPath,
   existsExecutable, installDir, isDeletableDsh, isManagedInstall, readVersionFromPath,
-  resolveDshPackage, type DshEntry,
+  resolveDshPackage, resolveLaunchEntry, type DshEntry,
 } from './dsh.ts'
 
 let root: string
@@ -240,5 +240,47 @@ describe('entryFromPath', () => {
 
   it('throws for a missing path', async () => {
     await expect(entryFromPath(join(root, 'nope'))).rejects.toThrow(/path not found/)
+  })
+})
+
+describe('resolveLaunchEntry', () => {
+  it('maps a published install to its bin script (bundle node runnable)', () => {
+    const pkg = writeJson('launch/pub/node_modules/@deepseek-ai/dsh', {
+      name: '@deepseek-ai/dsh', version: '1', bin: { dsh: 'lib/cli.js' },
+    })
+    mkdirSync(join(pkg, 'lib'), { recursive: true })
+    writeFileSync(join(pkg, 'lib', 'cli.js'), '')
+    const shim = join(root, 'launch', 'pub', 'node_modules', '.bin', 'dsh.cmd')
+    mkdirSync(join(root, 'launch', 'pub', 'node_modules', '.bin'), { recursive: true })
+    writeFileSync(shim, '@echo off')
+
+    const e = resolveLaunchEntry(shim)
+    expect(e.tsx).toBe(false)
+    expect(e.script).toBe(join(pkg, 'lib', 'cli.js'))
+    expect(e.cwd).toBe(pkg)
+  })
+
+  it('maps a source checkout through the tsx loader', () => {
+    const cli = writeJson('launch/src/apps/cli', { name: '@deepseek-ai/dsh', version: '1' })
+    mkdirSync(join(cli, 'src'), { recursive: true })
+    writeFileSync(join(cli, 'src', 'bin.ts'), '')
+    const e = resolveLaunchEntry(cli)
+    expect(e.tsx).toBe(true)
+    expect(e.script).toBe(join(cli, 'src', 'bin.ts'))
+    expect(e.cwd).toBe(cli)
+  })
+
+  it('falls back to a raw .js file as-is', () => {
+    const file = join(dir('launch/raw'), 'cli.js')
+    writeFileSync(file, '')
+    const e = resolveLaunchEntry(file)
+    expect(e.tsx).toBe(false)
+    expect(e.script).toBe(file)
+  })
+
+  it('throws when no bundle-node-friendly entry can be mapped', () => {
+    const bad = join(dir('launch/nopkg'), 'dsh.bin')
+    writeFileSync(bad, '')
+    expect(() => resolveLaunchEntry(bad)).toThrow(/无法解析 dsh 启动入口/)
   })
 })

@@ -42,9 +42,13 @@ export default function DshSection() {
   const [profileDirInput, setProfileDirInput] = useState('')
   // Exec paths that no longer exist on disk (stale = lacks the remove-guard).
   const [stalePaths, setStalePaths] = useState<Set<string>>(new Set())
+  // Exec paths whose launch entry is unresolvable (incomplete install → repairable).
+  const [brokenPaths, setBrokenPaths] = useState<Set<string>>(new Set())
 
   const [officialOpen, setOfficialOpen] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
+  // 「修复/重新安装」目标：预填官方安装弹窗并强制覆盖（force 走删除同目录重装）。
+  const [repairTarget, setRepairTarget] = useState<{ name: string } | null>(null)
 
   // 重命名弹窗（已注册 DSH）
   const [renameTarget, setRenameTarget] = useState<{ id: string; name: string } | null>(null)
@@ -60,9 +64,13 @@ export default function DshSection() {
     setHomeInput(active?.home ?? '')
     setProfileDirInput(active?.profilesDir ?? '')
     setLoading(false)
-    // Track which dsh executables no longer exist on disk, for stale marking.
+    // Track which dsh executables no longer exist (stale) or resolve to an
+    // unresolvable launch entry (broken / incomplete → repairable).
     const h = await window.api.settings.checkHealth()
-    if (h.ok) setStalePaths(new Set(h.value.filter(x => x.kind === 'dsh-exec').map(x => x.path ?? '')))
+    if (h.ok) {
+      setStalePaths(new Set(h.value.filter(x => x.kind === 'dsh-exec').map(x => x.path ?? '')))
+      setBrokenPaths(new Set(h.value.filter(x => x.kind === 'dsh-broken').map(x => x.path ?? '')))
+    }
   }
 
   useEffect(() => { void refresh() }, [])
@@ -99,10 +107,15 @@ export default function DshSection() {
   }
 
   const isStale = (d: DshEntry): boolean => d.execPath !== '' && stalePaths.has(d.execPath)
+  const isBroken = (d: DshEntry): boolean => d.execPath !== '' && brokenPaths.has(d.execPath)
 
   const actionsFor = (d: DshEntry): MenuAction[] => [
     { key: 'rename', label: t('dsh.action.rename') },
     { key: 'activate', label: t('dsh.action.setCurrent') },
+    // 残缺（安装不完整）的 app 托管安装可「重新安装」修复。
+    ...(isBroken(d) && d.managed === true
+      ? [{ key: 'repair', label: t('dsh.action.repair') } as MenuAction]
+      : []),
     // 失效条目（磁盘上可执行已不存在）允许脱管清理。
     ...(isStale(d)
       ? [{ key: 'remove-stale', label: t('dsh.action.removeStale'), danger: true } as MenuAction]
@@ -116,6 +129,7 @@ export default function DshSection() {
   const handleAction = (d: DshEntry, key: string): void => {
     if (key === 'rename') setRenameTarget({ id: d.id, name: d.name })
     else if (key === 'activate') void activate(d.id, d.name)
+    else if (key === 'repair') setRepairTarget({ name: d.name })
     else if (key === 'remove') setRemoveDsh({ id: d.id, name: d.name })
     else if (key === 'remove-stale') {
       Modal.confirm({
@@ -166,6 +180,7 @@ export default function DshSection() {
                   title={d.dir ?? d.execPath}
                 >
                   {d.dir ?? d.execPath}
+                  {isBroken(d) && <Tag color="error" style={{ marginInlineStart: 6 }}>{t('dsh.broken')}</Tag>}
                   {isStale(d) && <Tag color="error" style={{ marginInlineStart: 6 }}>{t('dsh.stale')}</Tag>}
                 </span>
               )}
@@ -228,7 +243,12 @@ export default function DshSection() {
             : <EmptyState title={t('dsh.select')} description={t('dsh.selectDesc')} />)}
     </AppShell>
 
-    <OfficialInstallModal open={officialOpen} onClose={() => setOfficialOpen(false)} onDone={() => void refresh()} />
+    <OfficialInstallModal
+      open={officialOpen || repairTarget !== null}
+      onClose={() => { setOfficialOpen(false); setRepairTarget(null) }}
+      onDone={() => void refresh()}
+      preset={repairTarget === null ? undefined : { name: repairTarget.name, force: true }}
+    />
     <AddDshModal open={addOpen} onClose={() => setAddOpen(false)} onDone={() => void refresh()} />
     <RenameDshModal target={renameTarget} onClose={() => setRenameTarget(null)} onDone={() => void refresh()} />
     <DshRemoveModal dsh={removeDsh} onClose={() => setRemoveDsh(null)} onRemoved={() => void refresh()} />

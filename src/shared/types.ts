@@ -120,6 +120,8 @@ export interface DshEntry {
 export type HealthIssueKind =
   /** A registered dsh's executable no longer exists on disk. */
   | 'dsh-exec'
+  /** The dsh executable exists but its launch entry is unresolvable (incomplete install). */
+  | 'dsh-broken'
   /** No plugin store location is configured. */
   | 'store-unconfigured'
   /** The plugin store dir is configured but does not exist on disk. */

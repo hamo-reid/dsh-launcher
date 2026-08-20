@@ -171,6 +171,8 @@ interface OfficialInstallModalProps {
   open: boolean
   onClose: () => void
   onDone: () => void | Promise<void>
+  /** Repair mode: prefill the install name and force-overwrite a broken install. */
+  preset?: { name?: string; force?: boolean }
 }
 export function OfficialInstallModal(p: OfficialInstallModalProps): JSX.Element {
   const { t } = useTranslation()
@@ -221,6 +223,7 @@ export function OfficialInstallModal(p: OfficialInstallModalProps): JSX.Element 
     setVersionDir('')
     setPkgInfo(null)
     setVersion('')
+    setInstallName(p.preset?.name ?? 'official')
     setVersionsLoading(true)
     let alive = true
     void (async () => {
@@ -253,6 +256,8 @@ export function OfficialInstallModal(p: OfficialInstallModalProps): JSX.Element 
         // (version ?? '')：allowClear 清除后 Select 的 onChange 会传 undefined，
         // 直接 trim() 会抛 TypeError。
         version: (version ?? '').trim() || undefined,
+        // 修复/重装模式强制覆盖同名安装（主进程先删再装）。
+        force: p.preset?.force === true,
       })
       if (!r.ok) { setError(apiErrorText(r)); setDone(true); return }
       setResult(r.value)
@@ -270,7 +275,7 @@ export function OfficialInstallModal(p: OfficialInstallModalProps): JSX.Element 
 
   return (
     <>
-    <Modal title={t('dsh.official.title')} open={p.open}
+    <Modal title={p.preset?.force === true ? t('dsh.official.repairTitle') : t('dsh.official.title')} open={p.open}
       onCancel={installing ? undefined : p.onClose}
       closable={!installing} maskClosable={!installing} width={MODAL.wide}
       footer={installing

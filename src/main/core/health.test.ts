@@ -17,7 +17,15 @@ function dir(...segments: string[]): string {
   return p
 }
 
-beforeAll(() => { root = mkdtempSync(join(tmpdir(), 'pm-health-')) })
+beforeAll(() => {
+  root = mkdtempSync(join(tmpdir(), 'pm-health-'))
+  // A resolvable published @deepseek-ai/dsh above every test tree, so each
+  // healthy shim maps to a valid bundle-node entry (not flagged "broken").
+  const pkg = join(root, 'node_modules', '@deepseek-ai', 'dsh')
+  mkdirSync(join(pkg, 'lib'), { recursive: true })
+  writeFileSync(join(pkg, 'lib', 'bin.js'), '')
+  writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: '1', bin: { dsh: 'lib/bin.js' } }))
+})
 afterAll(() => rmSync(root, { recursive: true, force: true }))
 
 const entry = (execPath: string, home: string): DshEntry =>
@@ -75,5 +83,19 @@ describe('checkHealth', () => {
     // package.json lists `gone`, but node_modules/gone is absent.
     expect(checkHealth([entry(shim, dir('dsh5/home'))], store))
       .toContainEqual({ kind: 'plugin-missing', label: 'gone', path: join(store, 'node_modules', 'gone'), missing: true })
+  })
+
+  it('flags a dsh whose launch entry is broken (incomplete install)', () => {
+    const shim = join(dir('bd/.bin'), 'dsh.cmd')
+    writeFileSync(shim, '@echo off')
+    // This tree owns a @deepseek-ai/dsh package whose bin entry file is missing —
+    // resolves before the shared root package → flagged broken.
+    const brokenPkg = join(root, 'bd', 'node_modules', '@deepseek-ai', 'dsh')
+    mkdirSync(brokenPkg, { recursive: true })
+    writeFileSync(join(brokenPkg, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: '1', bin: { dsh: 'lib/nope.js' } }))
+    const store = dir('sbd')
+    writeFileSync(join(store, 'package.json'), JSON.stringify({ name: 'store', private: true, dependencies: {} }))
+    expect(checkHealth([entry(shim, dir('bd/home'))], store))
+      .toContainEqual({ kind: 'dsh-broken', label: 'd', path: shim, missing: false })
   })
 })

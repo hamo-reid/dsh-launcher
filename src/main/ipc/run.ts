@@ -6,7 +6,7 @@ import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { baseLaunch, existsExecutable, resolveInstallAnchor } from '../core/dsh.ts'
+import { existsExecutable, resolveLaunchEntry, type LaunchEntry } from '../core/dsh.ts'
 import { activeDshEntry } from '../core/appState.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
 import { logger } from '../core/logger.ts'
@@ -51,13 +51,19 @@ function broadcastRun(event: RunEvent): void {
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send('run:event', event)
 }
 
-/** Open a visible PowerShell window running `command`, kept as a direct child
- * (via `cmd /c start /wait`) so the app can still abort it with taskkill /T.
- * The command lives in a temp .ps1 to avoid cmd's quote-munging on the nested
- * dsh invocation. */
-function launchShellWindow(command: string, env: NodeJS.ProcessEnv, cwd: string): ChildProcess {
+/** Open a visible PowerShell window running the bundled Node with `argv` as the
+ * dsh launch (kept as a `cmd /c start /wait` child so the app can still abort it
+ * with taskkill /T). Force UTF-8 on the child console + pipeline so dsh's UTF-8
+ * output never gets re-encoded to the system codepage (GBK) → mojibake. */
+function launchShellWindow(argv: string[], env: NodeJS.ProcessEnv, cwd: string): ChildProcess {
   const scriptPath = join(app.getPath('userData'), 'dsh-launch.ps1')
-  const script = `$ErrorActionPreference = 'Continue'\n& ${command}\n`
+  const psQuote = (raw: string): string => `'${raw.replace(/'/g, "''")}'`
+  const script = [
+    "chcp 65001 > $null",
+    '$ErrorActionPreference = \'Continue\'',
+    '[Console]::OutputEncoding=[Console]::InputEncoding=[Text.UTF8Encoding]::new()',
+    `& ${psQuote(process.execPath)} ${argv.map(psQuote).join(' ')}`,
+  ].join('\n')
   writeFileSync(scriptPath, script)
   return spawn('cmd.exe', ['/c', 'start', '', '/wait', 'powershell.exe', '-NoExit', '-ExecutionPolicy', 'Bypass', '-File', scriptPath], { windowsHide: false, env, cwd })
 }
@@ -69,13 +75,22 @@ export function registerRunIpc(): void {
     if (entry === undefined) return fail(E.needActiveDsh)
     if (!existsExecutable(entry.execPath)) return fail('run.execMissing', { path: entry.execPath })
     try {
-      const command = `${baseLaunch(entry.execPath)} --profile ${profile}`
-      const env = { ...process.env, DSH_HOME: entry.home }
-      // Node's `--import tsx` resolves `tsx` from the child's cwd; anchor the
-      // child at the dsh install root so a source checkout finds its tooling.
-      const cwd = resolveInstallAnchor(entry.execPath) ?? entry.home
+      // Launch with the app's OWN bundled Node (never a system `node`), running
+      // the dsh entry directly — no cmd/powershell command string, so there is
+      // no PATH-node dependency and the output pipe stays UTF-8.
+      let launch: LaunchEntry
+      try {
+        launch = resolveLaunchEntry(entry.execPath)
+      } catch (error) {
+        return fail('run.execLaunchResolve', { path: entry.execPath }, error instanceof Error ? error.message : String(error))
+      }
+      const { script, tsx, cwd } = launch
+      const argv = tsx
+        ? ['--import', 'tsx/esm', script, '--profile', profile]
+        : [script, '--profile', profile]
+      const env = { ...process.env, DSH_HOME: entry.home, ELECTRON_RUN_AS_NODE: '1' }
       const shellMode = mode === 'shell'
-      runCommand = command
+      runCommand = argv.join(' ')
       let exited = false
       // A spawn failure fires 'error' (never 'close'); both must end the run once.
       const finish = (code: number | null, signal: NodeJS.Signals | null): void => {
@@ -85,7 +100,7 @@ export function registerRunIpc(): void {
         if (intentionalStop) { code = 0; signal = null }
         intentionalStop = false
         logger.info(`run exited: ${running?.profile ?? '?'} (code ${String(code)}${signal ? `, sig ${signal}` : ''})`)
-        broadcastRun({ type: 'exited', code, signal, command })
+        broadcastRun({ type: 'exited', code, signal, command: runCommand })
         running = null
       }
       // The process stays owned by the app in BOTH modes (so it can be stopped
@@ -94,15 +109,16 @@ export function registerRunIpc(): void {
       //   shell → attach to a visible OS terminal window (new console)
       const child = shellMode
         ? (process.platform === 'win32'
-            ? launchShellWindow(command, env, cwd)
-            : spawn(command, { shell: true, detached: true, stdio: 'inherit', env, cwd }))
-        : spawn(command, {
-            shell: process.platform === 'win32',
+            ? launchShellWindow(argv, env, cwd)
+            : spawn(process.execPath, argv, { shell: false, detached: true, stdio: 'inherit', env, cwd }))
+        : spawn(process.execPath, argv, {
+            shell: false,
             // Keep stdin open as a pipe: a /dev/null stdin makes an interactive
             // CLI read EOF and exit immediately on launch.
             stdio: ['pipe', 'pipe', 'pipe'],
             env,
             cwd,
+            windowsHide: true,
           })
       logger.info(`run started: ${profile} (${mode}, ${entry.name})`)
       running = { profile, child }
@@ -114,9 +130,10 @@ export function registerRunIpc(): void {
         runLog = homeBanner
         broadcastRun({ type: 'output', line: homeBanner })
         const onOutput = (data: Buffer): void => {
-          runLog += String(data)
+          const line = data.toString('utf8')
+          runLog += line
           if (runLog.length > RUN_LOG_CAP) runLog = runLog.slice(-RUN_LOG_CAP)
-          broadcastRun({ type: 'output', line: String(data) })
+          broadcastRun({ type: 'output', line })
         }
         child.stdout?.on('data', onOutput)
         child.stderr?.on('data', onOutput)

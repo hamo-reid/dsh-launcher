@@ -269,7 +269,7 @@ export function registerDshIpc(): void {
     }
   })
 
-  ipcMain.handle('dsh:installOfficial', async (event, options?: { versionDir?: string; name?: string; version?: string }): Promise<IpcResult<DshInstallResult>> => {
+  ipcMain.handle('dsh:installOfficial', async (event, options?: { versionDir?: string; name?: string; version?: string; force?: boolean }): Promise<IpcResult<DshInstallResult>> => {
     try {
       const currentRoot = dshVersionDir()
       const requested = options?.versionDir?.trim()
@@ -280,8 +280,16 @@ export function registerDshIpc(): void {
         saveSettings({ ...loadSettings(), dshVersionDir: versionDir })
       }
       const name = safeVersionName(options?.name)
-      // 重装同名冲突：沿用现有弹窗报错（不并入进度展示），避免覆盖既有实例。
-      if (versionExists(join(versionDir, name))) return fail('dsh.versionExists', { name })
+      const target = join(versionDir, name)
+      if (versionExists(target)) {
+        // 修复/强制重装：先清掉残缺实例再装（home 由 installOfficialDsh 兜底清）。
+        // 非强制则沿用弹窗报错，避免误覆盖一个正常实例。
+        if (options?.force === true) {
+          await rm(target, { recursive: true, force: true }).catch(() => {})
+        } else {
+          return fail('dsh.versionExists', { name })
+        }
+      }
       const info = await installOfficialDsh(versionDir, name, options?.version,
         step => event.sender.send('install:event', step))
       const { dshes } = readDshState()

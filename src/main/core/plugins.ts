@@ -67,7 +67,8 @@ export function listPlugins(dir: string): { name: string; version: string }[] {
 export async function addPlugin(dir: string, source: string): Promise<PnpmResult> {
   if (dir === '') return { ok: false, text: '未配置插件保存位置 —— 请在「设置」中指定' }
   initStore(dir)
-  const result = await runPnpm(dir, ['add', source])
+  // 网络差时重试 fetch，避免一次抖动就得到一个残缺安装。
+  const result = await runPnpm(dir, ['add', source, '--fetch-retries=3', '--fetch-retry-maxtimeout=60000'])
   if (result.ok) logger.info(`plugin store add: ${source}`)
   return result
 }

@@ -4,9 +4,15 @@
 
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { existsExecutable } from './dsh.ts'
+import { existsExecutable, resolveLaunchEntry } from './dsh.ts'
 import { listPlugins } from './plugins.ts'
 import type { DshEntry, HealthIssue } from '../../shared/types.ts'
+
+/** True when a dsh's bundle-node launch entry can't be resolved — the structural
+ * sign of an incomplete install. Never runs the process, just maps the entry. */
+function launchEntryBroken(execPath: string): boolean {
+  try { resolveLaunchEntry(execPath); return false } catch { return true }
+}
 
 /** Flag every registered dsh (missing executable, missing home) and every store
  * plugin whose node_modules dir is gone, plus an unconfigured/missing store.
@@ -20,6 +26,13 @@ export function checkHealth(dshes: DshEntry[], storeDir: string): HealthIssue[] 
     // every writer lazily mkdirs it, and run:start anchors cwd on the package.
     if (!existsExecutable(d.execPath)) {
       issues.push({ kind: 'dsh-exec', label: d.name, path: d.execPath, missing: true })
+      continue
+    }
+    // A "broken" install leaves the bin file present but an unresolvable launch
+    // entry (network-shell install missing deps/entry). `resolveLaunchEntry`
+    // throws when the bundle-node entry can't be mapped → flag it for repair.
+    if (launchEntryBroken(d.execPath)) {
+      issues.push({ kind: 'dsh-broken', label: d.name, path: d.execPath, missing: false })
     }
   }
 
