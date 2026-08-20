@@ -5,9 +5,13 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   ComboPlugin,
+  DshDataImportResult,
+  DshDataManifest,
   DshEntry,
   DshInstallResult,
   DshInstallStep,
+  DshUpdateInfo,
+  DshUpdateResult,
   HealthIssue,
   ImportProfileResult,
   ImportStep,
@@ -49,6 +53,8 @@ const api = {
     ipcRenderer.invoke('profile:importFromFile'),
   importProfile: (json: string, name?: string, forceDsh?: boolean, localSource?: string): Promise<IpcResult<ImportProfileResult>> =>
     ipcRenderer.invoke('profile:import', json, name, forceDsh, localSource),
+  mirrorProfile: (sourceDshId: string, targetDshId: string, profileName: string): Promise<IpcResult<ImportProfileResult>> =>
+    ipcRenderer.invoke('profile:mirror', sourceDshId, targetDshId, profileName),
   onImportEvent: (callback: (step: ImportStep) => void): (() => void) => {
     const handler = (_: unknown, step: ImportStep): void => callback(step)
     ipcRenderer.on('import:event', handler)
@@ -207,6 +213,21 @@ const api = {
       ipcRenderer.invoke('dsh:rename', id, name),
     revealDir: (id: string): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('dsh:revealDir', id),
+    checkUpdate: (id: string): Promise<IpcResult<DshUpdateInfo | null>> =>
+      ipcRenderer.invoke('dsh:checkUpdate', id),
+    update: (id: string, opts?: { version?: string; ackMajorRisk?: boolean }): Promise<IpcResult<DshUpdateResult>> =>
+      ipcRenderer.invoke('dsh:update', id, opts),
+  },
+
+  data: {
+    export: (id: string): Promise<IpcResult<string>> =>
+      ipcRenderer.invoke('data:export', id),
+    inspectImport: (): Promise<IpcResult<{ file: string; manifest: DshDataManifest | null }>> =>
+      ipcRenderer.invoke('data:inspectImport'),
+    import: (id: string, file: string, forceDsh?: boolean): Promise<IpcResult<DshDataImportResult>> =>
+      ipcRenderer.invoke('data:import', id, file, forceDsh),
+    mirror: (sourceId: string, targetId: string): Promise<IpcResult<DshDataImportResult>> =>
+      ipcRenderer.invoke('data:mirror', sourceId, targetId),
   },
 
   logs: {

@@ -12,7 +12,7 @@ import FieldLabel from '../components/FieldLabel.tsx'
 import ConfigRow from '../components/ConfigRow.tsx'
 import Panel from '../components/Panel.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
-import { AddDshModal, DshRemoveModal, OfficialInstallModal, RenameDshModal } from './DshModals.tsx'
+import { AddDshModal, DataMirrorModal, DshRemoveModal, OfficialInstallModal, RenameDshModal, UpdateDshModal } from './DshModals.tsx'
 
 interface DshEntry {
   id: string
@@ -54,6 +54,10 @@ export default function DshSection() {
   const [renameTarget, setRenameTarget] = useState<{ id: string; name: string } | null>(null)
   // 移除弹窗（可选删除文件）
   const [removeDsh, setRemoveDsh] = useState<{ id: string; name: string } | null>(null)
+  // 版本更新弹窗（app 管理的 DSH）
+  const [updateDsh, setUpdateDsh] = useState<{ id: string; name: string } | null>(null)
+  // 数据迁移弹窗（把当前 DSH 的 home 数据迁移到另一 DSH）
+  const [mirrorOpen, setMirrorOpen] = useState(false)
 
   const refresh = async (): Promise<void> => {
     const r = await window.api.dsh.list()
@@ -112,6 +116,10 @@ export default function DshSection() {
   const actionsFor = (d: DshEntry): MenuAction[] => [
     { key: 'rename', label: t('dsh.action.rename') },
     { key: 'activate', label: t('dsh.action.setCurrent') },
+    // app 管理的 dsh 可原地升级版本（checkUpdate / update）。
+    ...(d.managed === true
+      ? [{ key: 'update', label: t('dsh.action.update') } as MenuAction]
+      : []),
     // 残缺（安装不完整）的 app 托管安装可「重新安装」修复。
     ...(isBroken(d) && d.managed === true
       ? [{ key: 'repair', label: t('dsh.action.repair') } as MenuAction]
@@ -129,6 +137,7 @@ export default function DshSection() {
   const handleAction = (d: DshEntry, key: string): void => {
     if (key === 'rename') setRenameTarget({ id: d.id, name: d.name })
     else if (key === 'activate') void activate(d.id, d.name)
+    else if (key === 'update') setUpdateDsh({ id: d.id, name: d.name })
     else if (key === 'repair') setRepairTarget({ name: d.name })
     else if (key === 'remove') setRemoveDsh({ id: d.id, name: d.name })
     else if (key === 'remove-stale') {
@@ -147,6 +156,49 @@ export default function DshSection() {
   }
 
   const active = dshes.find(d => d.id === activeId)
+
+  const majorOf = (v: string): number | null => {
+    const m = /^(\d+)/.exec(v.trim())
+    return m === null ? null : Number(m[1])
+  }
+
+  const exportData = async (): Promise<void> => {
+    if (activeId === undefined) return
+    const r = await window.api.data.export(activeId)
+    if (!r.ok) { void message.error(apiErrorText(r)); return }
+    if (r.value === '') return
+    void message.success(t('data.exported', { path: r.value }))
+  }
+
+  const importData = async (): Promise<void> => {
+    if (activeId === undefined) return
+    const entry = dshes.find(d => d.id === activeId)
+    if (entry === undefined) return
+    const r = await window.api.data.inspectImport()
+    if (!r.ok) { void message.error(apiErrorText(r)); return }
+    if (r.value.file === '') return
+    const from = r.value.manifest?.dshVersion
+    const to = entry.version
+    const ma = from !== undefined && from !== '' ? majorOf(from) : null
+    const mb = to !== '' ? majorOf(to) : null
+    const cross = ma !== null && mb !== null && ma !== mb
+    const doImport = async (forceDsh: boolean): Promise<void> => {
+      const res = await window.api.data.import(entry!.id, r.value.file, forceDsh)
+      if (!res.ok) { void message.error(apiErrorText(res)); return }
+      if (res.value.dshMismatch) { void message.warning(res.value.text); return }
+      void message.success(res.value.text)
+    }
+    if (cross) {
+      Modal.confirm({
+        title: t('data.importConfirmTitle'),
+        content: t('data.importCrossMajor', { from: from ?? '', to }),
+        okText: t('data.forceImport'),
+        onOk: () => void doImport(true),
+      })
+    } else {
+      void doImport(false)
+    }
+  }
 
   return (
     <>
@@ -236,6 +288,16 @@ export default function DshSection() {
                 {t('dsh.effectiveDir', { dir: active?.profileDir ?? '—' })}
               </div>
             </Panel>
+            <Panel title={t('dsh.dataTitle')}>
+              <div style={{ marginBottom: 8, color: token.colorTextTertiary, fontSize: token.fontSizeSM }}>
+                {t('dsh.dataDesc')}
+              </div>
+              <Space wrap>
+                <Button onClick={() => void exportData()}>{t('data.export')}</Button>
+                <Button onClick={() => void importData()}>{t('data.import')}</Button>
+                <Button onClick={() => setMirrorOpen(true)}>{t('data.mirror')}</Button>
+              </Space>
+            </Panel>
           </Space>
         )
         : (loading
@@ -252,6 +314,13 @@ export default function DshSection() {
     <AddDshModal open={addOpen} onClose={() => setAddOpen(false)} onDone={() => void refresh()} />
     <RenameDshModal target={renameTarget} onClose={() => setRenameTarget(null)} onDone={() => void refresh()} />
     <DshRemoveModal dsh={removeDsh} onClose={() => setRemoveDsh(null)} onRemoved={() => void refresh()} />
+    <UpdateDshModal dsh={updateDsh} onClose={() => setUpdateDsh(null)} onDone={() => void refresh()} />
+    <DataMirrorModal
+      open={mirrorOpen}
+      source={active === undefined ? null : { id: active.id, name: active.name, version: active.version }}
+      onClose={() => setMirrorOpen(false)}
+      onDone={() => void refresh()}
+    />
     </>
   )
 }

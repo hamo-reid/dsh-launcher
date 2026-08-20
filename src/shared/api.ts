@@ -7,9 +7,13 @@
  */
 import type {
   ComboPlugin,
+  DshDataImportResult,
+  DshDataManifest,
   DshEntry,
   DshInstallResult,
   DshInstallStep,
+  DshUpdateInfo,
+  DshUpdateResult,
   HealthIssue,
   ImportProfileResult,
   ImportStep,
@@ -44,6 +48,8 @@ export interface WindowApi {
   localBundles: (name: string) => Promise<IpcResult<string[]>>
   importFromFile: () => Promise<IpcResult<{ json: string; name: string; dshVersion: string; unpackDir: string }>>
   importProfile: (json: string, name?: string, forceDsh?: boolean, localSource?: string) => Promise<IpcResult<ImportProfileResult>>
+  /** Copy a profile from one dsh to another (cross-version migration; source stays). */
+  mirrorProfile: (sourceDshId: string, targetDshId: string, profileName: string) => Promise<IpcResult<ImportProfileResult>>
   /** Stream of per-step import progress (for the import dialog). Returns an unsubscribe. */
   onImportEvent: (callback: (step: ImportStep) => void) => () => void
   missingBundles: (name: string) => Promise<IpcResult<string[]>>
@@ -152,6 +158,21 @@ export interface WindowApi {
     addManual: (alias: string, execPath: string) => Promise<IpcResult<DshEntry>>
     rename: (id: string, name: string) => Promise<IpcResult<boolean>>
     revealDir: (id: string) => Promise<IpcResult<boolean>>
+    /** Whether a managed dsh has a newer release. `null` = up to date. */
+    checkUpdate: (id: string) => Promise<IpcResult<DshUpdateInfo | null>>
+    /** In-place update a managed dsh (cross-major needs `ackMajorRisk`). */
+    update: (id: string, opts?: { version?: string; ackMajorRisk?: boolean }) => Promise<IpcResult<DshUpdateResult>>
+  }
+
+  data: {
+    /** Export a dsh's migratable data to a user-chosen zip. `''` = cancelled. */
+    export: (id: string) => Promise<IpcResult<string>>
+    /** Pick an archive and read its manifest (for the cross-version gate). */
+    inspectImport: () => Promise<IpcResult<{ file: string; manifest: DshDataManifest | null }>>
+    /** Import an archive into a dsh's home (cross-major needs `forceDsh`). */
+    import: (id: string, file: string, forceDsh?: boolean) => Promise<IpcResult<DshDataImportResult>>
+    /** Directly mirror one dsh's data into another dsh's home. */
+    mirror: (sourceId: string, targetId: string) => Promise<IpcResult<DshDataImportResult>>
   }
 
   app: {

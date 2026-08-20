@@ -177,6 +177,47 @@ export type DshInstallStep =
   | { kind: 'install'; state: 'running' | 'ok' | 'error'; version?: string; detail?: string }
   | { kind: 'register'; state: 'running' | 'ok' | 'error'; version?: string; detail?: string }
 
+/** Update availability for a managed dsh, from `dsh:checkUpdate`. */
+export interface DshUpdateInfo {
+  /** Currently installed version. */
+  current: string
+  /** Newest available (dist-tag `latest`). */
+  latest: string
+  /** Whether the update crosses a major version (breaking-change warning). */
+  majorBump: boolean
+}
+
+/** Result of a completed in-place dsh update. */
+export interface DshUpdateResult {
+  /** Where the home was backed up before the update. */
+  backupDir: string
+  /** The version actually installed. */
+  version: string
+}
+
+// ── dsh data export / migration ─────────────────────────────────────────────
+
+/** Manifest carried inside a DSH data archive (`data-manifest.json`). */
+export interface DshDataManifest {
+  schemaVersion: 1
+  /** The dsh version the data was exported from. */
+  dshVersion: string
+  /** UTC export timestamp. */
+  exportedAt: string
+  /** Per KV-storage-domain `version` (best-effort probe; informational for the
+   * cross-version warning — the Launcher never rewrites these files). */
+  storageVersions: Record<string, number>
+}
+
+/** Result of importing / mirroring DSH data. */
+export interface DshDataImportResult {
+  ok: boolean
+  text: string
+  /** True when the archive's dsh major differed from the target and was refused
+   * (or explicitly acknowledged via `forceDsh`). */
+  dshMismatch: boolean
+}
+
 // ── npm search ──────────────────────────────────────────────────────────────
 
 /** One hit from the npm registry search. */

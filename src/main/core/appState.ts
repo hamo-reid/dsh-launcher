@@ -53,6 +53,32 @@ export function effectiveProfileDir(entry: DshEntry): string {
   return typeof dir === 'string' && dir.trim() !== '' ? dir : join(entry.home, 'profiles')
 }
 
+/** The dsh context a profile/data operation targets — normally the active dsh,
+ * but version migration / data export can target an explicit dsh. Carries just
+ * the fields core functions need, so they don't depend on the full entry. */
+export interface DshContext {
+  home: string
+  /** Override for the profiles dir (default `<home>/profiles`). */
+  profilesDirOverride?: string
+  /** The dsh version, for export version-tagging and cross-version gates. */
+  version: string
+}
+
+/** Build a DshContext from a dsh entry. */
+export function contextForEntry(entry: DshEntry): DshContext {
+  return {
+    home: entry.home,
+    profilesDirOverride: entry.profilesDir,
+    version: entry.version,
+  }
+}
+
+/** The profiles root a context operates on: its override, else `<home>/profiles`. */
+export function profilesRootFor(ctx: DshContext): string {
+  const dir = ctx.profilesDirOverride
+  return typeof dir === 'string' && dir.trim() !== '' ? dir : join(ctx.home, 'profiles')
+}
+
 /** The plugin-scan scopes derived from every registered dsh. */
 export function dshScopes(): DshScope[] {
   return readDshState().dshes.map(d => ({

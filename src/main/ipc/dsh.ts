@@ -6,18 +6,19 @@ import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 import {
-  baseLaunch, defaultHome, discoverVersionRepo, entryFromPath, existsExecutable, installDir,
-  installOfficialDsh, isDeletableDsh, probeDshs, readVersionFromPath, resolveDshPackage,
-  versionExists, type DshEntry,
+  baseLaunch, checkForDshUpdate, defaultHome, discoverVersionRepo, entryFromPath, existsExecutable,
+  installDir, installOfficialDsh, isDeletableDsh, probeDshs, readVersionFromPath, resolveDshPackage,
+  updateDsh, versionExists, type DshEntry,
 } from '../core/dsh.ts'
 import {
   dshVersionDir, effectiveProfileDir, readDshState, writeDshState,
 } from '../core/appState.ts'
 import { loadSettings, saveSettings } from '../core/settings.ts'
 import { fetchPackageVersions } from '../core/npm.ts'
+import { parseVersion } from '../core/version.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
 import { logger } from '../core/logger.ts'
-import type { DshInstallResult, IpcResult, PackageVersionInfo } from '../../shared/types.ts'
+import type { DshInstallResult, DshUpdateInfo, DshUpdateResult, IpcResult, PackageVersionInfo } from '../../shared/types.ts'
 
 /** A filesystem-safe version name (defaults to `official`). */
 function safeVersionName(name: string | undefined): string {
@@ -106,6 +107,46 @@ export function registerDshIpc(): void {
           activeDshId,
         },
       }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Whether a managed dsh has a newer release available. `value: null` = up to date.
+  ipcMain.handle('dsh:checkUpdate', async (_event, id: string): Promise<IpcResult<DshUpdateInfo | null>> => {
+    try {
+      const entry = readDshState().dshes.find(d => d.id === id)
+      if (entry === undefined) return fail(E.dshNotFound)
+      return { ok: true, value: await checkForDshUpdate(entry.version) }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // In-place update of a managed dsh: backup home → reinstall target version →
+  // refresh the entry version. Cross-major requires `ackMajorRisk` to proceed.
+  ipcMain.handle('dsh:update', async (event, id: string, opts?: { version?: string; ackMajorRisk?: boolean }): Promise<IpcResult<DshUpdateResult>> => {
+    try {
+      const { dshes, activeDshId } = readDshState()
+      const entry = dshes.find(d => d.id === id)
+      if (entry === undefined) return fail(E.dshNotFound)
+      if (!isDeletableDsh(entry, entry.versionDir ?? dshVersionDir())) return fail(E.dshNotManaged)
+      // Resolve the target version: explicit, else the latest release.
+      let target = opts?.version?.trim()
+      if (target === undefined || target === '') {
+        target = (await checkForDshUpdate(entry.version))?.latest
+      }
+      if (target === undefined || target === '') return fail(E.dshUpToDate)
+      // Cross-major → require explicit acknowledgement of the breaking-change risk.
+      const majorBump = parseVersion(target)?.major !== parseVersion(entry.version)?.major
+      if (majorBump && opts?.ackMajorRisk !== true) {
+        return fail(E.dshMajorRisk, { current: entry.version, latest: target })
+      }
+      const result = await updateDsh(entry, dshVersionDir(), { version: target },
+        step => event.sender.send('install:event', step))
+      writeDshState(dshes.map(d => d.id === id ? { ...d, version: result.version } : d), activeDshId)
+      logger.info(`dsh updated: ${entry.name} ${entry.version} → ${result.version} (backup ${result.backupDir})`)
+      return { ok: true, value: result }
     } catch (error) {
       return failFromError(error)
     }
