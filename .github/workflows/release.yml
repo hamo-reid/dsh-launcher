@@ -57,26 +57,15 @@ jobs:
         shell: pwsh
         run: Compress-Archive -Path release/win-unpacked -DestinationPath release/Dsh-Launcher-win-unpacked.zip
 
-      # Release 正文读取仓库内 docs/releases/<tag>.md（中英两份、中文在前），
+      # GitHub Release 正文读取仓库内 docs/releases/<tag>.md（中英两份、中文在前），
       # 与 annotated tag 的 message 用同一份，保证 GitHub tag 页与 Release 页一致。
-      # 用脚本把文件内容注入 body（不用 body_file：其相对路径在 windows runner 上
-      # 读取失效，会导致空 body）；update_release_body 让重跑可修正已有 release。
-      - name: Prepare release notes
-        id: notes
-        shell: pwsh
-        run: |
-          $p = "docs/releases/${{ github.ref_name }}.md"
-          if (-not (Test-Path $p)) { throw "changelog not found: $p" }
-          $body = (Get-Content -Path $p -Raw).Replace("`r", "")
-          $delim = [guid]::NewGuid().ToString()
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "notes<<$delim"
-          Add-Content -Path $env:GITHUB_OUTPUT -Value $body
-          Add-Content -Path $env:GITHUB_OUTPUT -Value $delim
+      # body_file 必须用绝对路径（相对路径在 windows runner 上读取会失效 → 空 body）；
+      # update_release_body 让重跑可修正已有 release 的正文。
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             release/Dsh-Launcher-*.exe
             release/Dsh-Launcher-win-unpacked.zip
-          body: ${{ steps.notes.outputs.notes }}
+          body_file: ${{ github.workspace }}/docs/releases/${{ github.ref_name }}.md
           update_release_body: true
