@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Button, Segmented, Select, Space, message, theme } from 'antd'
+import { Button, Segmented, Select, Space, Switch, message, theme } from 'antd'
 import { FolderOpenOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import Panel from '../components/Panel.tsx'
@@ -18,15 +18,24 @@ export default function SettingsSection() {
   const { language, setLanguage } = useAppLang()
   const [versionDir, setVersionDir] = useState('')
   const [pluginDir, setPluginDir] = useState('')
+  const [closeToTray, setCloseToTray] = useState(true)
 
   const load = async (): Promise<void> => {
     const v = await window.api.dsh.getVersionDir()
     if (v.ok) setVersionDir(v.value.dir)
     const p = await window.api.plugins.getDir()
     if (p.ok) setPluginDir(p.value.dir)
+    const c = await window.api.settings.getCloseToTray()
+    if (c.ok) setCloseToTray(c.value)
   }
 
   useEffect(() => { void load() }, [])
+
+  const saveCloseToTray = async (enabled: boolean): Promise<void> => {
+    const res = await window.api.settings.setCloseToTray(enabled)
+    if (res.ok) setCloseToTray(enabled)
+    else void message.error(apiErrorText(res))
+  }
 
   const saveVersionDir = async (value: string): Promise<string> => {
     const res = await window.api.dsh.setVersionDir(value)
@@ -78,6 +87,18 @@ export default function SettingsSection() {
               </div>
             </div>
           </Space>
+        </Panel>
+
+        <Panel title={t('settings.section.behavior')}>
+          <div style={{ maxWidth: 560, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
+            <div>
+              <div style={{ fontWeight: 600 }}>{t('settings.closeToTray')}</div>
+              <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, marginTop: 4 }}>
+                {t('settings.closeToTray.desc')}
+              </div>
+            </div>
+            <Switch checked={closeToTray} onChange={value => void saveCloseToTray(value)} />
+          </div>
         </Panel>
 
         <Panel title={t('settings.section.directories')}>

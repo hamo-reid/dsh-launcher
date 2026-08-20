@@ -23,7 +23,8 @@
     },
     "files": [
       "out/**",
-      "package.json"
+      "package.json",
+      "build/icon.ico"
     ],
     "asar": true,
     "asarUnpack": [

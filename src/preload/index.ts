@@ -151,6 +151,10 @@ const api = {
       ipcRenderer.invoke('settings:completeOnboarding', payload),
     checkHealth: (): Promise<IpcResult<HealthIssue[]>> =>
       ipcRenderer.invoke('settings:checkHealth'),
+    getCloseToTray: (): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('settings:getCloseToTray'),
+    setCloseToTray: (enabled: boolean): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('settings:setCloseToTray', enabled),
   },
 
   trash: {

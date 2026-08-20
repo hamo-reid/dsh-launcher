@@ -2,7 +2,7 @@
  * (`settings:*`). */
 
 import { app, ipcMain, dialog } from 'electron'
-import { loadSettings, saveSettings } from '../core/settings.ts'
+import { closeToTrayEnabled, loadSettings, saveSettings } from '../core/settings.ts'
 import { dshVersionDir, pluginDir, readDshState, shouldRunOnboarding } from '../core/appState.ts'
 import { failFromError } from '../core/errors.ts'
 import { checkHealth } from '../core/health.ts'
@@ -22,6 +22,23 @@ export function registerSettingsIpc(): void {
   ipcMain.handle('settings:setUiLanguage', (_event, lng: string): IpcResult<boolean> => {
     try {
       saveSettings({ ...loadSettings(), uiLanguage: lng })
+      return { ok: true, value: true }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  ipcMain.handle('settings:getCloseToTray', (): IpcResult<boolean> => {
+    try {
+      return { ok: true, value: closeToTrayEnabled() }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  ipcMain.handle('settings:setCloseToTray', (_event, enabled: boolean): IpcResult<boolean> => {
+    try {
+      saveSettings({ ...loadSettings(), closeToTray: enabled })
       return { ok: true, value: true }
     } catch (error) {
       return failFromError(error)
