@@ -37,16 +37,21 @@ export function currentRun(): RuntimeState | null {
 }
 
 /**
- * Which node runs the embedded dsh. Prefer a SYSTEM `node` when one exists: the
- * app's bundled Electron Node (Electron ≤37 bundles Node 20.x/22.x) is older
- * than what modern dsh needs (Node 22+/23 APIs like `node:zlib` zstd and
- * `node:module` type-stripping), so forcing the bundled Node breaks startup.
- * Fall back to the bundled Node (`ELECTRON_RUN_AS_NODE`) only when no system
- * node is on PATH. Detected once and cached.
+ * Which node runs the embedded dsh. PREFER the app's bundled Node — that's what
+ * makes the launcher self-contained (no system node required). The bundled
+ * Electron 40 Node is 24.x, which satisfies modern dsh (Node 22+/23 APIs like
+ * `node:zlib` zstd and `node:module` type-stripping). Only fall back to a SYSTEM
+ * `node` when the bundled Node is too old (< 22) to host dsh. Detected once.
  */
 let resolvedExe: { exe: string; bundled: boolean } | null = null
 function resolveNodeExe(): { exe: string; bundled: boolean } {
   if (resolvedExe !== null) return resolvedExe
+  const bundledMajor = Number(String(process.versions.node).split('.')[0]) || 0
+  if (bundledMajor >= 22) {
+    resolvedExe = { exe: process.execPath, bundled: true }
+    return resolvedExe
+  }
+  // Bundled Node too old → use a system node if present, else bundled anyway.
   try {
     const probe = spawnSync('node', ['--version'], { encoding: 'utf8', windowsHide: true, timeout: 3000 })
     if (probe.status === 0 && /^v\d+\.\d+\.\d+/.test((probe.stdout ?? '').trim())) {
