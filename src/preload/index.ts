@@ -13,6 +13,7 @@ import type {
   ImportStep,
   InstalledOverviewRow,
   IpcResult,
+  NodeEnvironment,
   NpmSearchHit,
   OnboardingPayload,
   OnboardingState,
@@ -155,6 +156,10 @@ const api = {
       ipcRenderer.invoke('settings:getCloseToTray'),
     setCloseToTray: (enabled: boolean): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('settings:setCloseToTray', enabled),
+    getNodeEnvironment: (): Promise<IpcResult<NodeEnvironment>> =>
+      ipcRenderer.invoke('settings:getNodeEnvironment'),
+    setNodePreference: (preference: 'system' | 'bundled'): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('settings:setNodePreference', preference),
   },
 
   trash: {

@@ -28,6 +28,10 @@ export interface AppSettings {
   /** Whether clicking close minimizes to the system tray instead of quitting.
    * Defaults to `true`; a false (or absent-on-older-schema) value quits. */
   closeToTray?: boolean
+  /** Which node to run dsh with when the user chooses explicitly. `'system'`
+   * uses a usable system node (falling back to bundled if none/too old);
+   * `'bundled'` always uses the bundled Node. Defaults to `'system'`. */
+  nodePreference?: 'system' | 'bundled'
   /** Whether the first-run onboarding wizard has been completed. */
   onboarded?: boolean
 }
@@ -96,6 +100,12 @@ export function loadSettings(): AppSettings {
  * Absent / unspecified → tray (the default close behaviour). */
 export function closeToTrayEnabled(): boolean {
   return loadSettings().closeToTray !== false
+}
+
+/** The user's preferred node for launching dsh (`'system'` when unset). */
+export function nodePreferenceValue(): 'system' | 'bundled' {
+  const p = loadSettings().nodePreference
+  return p === 'bundled' ? 'bundled' : 'system'
 }
 
 /** Persist settings (upsert one row) and flush the database file to disk. */

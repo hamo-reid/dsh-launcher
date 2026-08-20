@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Button, Segmented, Select, Space, Switch, message, theme } from 'antd'
+import { Button, Descriptions, Segmented, Select, Space, Switch, message, theme } from 'antd'
 import { FolderOpenOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import Panel from '../components/Panel.tsx'
@@ -9,6 +9,7 @@ import { useThemeMode } from '../ThemeProvider.tsx'
 import { useAppLang } from '../i18n'
 import { apiErrorText } from '../lib/ipc.ts'
 import type { ThemeMode } from '../theme.ts'
+import type { NodeEnvironment } from '../../../shared/types.ts'
 
 /** 设置页：外观(主题 + 语言) + 目录配置(DSH 版本库 / 插件保存位置)。 */
 export default function SettingsSection() {
@@ -19,6 +20,7 @@ export default function SettingsSection() {
   const [versionDir, setVersionDir] = useState('')
   const [pluginDir, setPluginDir] = useState('')
   const [closeToTray, setCloseToTray] = useState(true)
+  const [nodeEnv, setNodeEnv] = useState<NodeEnvironment>()
 
   const load = async (): Promise<void> => {
     const v = await window.api.dsh.getVersionDir()
@@ -27,6 +29,8 @@ export default function SettingsSection() {
     if (p.ok) setPluginDir(p.value.dir)
     const c = await window.api.settings.getCloseToTray()
     if (c.ok) setCloseToTray(c.value)
+    const n = await window.api.settings.getNodeEnvironment()
+    if (n.ok) setNodeEnv(n.value)
   }
 
   useEffect(() => { void load() }, [])
@@ -35,6 +39,13 @@ export default function SettingsSection() {
     const res = await window.api.settings.setCloseToTray(enabled)
     if (res.ok) setCloseToTray(enabled)
     else void message.error(apiErrorText(res))
+  }
+
+  const saveNodePref = async (useSystem: boolean): Promise<void> => {
+    const res = await window.api.settings.setNodePreference(useSystem ? 'system' : 'bundled')
+    if (!res.ok) { void message.error(apiErrorText(res)); return }
+    const n = await window.api.settings.getNodeEnvironment()
+    if (n.ok) setNodeEnv(n.value)
   }
 
   const saveVersionDir = async (value: string): Promise<string> => {
@@ -98,6 +109,42 @@ export default function SettingsSection() {
               </div>
             </div>
             <Switch checked={closeToTray} onChange={value => void saveCloseToTray(value)} />
+          </div>
+        </Panel>
+
+        <Panel title={t('settings.section.runtime')}>
+          <div style={{ maxWidth: 560 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, marginBottom: token.paddingSM }}>
+              <div>
+                <div style={{ fontWeight: 600 }}>{t('settings.runtime.preferSystem')}</div>
+                <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, marginTop: 4 }}>
+                  {t('settings.runtime.preferSystem.desc')}
+                </div>
+              </div>
+              <Switch checked={nodeEnv?.preference === 'system'} onChange={value => void saveNodePref(value)} />
+            </div>
+            <Descriptions size="small" column={1} bordered>
+              <Descriptions.Item label={t('settings.runtime.bundled')}>
+                <span style={{ fontFamily: 'ui-monospace, Menlo, Consolas, monospace' }}>{nodeEnv?.bundled ?? '—'}</span>
+              </Descriptions.Item>
+              <Descriptions.Item label={t('settings.runtime.system')}>
+                {nodeEnv === undefined
+                  ? '—'
+                  : nodeEnv.system.installed
+                    ? <span style={{ fontFamily: 'ui-monospace, Menlo, Consolas, monospace' }}>{nodeEnv.system.version}</span>
+                    : t('settings.runtime.systemNone')}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('settings.runtime.use')}>
+                {nodeEnv === undefined
+                  ? '—'
+                  : nodeEnv.prefer === 'system'
+                    ? t('settings.runtime.useSystem', { v: nodeEnv.system.version })
+                    : t('settings.runtime.useBundled', { v: nodeEnv.bundled })}
+              </Descriptions.Item>
+            </Descriptions>
+            <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, marginTop: token.paddingSM }}>
+              {t('settings.runtime.desc')}
+            </div>
           </div>
         </Panel>
 

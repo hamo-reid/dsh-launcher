@@ -3,10 +3,12 @@
  * consults before closing. */
 
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { existsExecutable, resolveLaunchEntry, type LaunchEntry } from '../core/dsh.ts'
+import { nodeEnvironment } from '../core/node-env.ts'
+import { nodePreferenceValue } from '../core/settings.ts'
 import { activeDshEntry } from '../core/appState.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
 import { logger } from '../core/logger.ts'
@@ -37,30 +39,15 @@ export function currentRun(): RuntimeState | null {
 }
 
 /**
- * Which node runs the embedded dsh. PREFER the app's bundled Node — that's what
- * makes the launcher self-contained (no system node required). The bundled
- * Electron 40 Node is 24.x, which satisfies modern dsh (Node 22+/23 APIs like
- * `node:zlib` zstd and `node:module` type-stripping). Only fall back to a SYSTEM
- * `node` when the bundled Node is too old (< 22) to host dsh. Detected once.
+ * Which node runs the embedded dsh. Prefers a usable SYSTEM `node` when one is
+ * on PATH (the user asked to use it in node-equipped environments); falls back
+ * to the app's bundled Node 24 (always satisfies dsh, keeps it self-contained).
+ * Detection + the decision live in `core/node-env.ts` (shared with the settings
+ * page display), cached once.
  */
-let resolvedExe: { exe: string; bundled: boolean } | null = null
 function resolveNodeExe(): { exe: string; bundled: boolean } {
-  if (resolvedExe !== null) return resolvedExe
-  const bundledMajor = Number(String(process.versions.node).split('.')[0]) || 0
-  if (bundledMajor >= 22) {
-    resolvedExe = { exe: process.execPath, bundled: true }
-    return resolvedExe
-  }
-  // Bundled Node too old → use a system node if present, else bundled anyway.
-  try {
-    const probe = spawnSync('node', ['--version'], { encoding: 'utf8', windowsHide: true, timeout: 3000 })
-    if (probe.status === 0 && /^v\d+\.\d+\.\d+/.test((probe.stdout ?? '').trim())) {
-      resolvedExe = { exe: 'node', bundled: false }
-      return resolvedExe
-    }
-  } catch { /* no system node on PATH */ }
-  resolvedExe = { exe: process.execPath, bundled: true }
-  return resolvedExe
+  const env = nodeEnvironment(nodePreferenceValue())
+  return env.prefer === 'system' ? { exe: 'node', bundled: false } : { exe: process.execPath, bundled: true }
 }
 
 /** Kill the child (and, on Windows, its whole tree) and drop the runtime state

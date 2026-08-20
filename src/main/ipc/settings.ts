@@ -6,9 +6,11 @@ import { closeToTrayEnabled, loadSettings, saveSettings } from '../core/settings
 import { dshVersionDir, pluginDir, readDshState, shouldRunOnboarding } from '../core/appState.ts'
 import { failFromError } from '../core/errors.ts'
 import { checkHealth } from '../core/health.ts'
+import { nodeEnvironment } from '../core/node-env.ts'
+import { nodePreferenceValue } from '../core/settings.ts'
 import { setPluginStoreDir } from './plugins.ts'
 import { setVersionDirValue } from './dsh.ts'
-import type { HealthIssue, IpcResult, OnboardingPayload, OnboardingState } from '../../shared/types.ts'
+import type { HealthIssue, IpcResult, NodeEnvironment, OnboardingPayload, OnboardingState } from '../../shared/types.ts'
 
 export function registerSettingsIpc(): void {
   ipcMain.handle('settings:getUiLanguage', (): IpcResult<string | null> => {
@@ -39,6 +41,26 @@ export function registerSettingsIpc(): void {
   ipcMain.handle('settings:setCloseToTray', (_event, enabled: boolean): IpcResult<boolean> => {
     try {
       saveSettings({ ...loadSettings(), closeToTray: enabled })
+      return { ok: true, value: true }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  /** Bundled / system Node detection + which one dsh launches with. */
+  ipcMain.handle('settings:getNodeEnvironment', (): IpcResult<NodeEnvironment> => {
+    try {
+      return { ok: true, value: nodeEnvironment(nodePreferenceValue()) }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  /** Persist the preferred node for launching dsh (`'system'` | `'bundled'`). */
+  ipcMain.handle('settings:setNodePreference', (_event, preference: 'system' | 'bundled'): IpcResult<boolean> => {
+    try {
+      const value = preference === 'bundled' ? 'bundled' : 'system'
+      saveSettings({ ...loadSettings(), nodePreference: value })
       return { ok: true, value: true }
     } catch (error) {
       return failFromError(error)
@@ -91,6 +113,9 @@ export function registerSettingsIpc(): void {
         ...loadSettings(),
         ...(typeof uiLanguage === 'string' && uiLanguage.trim() !== ''
           ? { uiLanguage: uiLanguage.trim() }
+          : {}),
+        ...(payload.nodePreference === 'system' || payload.nodePreference === 'bundled'
+          ? { nodePreference: payload.nodePreference }
           : {}),
         onboarded: true,
       })

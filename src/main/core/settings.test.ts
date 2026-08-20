@@ -6,7 +6,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { closeToTrayEnabled, loadSettings, openDatabase, saveSettings } from './settings.ts'
+import { closeToTrayEnabled, loadSettings, nodePreferenceValue, openDatabase, saveSettings } from './settings.ts'
 
 let dirs: string[] = []
 
@@ -36,6 +36,14 @@ describe('loadSettings / saveSettings', () => {
     saveSettings({ pluginDir: '/store', uiLanguage: 'en' })
     saveSettings({ uiLanguage: 'zh' })
     expect(loadSettings()).toEqual({ uiLanguage: 'zh' })
+  })
+
+  it('nodePreferenceValue defaults to system and reflects the stored value', () => {
+    expect(nodePreferenceValue()).toBe('system')
+    saveSettings({ nodePreference: 'bundled' })
+    expect(nodePreferenceValue()).toBe('bundled')
+    saveSettings({ nodePreference: 'system' })
+    expect(nodePreferenceValue()).toBe('system')
   })
 
   it('closeToTrayEnabled defaults to true and reflects the stored flag', () => {

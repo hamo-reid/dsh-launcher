@@ -138,6 +138,20 @@ export interface HealthIssue {
   missing: boolean
 }
 
+// ── node runtime detection ───────────────────────────────────────────────────
+
+/** Which node the launcher will run dsh with, + the versions it detected. */
+export interface NodeEnvironment {
+  /** The app's bundled Node version (process.versions.node). */
+  bundled: string
+  /** A system `node` on PATH, if any. */
+  system: { installed: boolean; version: string }
+  /** The user's explicit choice (`'system'` = use system node when usable). */
+  preference: 'system' | 'bundled'
+  /** The node actually used to run dsh (after fallback if the choice is unusable). */
+  prefer: 'system' | 'bundled'
+}
+
 // ── dsh official install ─────────────────────────────────────────────────────
 
 /** Successful official-install payload, returned to the renderer so the dialog
@@ -278,4 +292,6 @@ export interface OnboardingPayload {
   uiLanguage?: string
   pluginDir?: string
   dshVersionDir?: string
+  /** Preferred node for launching dsh (`'system'` | `'bundled'`). */
+  nodePreference?: 'system' | 'bundled'
 }

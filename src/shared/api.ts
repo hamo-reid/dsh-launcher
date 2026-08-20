@@ -16,6 +16,7 @@ import type {
   InstalledOverviewRow,
   InstalledPlugin,
   IpcResult,
+  NodeEnvironment,
   NpmSearchHit,
   OnboardingPayload,
   OnboardingState,
@@ -112,6 +113,10 @@ export interface WindowApi {
     /** Whether clicking close minimizes to tray instead of quitting. */
     getCloseToTray: () => Promise<IpcResult<boolean>>
     setCloseToTray: (enabled: boolean) => Promise<IpcResult<boolean>>
+    /** Bundled/system Node versions + which one dsh launches with. */
+    getNodeEnvironment: () => Promise<IpcResult<NodeEnvironment>>
+    /** Persist which node to use for launching dsh (`'system'` | `'bundled'`). */
+    setNodePreference: (preference: 'system' | 'bundled') => Promise<IpcResult<boolean>>
   }
 
   logs: {
