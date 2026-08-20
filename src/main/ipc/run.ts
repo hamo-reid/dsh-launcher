@@ -3,7 +3,7 @@
  * consults before closing. */
 
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { existsExecutable, resolveLaunchEntry, type LaunchEntry } from '../core/dsh.ts'
@@ -36,6 +36,28 @@ export function currentRun(): RuntimeState | null {
   return running
 }
 
+/**
+ * Which node runs the embedded dsh. Prefer a SYSTEM `node` when one exists: the
+ * app's bundled Electron Node (Electron ≤37 bundles Node 20.x/22.x) is older
+ * than what modern dsh needs (Node 22+/23 APIs like `node:zlib` zstd and
+ * `node:module` type-stripping), so forcing the bundled Node breaks startup.
+ * Fall back to the bundled Node (`ELECTRON_RUN_AS_NODE`) only when no system
+ * node is on PATH. Detected once and cached.
+ */
+let resolvedExe: { exe: string; bundled: boolean } | null = null
+function resolveNodeExe(): { exe: string; bundled: boolean } {
+  if (resolvedExe !== null) return resolvedExe
+  try {
+    const probe = spawnSync('node', ['--version'], { encoding: 'utf8', windowsHide: true, timeout: 3000 })
+    if (probe.status === 0 && /^v\d+\.\d+\.\d+/.test((probe.stdout ?? '').trim())) {
+      resolvedExe = { exe: 'node', bundled: false }
+      return resolvedExe
+    }
+  } catch { /* no system node on PATH */ }
+  resolvedExe = { exe: process.execPath, bundled: true }
+  return resolvedExe
+}
+
 /** Kill the child (and, on Windows, its whole tree) and drop the runtime state
  * if it belongs to the current run. */
 export function terminateAndClear(child: ChildProcess): void {
@@ -55,14 +77,14 @@ function broadcastRun(event: RunEvent): void {
  * dsh launch (kept as a `cmd /c start /wait` child so the app can still abort it
  * with taskkill /T). Force UTF-8 on the child console + pipeline so dsh's UTF-8
  * output never gets re-encoded to the system codepage (GBK) → mojibake. */
-function launchShellWindow(argv: string[], env: NodeJS.ProcessEnv, cwd: string): ChildProcess {
+function launchShellWindow(exe: string, argv: string[], env: NodeJS.ProcessEnv, cwd: string): ChildProcess {
   const scriptPath = join(app.getPath('userData'), 'dsh-launch.ps1')
   const psQuote = (raw: string): string => `'${raw.replace(/'/g, "''")}'`
   const script = [
     "chcp 65001 > $null",
     '$ErrorActionPreference = \'Continue\'',
     '[Console]::OutputEncoding=[Console]::InputEncoding=[Text.UTF8Encoding]::new()',
-    `& ${psQuote(process.execPath)} ${argv.map(psQuote).join(' ')}`,
+    `& ${psQuote(exe)} ${argv.map(psQuote).join(' ')}`,
   ].join('\n')
   writeFileSync(scriptPath, script)
   return spawn('cmd.exe', ['/c', 'start', '', '/wait', 'powershell.exe', '-NoExit', '-ExecutionPolicy', 'Bypass', '-File', scriptPath], { windowsHide: false, env, cwd })
@@ -75,9 +97,9 @@ export function registerRunIpc(): void {
     if (entry === undefined) return fail(E.needActiveDsh)
     if (!existsExecutable(entry.execPath)) return fail('run.execMissing', { path: entry.execPath })
     try {
-      // Launch with the app's OWN bundled Node (never a system `node`), running
-      // the dsh entry directly — no cmd/powershell command string, so there is
-      // no PATH-node dependency and the output pipe stays UTF-8.
+      // Launch the dsh entry directly with array args (no cmd/powershell command
+      // string — the output pipe stays UTF-8). Prefer a system `node` when one
+      // exists; fall back to the app's bundled Node only if none is on PATH.
       let launch: LaunchEntry
       try {
         launch = resolveLaunchEntry(entry.execPath)
@@ -88,6 +110,9 @@ export function registerRunIpc(): void {
       const argv = tsx
         ? ['--import', 'tsx/esm', script, '--profile', profile]
         : [script, '--profile', profile]
+      const { exe } = resolveNodeExe()
+      // ELECTRON_RUN_AS_NODE is only meaningful for electron.exe; a system `node`
+      // ignores it, so it can be set unconditionally.
       const env = { ...process.env, DSH_HOME: entry.home, ELECTRON_RUN_AS_NODE: '1' }
       const shellMode = mode === 'shell'
       runCommand = argv.join(' ')
@@ -109,9 +134,9 @@ export function registerRunIpc(): void {
       //   shell → attach to a visible OS terminal window (new console)
       const child = shellMode
         ? (process.platform === 'win32'
-            ? launchShellWindow(argv, env, cwd)
-            : spawn(process.execPath, argv, { shell: false, detached: true, stdio: 'inherit', env, cwd }))
-        : spawn(process.execPath, argv, {
+            ? launchShellWindow(exe, argv, env, cwd)
+            : spawn(exe, argv, { shell: false, detached: true, stdio: 'inherit', env, cwd }))
+        : spawn(exe, argv, {
             shell: false,
             // Keep stdin open as a pipe: a /dev/null stdin makes an interactive
             // CLI read EOF and exit immediately on launch.
