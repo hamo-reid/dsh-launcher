@@ -1,10 +1,10 @@
 /** Main process: window lifecycle + IPC wiring. Every handler lives in its own
  * domain module under `src/main/ipc/`; this file only assembles them. */
 
-import { app, BrowserWindow, dialog, Menu, nativeImage, shell, Tray } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, Tray } from 'electron'
 import { join } from 'node:path'
 import os from 'node:os'
-import { currentRun, registerRunIpc, terminateAndClear } from './ipc/run.ts'
+import { currentRun, registerRunIpc, terminateAndClear, type RuntimeState } from './ipc/run.ts'
 import { registerProfileIpc } from './ipc/profile.ts'
 import { registerHomeIpc } from './ipc/home.ts'
 import { registerPluginsIpc } from './ipc/plugins.ts'
@@ -15,7 +15,7 @@ import { registerSettingsIpc } from './ipc/settings.ts'
 import { hookWindowMaximize, registerWindowIpc } from './ipc/window.ts'
 import { registerLogsIpc } from './ipc/logs.ts'
 import { initLogger, logger } from './core/logger.ts'
-import { closeToTrayEnabled, openDatabase } from './core/settings.ts'
+import { askOnCloseEnabled, closeToTrayEnabled, loadSettings, openDatabase, saveSettings } from './core/settings.ts'
 import { configureAppState } from './core/appState.ts'
 
 // Process-level breadcrumbs for anything that escapes the IPC try/catch.
@@ -91,21 +91,12 @@ function createWindow(): void {
     }
   })
 
-  // Guard exit while a profile process is still running: ask first, and only
-  // terminate if the user chooses to.
-  let allowClose = false
-  win.on('close', (event) => {
-    if (allowClose || quitting) return
-    // 默认关闭行为：最小化到托盘（窗口隐藏，app 继续后台运行）。
-    // 在设置里可改为「直接退出」，此时才走下面的运行中进程保护。
-    if (closeToTrayEnabled()) {
-      event.preventDefault()
-      win.hide()
-      return
-    }
-    const active = currentRun()
-    if (active === null) return
-    event.preventDefault()
+  // Ask whether to minimize-to-tray or quit when closing, unless the user
+  // picked "don't ask again". In prompt mode the renderer shows an in-app modal
+  // (so it can carry the "remember" checkbox); the chosen action is executed via
+  // `window:chooseClose`. In no-prompt mode the configured `closeToTray`
+  // behaviour applies directly, with the profile-run guard below.
+  const confirmTerminate = (active: RuntimeState): void => {
     void dialog.showMessageBox(win, {
       type: 'warning',
       title: '进程仍在运行',
@@ -121,6 +112,45 @@ function createWindow(): void {
       allowClose = true
       win.close()
     })
+  }
+  let allowClose = false
+
+  // Renderer → main: the user picked minimize-to-tray or quit in the prompt
+  // modal. If they ticked "don't ask again", persist the choice (behaviour +
+  // ask=false) so future closes follow it without prompting.
+  ipcMain.removeHandler('window:chooseClose')
+  ipcMain.handle('window:chooseClose', (_event, action: 'tray' | 'quit', remember: boolean) => {
+    if (remember) {
+      saveSettings({ ...loadSettings(), closeToTray: action === 'tray', askOnClose: false })
+    }
+    if (action === 'tray') {
+      if (!win.isDestroyed()) win.hide()
+      return
+    }
+    const active = currentRun()
+    if (active !== null) terminateAndClear(active.child)
+    allowClose = true
+    app.quit()
+  })
+
+  win.on('close', (event) => {
+    if (allowClose || quitting) return
+    // Prompt mode → tell the renderer to show the minimize/quit modal.
+    if (askOnCloseEnabled()) {
+      event.preventDefault()
+      win.webContents.send('window:askClose', { running: currentRun()?.profile })
+      return
+    }
+    // "Don't ask" mode: follow the configured close behaviour directly.
+    if (closeToTrayEnabled()) {
+      event.preventDefault()
+      win.hide()
+      return
+    }
+    const active = currentRun()
+    if (active === null) return
+    event.preventDefault()
+    confirmTerminate(active)
   })
 
   if (process.env['ELECTRON_RENDERER_URL'] !== undefined) {

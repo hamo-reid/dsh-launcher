@@ -162,6 +162,10 @@ const api = {
       ipcRenderer.invoke('settings:getCloseToTray'),
     setCloseToTray: (enabled: boolean): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('settings:setCloseToTray', enabled),
+    getAskOnClose: (): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('settings:getAskOnClose'),
+    setAskOnClose: (enabled: boolean): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('settings:setAskOnClose', enabled),
     getNodeEnvironment: (): Promise<IpcResult<NodeEnvironment>> =>
       ipcRenderer.invoke('settings:getNodeEnvironment'),
     setNodePreference: (preference: 'system' | 'bundled'): Promise<IpcResult<boolean>> =>
@@ -239,6 +243,13 @@ const api = {
     toggleMaximize: (): Promise<IpcResult<boolean>> => ipcRenderer.invoke('window:toggleMaximize'),
     close: (): Promise<IpcResult<boolean>> => ipcRenderer.invoke('window:close'),
     isMaximized: (): Promise<IpcResult<boolean>> => ipcRenderer.invoke('window:isMaximized'),
+    chooseClose: (action: 'tray' | 'quit', remember: boolean): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('window:chooseClose', action, remember),
+    onAskClose: (callback: (info: { running?: string }) => void): (() => void) => {
+      const handler = (_: unknown, info: { running?: string }): void => callback(info)
+      ipcRenderer.on('window:askClose', handler)
+      return () => { ipcRenderer.removeListener('window:askClose', handler) }
+    },
     onMaximizeState: (callback: (maximized: boolean) => void): (() => void) => {
       const handler = (_: unknown, maximized: boolean): void => callback(maximized)
       ipcRenderer.on('window:maximized', handler)

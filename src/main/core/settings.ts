@@ -28,6 +28,10 @@ export interface AppSettings {
   /** Whether clicking close minimizes to the system tray instead of quitting.
    * Defaults to `true`; a false (or absent-on-older-schema) value quits. */
   closeToTray?: boolean
+  /** Whether clicking close asks the user (minimize-to-tray vs quit) each time.
+   * Defaults to `true`; a false value uses `closeToTray` directly without
+   * prompting (set both when the user ticks "don't ask again"). */
+  askOnClose?: boolean
   /** Which node to run dsh with when the user chooses explicitly. `'system'`
    * uses a usable system node (falling back to bundled if none/too old);
    * `'bundled'` always uses the bundled Node. Defaults to `'system'`. */
@@ -100,6 +104,12 @@ export function loadSettings(): AppSettings {
  * Absent / unspecified → tray (the default close behaviour). */
 export function closeToTrayEnabled(): boolean {
   return loadSettings().closeToTray !== false
+}
+
+/** Whether closing the window should ask the user each time. Absent / unset →
+ * ask (the default, until the user picks "don't ask again"). */
+export function askOnCloseEnabled(): boolean {
+  return loadSettings().askOnClose !== false
 }
 
 /** The user's preferred node for launching dsh (`'system'` when unset). */

@@ -119,6 +119,9 @@ export interface WindowApi {
     /** Whether clicking close minimizes to tray instead of quitting. */
     getCloseToTray: () => Promise<IpcResult<boolean>>
     setCloseToTray: (enabled: boolean) => Promise<IpcResult<boolean>>
+    /** Whether clicking close asks the user each time. */
+    getAskOnClose: () => Promise<IpcResult<boolean>>
+    setAskOnClose: (enabled: boolean) => Promise<IpcResult<boolean>>
     /** Bundled/system Node versions + which one dsh launches with. */
     getNodeEnvironment: () => Promise<IpcResult<NodeEnvironment>>
     /** Persist which node to use for launching dsh (`'system'` | `'bundled'`). */
@@ -135,6 +138,11 @@ export interface WindowApi {
     toggleMaximize: () => Promise<IpcResult<boolean>>
     close: () => Promise<IpcResult<boolean>>
     isMaximized: () => Promise<IpcResult<boolean>>
+    /** Resolve a close prompt: minimize-to-tray (`'tray'`) or quit; `remember`
+     * persists the choice as the close behaviour and stops future prompts. */
+    chooseClose: (action: 'tray' | 'quit', remember: boolean) => Promise<IpcResult<boolean>>
+    /** Push event asking the renderer to show the minimize/quit close prompt. Returns an unsubscribe. */
+    onAskClose: (callback: (info: { running?: string }) => void) => () => void
     /** Push event mirroring maximize state (for the title-bar icon). Returns an unsubscribe. */
     onMaximizeState: (callback: (maximized: boolean) => void) => () => void
   }

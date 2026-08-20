@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Button, Descriptions, Segmented, Select, Space, Switch, message, theme } from 'antd'
+import { Button, Descriptions, Radio, Segmented, Select, Space, Switch, message, theme } from 'antd'
 import { FolderOpenOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import Panel from '../components/Panel.tsx'
@@ -20,6 +20,7 @@ export default function SettingsSection() {
   const [versionDir, setVersionDir] = useState('')
   const [pluginDir, setPluginDir] = useState('')
   const [closeToTray, setCloseToTray] = useState(true)
+  const [askOnClose, setAskOnClose] = useState(true)
   const [nodeEnv, setNodeEnv] = useState<NodeEnvironment>()
 
   const load = async (): Promise<void> => {
@@ -29,6 +30,8 @@ export default function SettingsSection() {
     if (p.ok) setPluginDir(p.value.dir)
     const c = await window.api.settings.getCloseToTray()
     if (c.ok) setCloseToTray(c.value)
+    const a = await window.api.settings.getAskOnClose()
+    if (a.ok) setAskOnClose(a.value)
     const n = await window.api.settings.getNodeEnvironment()
     if (n.ok) setNodeEnv(n.value)
   }
@@ -38,6 +41,12 @@ export default function SettingsSection() {
   const saveCloseToTray = async (enabled: boolean): Promise<void> => {
     const res = await window.api.settings.setCloseToTray(enabled)
     if (res.ok) setCloseToTray(enabled)
+    else void message.error(apiErrorText(res))
+  }
+
+  const saveAskOnClose = async (enabled: boolean): Promise<void> => {
+    const res = await window.api.settings.setAskOnClose(enabled)
+    if (res.ok) setAskOnClose(enabled)
     else void message.error(apiErrorText(res))
   }
 
@@ -101,14 +110,29 @@ export default function SettingsSection() {
         </Panel>
 
         <Panel title={t('settings.section.behavior')}>
-          <div style={{ maxWidth: 560, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
+          <div style={{ maxWidth: 620, display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
+              <div>
+                <div style={{ fontWeight: 600 }}>{t('settings.askOnClose')}</div>
+                <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, marginTop: 4 }}>
+                  {t('settings.askOnClose.desc')}
+                </div>
+              </div>
+              <Switch checked={askOnClose} onChange={value => void saveAskOnClose(value)} />
+            </div>
             <div>
               <div style={{ fontWeight: 600 }}>{t('settings.closeToTray')}</div>
-              <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, marginTop: 4 }}>
+              <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, marginTop: 4, marginBottom: token.paddingSM }}>
                 {t('settings.closeToTray.desc')}
               </div>
+              <Radio.Group
+                value={closeToTray ? 'tray' : 'quit'}
+                onChange={e => void saveCloseToTray(e.target.value === 'tray')}
+              >
+                <Radio value="tray">{t('settings.closeAction.tray')}</Radio>
+                <Radio value="quit">{t('settings.closeAction.quit')}</Radio>
+              </Radio.Group>
             </div>
-            <Switch checked={closeToTray} onChange={value => void saveCloseToTray(value)} />
           </div>
         </Panel>
 

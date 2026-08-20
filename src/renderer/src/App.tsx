@@ -7,6 +7,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import { useAppLang } from './i18n'
 import OnboardingModal from './components/OnboardingModal.tsx'
+import CloseConfirmModal from './components/CloseConfirmModal.tsx'
 import ProfileSection from './views/ProfileSection.tsx'
 import PluginsSection from './views/PluginsSection.tsx'
 import SettingsSection from './views/SettingsSection.tsx'
@@ -27,6 +28,8 @@ export default function App() {
   const { token } = theme.useToken()
   const [maximized, setMaximized] = useState(false)
   const [issues, setIssues] = useState<HealthIssue[]>([])
+  // Shown when the main process asks us to pick minimize-to-tray vs quit on close.
+  const [closePrompt, setClosePrompt] = useState<{ running?: string } | null>(null)
 
   // Decide once whether the first-run wizard is required (fresh install).
   useEffect(() => {
@@ -45,6 +48,9 @@ export default function App() {
     void window.api.window.isMaximized().then(r => { if (r.ok) setMaximized(r.value) })
     return window.api.window.onMaximizeState(setMaximized)
   }, [])
+
+  // Show the minimize-vs-quit prompt when the window close is intercepted.
+  useEffect(() => window.api.window.onAskClose(info => setClosePrompt(info)), [])
 
   // Disk-vs-app sync health: stale/missing dsh + store paths. Check on mount,
   // and again when entering the DSH / plugins views so a fix shows up promptly.
@@ -153,6 +159,14 @@ export default function App() {
         onComplete={() => setOnboarding('done')}
       />
     )}
+    <CloseConfirmModal
+      open={closePrompt !== null}
+      running={closePrompt?.running}
+      onClose={() => setClosePrompt(null)}
+      onResolve={(action, remember) => {
+        void window.api.window.chooseClose(action, remember)
+      }}
+    />
     </ConfigProvider>
   )
 }

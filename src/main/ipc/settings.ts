@@ -2,7 +2,7 @@
  * (`settings:*`). */
 
 import { app, ipcMain, dialog } from 'electron'
-import { closeToTrayEnabled, loadSettings, saveSettings } from '../core/settings.ts'
+import { askOnCloseEnabled, closeToTrayEnabled, loadSettings, saveSettings } from '../core/settings.ts'
 import { dshVersionDir, pluginDir, readDshState, shouldRunOnboarding } from '../core/appState.ts'
 import { failFromError } from '../core/errors.ts'
 import { checkHealth } from '../core/health.ts'
@@ -41,6 +41,23 @@ export function registerSettingsIpc(): void {
   ipcMain.handle('settings:setCloseToTray', (_event, enabled: boolean): IpcResult<boolean> => {
     try {
       saveSettings({ ...loadSettings(), closeToTray: enabled })
+      return { ok: true, value: true }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  ipcMain.handle('settings:getAskOnClose', (): IpcResult<boolean> => {
+    try {
+      return { ok: true, value: askOnCloseEnabled() }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  ipcMain.handle('settings:setAskOnClose', (_event, enabled: boolean): IpcResult<boolean> => {
+    try {
+      saveSettings({ ...loadSettings(), askOnClose: enabled })
       return { ok: true, value: true }
     } catch (error) {
       return failFromError(error)
