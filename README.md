@@ -20,10 +20,19 @@ Built with Electron, React and Ant Design.
   plus your own *patch layer*.
 - **Plugin store** — Browse and search plugins on the npm registry, pick a
   version, and install into a profile. Local-folder plugins are supported too.
-- **Runtimes** — Auto-discover installed dsh versions and pick one as active.
-- **Run & console** — Launch a profile's dsh and watch its output in an
-  embedded terminal console; closing the window with a running profile asks
-  first instead of silently killing it.
+- **Runtimes & updates** — Auto-discover installed dsh versions, pick one as
+  active, and update an app-managed dsh in place (home auto-backed up;
+  cross-major upgrades require confirmation).
+- **Version tracks** — Check for both the stable `latest` and prerelease `next`
+  releases; the official-install picker tags them so you can tell them apart.
+- **Profile migration** — Copy a profile into another installed dsh version and
+  rebuild its bundle layers there; the source profile is kept.
+- **Data export / migration** — Export a dsh's profiles and home data to a zip,
+  restore from an archive, or migrate directly between installed versions.
+- **Run, console & tray** — Launch a profile's dsh and watch its output in an
+  embedded terminal console; the tray shows live run status and elapsed time.
+  Closing the window asks whether to minimize to the tray or quit (with a
+  "don't ask again" option) instead of silently killing a running profile.
 - **Safe trash** — Deleted profiles go to `.trash` (auto-numbered); nothing is
   destroyed until you empty it.
 - **Dual theme & bilingual UI** — Light/dark themes (follows system), and
@@ -33,8 +42,8 @@ Built with Electron, React and Ant Design.
 
 ## Tech Stack
 
-Electron 33 · electron-vite 2 · React 18 · Ant Design 6 · TypeScript 5 · sql.js
-(SQLite/WASM) · i18next · electron-builder · vitest. Managed with pnpm.
+Electron 40 · electron-vite 2 · React 18 · Ant Design 6 · TypeScript 5 · sql.js
+(SQLite/WASM) · i18next · semver · electron-builder · vitest. Managed with pnpm.
 
 ---
 

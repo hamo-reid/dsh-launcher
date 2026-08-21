@@ -14,8 +14,11 @@ DSH Launcher 是 `@deepseek-ai/dsh` 命令行运行时的一款 Windows 桌面�
 
 - **配置档** — 从官方模板（`base` / `web`）创建、克隆、软删除到可恢复的回收站，并可导出/导入为便携式 JSON。每个配置档都是自包含的 dsh 实例，由若干 *bundle 层* 加上你自己的 *patch 层* 组成。
 - **插件商店** — 在 npm 仓库上浏览、搜索插件，选择版本并安装进配置档。也支持本地文件夹插件。
-- **运行时** — 自动发现已安装的 dsh 版本，并指定其中一个为激活版本。
-- **运行与控制台** — 启动配置档对应的 dsh，在内嵌的终端风格控制台观察输出；有配置档运行时关闭窗口会先询问，不会静默终止。
+- **运行时与更新** — 自动发现已安装的 dsh 版本，指定其中一个为激活版本，并可对 app 管理的 DSH 原地升级（升级前自动备份 home；跨大版本需二次确认）。
+- **版本轨道** — 同时检测稳定版 `latest` 与预发布 `next`；官方安装弹窗的版本下拉以标签区分两者。
+- **配置档迁移** — 把一个配置档复制到另一版本的 DSH，并按该版本的 bundle 层重建；源配置档保留。
+- **数据导出 / 迁移** — 把一个 DSH 的配置档与 home 数据导出为 zip 归档、从归档恢复，或在已安装版本之间直接迁移。
+- **运行、控制台与托盘** — 启动配置档对应的 dsh，在内嵌的终端风格控制台观察输出；托盘实时显示运行状态与时长。关闭窗口时询问「最小化到任务栏 / 退出」（可勾选不再提示），不会静默终止运行中的 dsh。
 - **安全的回收站** — 被删除的配置档进入 `.trash`（自动编号命名）；清空回收站前不会真正销毁任何东西。
 - **双主题与双语界面** — 亮 / 暗主题（可跟随系统），支持英文与简体中文。
 
@@ -23,7 +26,7 @@ DSH Launcher 是 `@deepseek-ai/dsh` 命令行运行时的一款 Windows 桌面�
 
 ## 技术栈
 
-Electron 33 · electron-vite 2 · React 18 · Ant Design 6 · TypeScript 5 · sql.js（SQLite/WASM）· i18next · electron-builder · vitest。使用 pnpm 管理。
+Electron 40 · electron-vite 2 · React 18 · Ant Design 6 · TypeScript 5 · sql.js（SQLite/WASM）· i18next · semver · electron-builder · vitest。使用 pnpm 管理。
 
 ---
 
