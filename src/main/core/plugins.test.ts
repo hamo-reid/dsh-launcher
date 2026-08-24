@@ -4,7 +4,7 @@
  * profile install-into. `runPnpm` is mocked so network/FS side effects stay out.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import AdmZip from 'adm-zip'
@@ -18,8 +18,9 @@ import { runPnpm } from './pnpm.ts'
 import {
   addLocalPlugin, addPlugin, buildInstalledOverview, findInstalledDir, initStore,
   installIntoProfile, installedStoreVersion, listPlugins, listProfileScopes,
-  readPluginReadme, removePlugin,
+  migrateStore, needsStoreMigration, readPluginReadme, removePlugin,
 } from './plugins.ts'
+import * as appStateModule from './appState.ts'
 import type { DshScope } from './appState.ts'
 
 let root: string
@@ -48,6 +49,30 @@ function mkProfile(rootDir: string, profile: string, manifest: Record<string, un
   writeFileSync(join(p, 'package.json'), JSON.stringify(manifest))
 }
 
+/** Seed an archived store version at archive/<pkg>/<version>/node_modules/<pkg>. */
+function seedVersion(pkg: string, version: string, extra: Record<string, unknown> = {}): void {
+  mkPkg(join(store(), 'archive', pkg, version, 'node_modules', pkg), version, extra)
+}
+
+/** Mock `pnpm add`: materialise `node_modules/<name>` for the source. Reads the
+ * real name/version from `file:` sources (the legacy→archive migration reinstalls
+ * every package that way); non-`file:` sources fall back to `fresh`. */
+function mockSourceInstall(): void {
+  vi.mocked(runPnpm).mockImplementation(async (dir, args) => {
+    const source = args[1] ?? ''
+    let name = 'fresh'
+    let version = '0.9.0'
+    const srcPath = source.startsWith('file:') ? source.slice(5) : ''
+    if (srcPath !== '' && existsSync(join(srcPath, 'package.json'))) {
+      const pkg = JSON.parse(readFileSync(join(srcPath, 'package.json'), 'utf8')) as { name?: string; version?: string }
+      name = pkg.name ?? name
+      version = pkg.version ?? version
+    }
+    mkPkg(join(dir, 'node_modules', name), version)
+    return { ok: true, text: 'added' }
+  })
+}
+
 describe('store basics', () => {
   it('initStore writes an empty private manifest', () => {
     const d = join(store(), 'init')
@@ -63,17 +88,33 @@ describe('store basics', () => {
     expect(listPlugins(join(root, 'no-store'))).toEqual([])
   })
 
-  it('installedStoreVersion reads the installed package version', () => {
+  it('installedStoreVersion reports the highest archived version', () => {
     expect(installedStoreVersion('', 'x')).toBeUndefined()
-    mkPkg(join(store(), 'node_modules', 'pkg-a'), '3.0.0')
+    seedVersion('pkg-a', '1.0.0')
+    seedVersion('pkg-a', '3.0.0')
     expect(installedStoreVersion(store(), 'pkg-a')).toBe('3.0.0')
+    expect(installedStoreVersion(store(), 'ghost')).toBeUndefined()
   })
 
-  it('addPlugin/removePlugin hand the source to pnpm', async () => {
+  it('addPlugin archives into archive/ and removePlugin uninstalls', async () => {
+    // simulate pnpm resolving the install into the plugin's staging project
+    vi.mocked(runPnpm).mockImplementation(async (dir) => {
+      mkPkg(join(dir, 'node_modules', 'foo'), '1.2.3')
+      return { ok: true, text: 'added' }
+    })
     await addPlugin(store(), 'foo@^1')
-    expect(runPnpm).toHaveBeenCalledWith(store(), ['add', 'foo@^1', '--fetch-retries=3', '--fetch-retry-maxtimeout=60000'])
+    const staging = join(store(), 'archive', 'foo', '.staging')
+    expect(runPnpm).toHaveBeenCalledWith(staging, ['add', 'foo@^1', '--fetch-retries=3', '--fetch-retry-maxtimeout=60000'])
+    expect(listPlugins(store())).toContainEqual({ name: 'foo', version: '1.2.3' })
     await removePlugin(store(), 'foo')
-    expect(runPnpm).toHaveBeenCalledWith(store(), ['remove', 'foo'])
+    expect(existsSync(join(store(), 'archive', 'foo'))).toBe(false)
+  })
+
+  it('removePlugin drops a single archived version and keeps the others', async () => {
+    seedVersion('dup', '1.0.0')
+    seedVersion('dup', '2.0.0')
+    removePlugin(store(), 'dup', '1.0.0')
+    expect(listPlugins(store())).toEqual([{ name: 'dup', version: '2.0.0' }])
   })
 
   it('addPlugin/removePlugin reject when no store is configured', async () => {
@@ -84,12 +125,18 @@ describe('store basics', () => {
 })
 
 describe('local installs', () => {
-  it('adds a plugin from a directory source', async () => {
+  it('adds a plugin from a directory source into the versioned store', async () => {
     const src = join(root, 'src-plugin')
     mkPkg(src, '1.0.0')
+    vi.mocked(runPnpm).mockImplementation(async (dir) => {
+      mkPkg(join(dir, 'node_modules', 'src-plugin'), '1.0.0')
+      return { ok: true, text: 'added' }
+    })
     const r = await addLocalPlugin(store(), src)
     expect(r.ok).toBe(true)
-    expect(runPnpm).toHaveBeenCalledWith(store(), ['add', `file:${src}`])
+    const staging = join(store(), 'archive', 'src-plugin', '.staging')
+    expect(runPnpm).toHaveBeenCalledWith(staging, ['add', `file:${src}`, '--fetch-retries=3', '--fetch-retry-maxtimeout=60000'])
+    expect(listPlugins(store())).toContainEqual({ name: 'src-plugin', version: '1.0.0' })
   })
 
   it('rejects a missing path and a non-zip file', async () => {
@@ -104,11 +151,15 @@ describe('local installs', () => {
     const zip = new AdmZip()
     zip.addFile('inner/package.json', Buffer.from(JSON.stringify({ name: 'inner', version: '1.0.0' })))
     zip.writeZip(zipPath)
+    vi.mocked(runPnpm).mockImplementation(async (dir) => {
+      mkPkg(join(dir, 'node_modules', 'inner'), '1.0.0')
+      return { ok: true, text: 'added' }
+    })
     await addLocalPlugin(store(), zipPath)
-    expect(runPnpm).toHaveBeenCalled()
     const fileArg = vi.mocked(runPnpm).mock.calls.at(-1)?.[1][1] as string
     expect(fileArg.startsWith('file:')).toBe(true)
     expect(fileArg).toContain('.import')
+    expect(listPlugins(store())).toContainEqual({ name: 'inner', version: '1.0.0' })
   })
 
   it('reports a broken zip', async () => {
@@ -135,9 +186,9 @@ describe('scopes and installed-dir resolution', () => {
     expect(r).toEqual([{ id: 'a', name: 'dsh@a', version: undefined, profiles: ['alpha', 'zeta'] }])
   })
 
-  it('findInstalledDir checks the store first, then profiles', () => {
-    mkPkg(join(store(), 'node_modules', 'lift'), '1.0.0')
-    expect(findInstalledDir([], store(), 'lift')).toBe(join(store(), 'node_modules', 'lift'))
+  it('findInstalledDir checks the store versions first, then profiles', () => {
+    seedVersion('lift', '1.0.0')
+    expect(findInstalledDir([], store(), 'lift')).toBe(join(store(), 'archive', 'lift', '1.0.0', 'node_modules', 'lift'))
     const homeD = join(root, 'home-b')
     mkDirEmpty(homeD)
     mkPkg(join(homeD, 'profiles', 'prof-p', 'node_modules', 'ember'), '2.0.0')
@@ -217,17 +268,19 @@ describe('installIntoProfile', () => {
 
   it('adds a link dependency and reports a failed pnpm install', async () => {
     const base = join(root, 'profs-1')
+    seedVersion('pkg-a', '1.0.0')
     mkProfile(base, 'prof', {})
     vi.mocked(runPnpm).mockResolvedValueOnce({ ok: false, text: 'boom' })
     const r = await installIntoProfile('prof', 'pkg-a', store(), base)
     expect(r.ok).toBe(false)
     expect(r.text).toContain('pnpm install 失败')
     const m = JSON.parse(readFileSync(join(base, 'prof', 'package.json'), 'utf8'))
-    expect(m.dependencies['pkg-a']).toBe(`link:${join(store(), 'node_modules', 'pkg-a')}`)
+    expect(m.dependencies['pkg-a']).toBe(`link:${join(store(), 'archive', 'pkg-a', '1.0.0', 'node_modules', 'pkg-a')}`)
   })
 
   it('reports link-only install when the store package stays absent', async () => {
     const base = join(root, 'profs-2')
+    seedVersion('orphan', '1.0.0')
     mkProfile(base, 'prof', {})
     const r = await installIntoProfile('prof', 'orphan', store(), base)
     expect(r.ok).toBe(true)
@@ -238,7 +291,7 @@ describe('installIntoProfile', () => {
   it('activates a declaring bundle by appending it to the layer', async () => {
     const base = join(root, 'profs-3')
     mkProfile(base, 'prof', { dsh: { profile: { bundles: [] } } })
-    mkPkg(join(store(), 'node_modules', 'pkg-b'), '1.0.0', { dsh: { bundle: { patch: 'x' } } })
+    seedVersion('pkg-b', '1.0.0', { dsh: { bundle: { patch: 'x' } } })
     const r = await installIntoProfile('prof', 'pkg-b', store(), base)
     expect(r.ok).toBe(true)
     expect(r.activated).toBe(true)
@@ -249,10 +302,100 @@ describe('installIntoProfile', () => {
   it('says already-in-layer when the bundle is present', async () => {
     const base = join(root, 'profs-4')
     mkProfile(base, 'prof', { dsh: { profile: { bundles: ['pkg-c'] } } })
-    mkPkg(join(store(), 'node_modules', 'pkg-c'), '1.0.0', { dsh: { bundle: { patch: 'x' } } })
+    seedVersion('pkg-c', '1.0.0', { dsh: { bundle: { patch: 'x' } } })
     const r = await installIntoProfile('prof', 'pkg-c', store(), base)
     expect(r.text).toContain('已在 bundle 层')
     expect(r.activated).toBe(true)
+  })
+})
+
+describe('legacy migration', () => {
+  it('hoists a legacy top-level store into versions on the first write', async () => {
+    // Legacy layout: flat manifest deps + packages in the top-level node_modules.
+    writeFileSync(join(store(), 'package.json'), JSON.stringify({ name: 'plugin-store', private: true, dependencies: { oldy: '^1.0.0', range: '^2.0.0' } }))
+    mkPkg(join(store(), 'node_modules', 'oldy'), '1.0.0')
+    mkPkg(join(store(), 'node_modules', 'range'), '2.1.0')
+    // A download triggers the migration.
+    mockSourceInstall()
+    await addPlugin(store(), 'fresh@^0')
+
+    expect(listPlugins(store())).toContainEqual({ name: 'oldy', version: '1.0.0' })
+    expect(listPlugins(store())).toContainEqual({ name: 'range', version: '2.1.0' })
+    expect(listPlugins(store())).toContainEqual({ name: 'fresh', version: '0.9.0' })
+    // The legacy manifest deps were cleared so nothing is listed twice.
+    const m = JSON.parse(readFileSync(join(store(), 'package.json'), 'utf8'))
+    expect(m.dependencies).toEqual({})
+  })
+
+  it('retargets a profile that links into a moved top-level package', async () => {
+    writeFileSync(join(store(), 'package.json'), JSON.stringify({ name: 'plugin-store', private: true, dependencies: { app: '^1.0.0' } }))
+    mkPkg(join(store(), 'node_modules', 'app'), '1.0.0')
+    // A 0.1.4 profile pointing at the top-level store path via `link:`.
+    const home = join(root, 'dshP')
+    const profDir = join(home, 'profiles')
+    mkProfile(profDir, 'prof', { dependencies: { app: `link:${join(store(), 'node_modules', 'app')}` } })
+
+    const spy = vi.spyOn(appStateModule, 'dshScopes').mockReturnValue([{ id: 'p', name: 'dsh@p', home, profilesDir: profDir } as DshScope])
+    try {
+      mockSourceInstall()
+      await addPlugin(store(), 'fresh@^0')
+    } finally {
+      spy.mockRestore()
+    }
+    const profileManifest = JSON.parse(readFileSync(join(profDir, 'prof', 'package.json'), 'utf8'))
+    expect(profileManifest.dependencies.app).toBe(`link:${join(store(), 'archive', 'app', '1.0.0', 'node_modules', 'app')}`)
+    expect(listPlugins(store())).toContainEqual({ name: 'app', version: '1.0.0' })
+  })
+
+  it('needsStoreMigration flags only unabsorbed flat packages', () => {
+    expect(needsStoreMigration('')).toBe(false)
+    expect(needsStoreMigration(join(root, 'no-store'))).toBe(false)
+    // A store whose manifest has no deps → nothing to migrate.
+    writeFileSync(join(store(), 'package.json'), JSON.stringify({ name: 'plugin-store', private: true, dependencies: {} }))
+    expect(needsStoreMigration(store())).toBe(false)
+    // A legacy flat package present in the top-level node_modules → migrate.
+    writeFileSync(join(store(), 'package.json'), JSON.stringify({ name: 'plugin-store', private: true, dependencies: { legacy: '^1.0.0' } }))
+    mkPkg(join(store(), 'node_modules', 'legacy'), '1.0.0')
+    expect(needsStoreMigration(store())).toBe(true)
+    // Once that same package is represented in versions, nothing pending.
+    seedVersion('legacy', '1.0.0')
+    expect(needsStoreMigration(store())).toBe(false)
+  })
+
+  it('migrateStore absorbs a legacy layout and is idempotent', async () => {
+    writeFileSync(join(store(), 'package.json'), JSON.stringify({ name: 'plugin-store', private: true, dependencies: { old1: '^1.0.0', old2: '^2.0.0' } }))
+    mkPkg(join(store(), 'node_modules', 'old1'), '1.0.0')
+    mkPkg(join(store(), 'node_modules', 'old2'), '2.1.0')
+    expect(needsStoreMigration(store())).toBe(true)
+
+    mockSourceInstall()
+    await migrateStore(store())
+
+    expect(listPlugins(store())).toContainEqual({ name: 'old1', version: '1.0.0' })
+    expect(listPlugins(store())).toContainEqual({ name: 'old2', version: '2.1.0' })
+    expect(needsStoreMigration(store())).toBe(false)
+
+    // Re-running is a no-op and leaves nothing left to migrate.
+    const manifest = JSON.parse(readFileSync(join(store(), 'package.json'), 'utf8'))
+    expect(manifest.dependencies).toEqual({})
+    await migrateStore(store())
+    expect(needsStoreMigration(store())).toBe(false)
+    expect(listPlugins(store())).toHaveLength(2)
+  })
+
+  it('falls back to an online reinstall when the offline cache misses', async () => {
+    writeFileSync(join(store(), 'package.json'), JSON.stringify({ name: 'plugin-store', private: true, dependencies: { occ: '^1.0.0' } }))
+    mkPkg(join(store(), 'node_modules', 'occ'), '1.0.0')
+    // First (offline) attempt misses the cache → non-zero + no package; the
+    // online retry then materialises the archive package.
+    vi.mocked(runPnpm).mockImplementation(async (dir, args) => {
+      if (args.includes('--offline')) return { ok: false, text: 'ERR_PNPM_OFFLINE_MISSING' }
+      mkPkg(join(dir, 'node_modules', 'occ'), '1.0.0')
+      return { ok: true, text: 'added' }
+    })
+    await migrateStore(store())
+    expect(listPlugins(store())).toContainEqual({ name: 'occ', version: '1.0.0' })
+    expect(needsStoreMigration(store())).toBe(false)
   })
 })
 

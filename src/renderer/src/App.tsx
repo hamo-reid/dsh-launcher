@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
-import { Alert, Button, ConfigProvider, Layout, Space, Tabs, theme, Typography } from 'antd'
+import { Alert, Button, ConfigProvider, Layout, message, Modal, Space, Tabs, theme, Typography } from 'antd'
 import {
   AppstoreOutlined, CloseOutlined, FullscreenExitOutlined, FullscreenOutlined,
   InfoOutlined, MinusOutlined, ProfileOutlined, RobotOutlined, SettingOutlined,
@@ -25,6 +25,11 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('profile')
   const [onboarding, setOnboarding] = useState<'loading' | 'open' | 'done'>('loading')
   const [onboardDefaults, setOnboardDefaults] = useState({ pluginDir: '', dshVersionDir: '' })
+  // One-time legacy → versioned store migration is never silent: ask first.
+  const [migration, setMigration] = useState<'checking' | 'needed' | 'running' | 'skip'>('checking')
+  // Bumped after a store migration so the plugins view remounts and re-reads the
+  // new (archive) layout without page navigation / reload.
+  const [pluginsEpoch, setPluginsEpoch] = useState(0)
   const { token } = theme.useToken()
   const [maximized, setMaximized] = useState(false)
   const [issues, setIssues] = useState<HealthIssue[]>([])
@@ -57,6 +62,41 @@ export default function App() {
   const refreshHealth = async (): Promise<void> => {
     const r = await window.api.settings.checkHealth()
     if (r.ok) setIssues(r.value)
+  }
+
+  // Ask (not silently migrate): a legacy store is detected on mount; the user
+  // consents to migrate or quits. Probing is read-only.
+  useEffect(() => {
+    let alive = true
+    void window.api.store.needsMigration().then((r) => {
+      if (!alive) return
+      setMigration(r.ok && r.value ? 'needed' : 'skip')
+    })
+    return () => { alive = false }
+  }, [])
+
+  const doMigrate = async (): Promise<void> => {
+    setMigration('running')
+    let migratedOk = false
+    try {
+      // Bail out of an IPC that lingers (migration is idempotent): a ceiling
+      // guarantees the dialog never spins forever. Reload always runs, so the
+      // next mount re-detects (migrated → no prompt; partial → re-asks).
+      const r = await Promise.race([
+        window.api.store.migrate(),
+        new Promise<null>(resolve => setTimeout(() => resolve(null), 5000)),
+      ])
+      migratedOk = r !== null && r.ok === true && r.value.migrated === true
+    } finally {
+      if (migratedOk) void message.success(t('store.migration.done'))
+      // Do NOT window.location.reload(): the page is served at
+      // http://localhost:5173 in dev, and the main process delegates any http(s)
+      // navigation to the system browser — a reload would open the page in the
+      // browser and never remount here. Instead remount the plugins view via a
+      // key bump (it re-reads the store on mount) and close the dialog.
+      setMigration('skip')
+      setPluginsEpoch(epoch => epoch + 1)
+    }
   }
 
   // Jump to the page that can actually act on the current issues: store/plugin
@@ -147,7 +187,7 @@ export default function App() {
 
       <Content style={{ flex: 1, overflow: 'hidden', background: token.colorBgLayout }}>
         {tab === 'profile' && <ProfileSection />}
-        {tab === 'plugins' && <PluginsSection />}
+        {tab === 'plugins' && <PluginsSection key={pluginsEpoch} />}
         {tab === 'settings' && <SettingsSection />}
         {tab === 'dsh' && <DshSection />}
         {tab === 'about' && <AboutView />}
@@ -158,6 +198,24 @@ export default function App() {
         defaults={onboardDefaults}
         onComplete={() => setOnboarding('done')}
       />
+    )}
+    {(migration === 'needed' || migration === 'running') && (
+      <Modal
+        open
+        closable={false}
+        maskClosable={false}
+        keyboard={false}
+        title={t('store.migration.title')}
+        okText={t('store.migration.ok')}
+        cancelText={t('store.migration.exit')}
+        okButtonProps={{ disabled: migration === 'running' }}
+        confirmLoading={migration === 'running'}
+        onOk={() => void doMigrate()}
+        onCancel={() => void window.api.window.quit()}
+        width={440}
+      >
+        <div style={{ color: 'inherit' }}>{t('store.migration.body')}</div>
+      </Modal>
     )}
     <CloseConfirmModal
       open={closePrompt !== null}

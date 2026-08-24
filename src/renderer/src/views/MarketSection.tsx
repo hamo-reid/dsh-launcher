@@ -17,7 +17,7 @@ import { apiErrorText } from '../lib/ipc.ts'
 import Panel from '../components/Panel.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
 import FieldLabel from '../components/FieldLabel.tsx'
-import { DownloadVersionModal, InstallToProfileModal } from './PluginsModals.tsx'
+import { DownloadVersionModal, InstallToProfileModal, toStoreMap } from './PluginsModals.tsx'
 import type { MarketPlugin, MarketSort, MarketSourceState } from '../../../shared/types.ts'
 
 const num = (n: number): string => new Intl.NumberFormat().format(n)
@@ -51,7 +51,7 @@ export default function MarketSection(): JSX.Element {
   const seqRef = useRef(0)
 
   // Store membership (for in-store marking + which plugins are downloadable).
-  const [storeNames, setStoreNames] = useState<Set<string>>(new Set())
+  const [storeMap, setStoreMap] = useState<Map<string, string[]>>(new Map())
 
   // Dialogs.
   const [dlPkg, setDlPkg] = useState<string | null>(null) // npm name → DownloadVersionModal
@@ -61,7 +61,7 @@ export default function MarketSection(): JSX.Element {
 
   const refreshStoreNames = useCallback(async (): Promise<void> => {
     const r = await window.api.plugins.list()
-    if (r.ok) setStoreNames(new Set(r.value.map(p => p.name)))
+    if (r.ok) setStoreMap(toStoreMap(r.value))
   }, [])
 
   // The one request path. Reads the current filter/page state (fresh via the
@@ -147,7 +147,7 @@ export default function MarketSection(): JSX.Element {
       const r = await window.api.market.resolve(p.url)
       if (!r.ok) { void message.error(apiErrorText(r)); return }
       if (r.value.spec === null) { void message.error(t('plugin.market.noSource')); return }
-      const add = await window.api.plugins.add(r.value.spec)
+      const add = await window.api.plugins.add(r.value.spec, p.name)
       if (!add.ok) { void message.error(apiErrorText(add)); return }
       void message.success(t('plugin.market.addedToStore', { spec: r.value.spec }))
       await refreshStoreNames()
@@ -247,17 +247,17 @@ export default function MarketSection(): JSX.Element {
                 // repo package.json name), so a repo download is recognised in
                 // the store and its install button correctly targets it.
                 const storeKey = p.npm && p.npm.trim() !== '' ? p.npm : p.name
-                const inStore = storeNames.has(storeKey)
+                const inStore = storeMap.has(storeKey)
                 return (
                   <List.Item
                     style={{ cursor: 'pointer' }}
                     onClick={() => setDetail(p)}
                     actions={[
-                      inStore
-                        ? <Button size="small" type="primary" onClick={e => { e.stopPropagation(); setInstallPkg(storeKey) }}>{t('plugin.market.installToProfile')}</Button>
-                        : hasNpm(p)
-                          ? <Button size="small" disabled={busy !== null} onClick={e => { e.stopPropagation(); setDlPkg(p.npm!) }}>{t('plugin.market.download')}</Button>
-                          : <Button size="small" loading={busy === p.url} onClick={e => { e.stopPropagation(); void downloadFromGitHub(p) }}>{t('plugin.market.downloadGitHub')}</Button>,
+                      // 下载始终可用(可下载其他版本);安装到 profile 仅在已入库时显示。
+                      hasNpm(p)
+                        ? <Button key="dl" size="small" disabled={busy !== null} onClick={e => { e.stopPropagation(); setDlPkg(p.npm!) }}>{t('plugin.market.download')}</Button>
+                        : <Button key="dl" size="small" loading={busy === p.url} onClick={e => { e.stopPropagation(); void downloadFromGitHub(p) }}>{t('plugin.market.downloadGitHub')}</Button>,
+                      ...(inStore ? [<Button key="install" type="primary" size="small" onClick={e => { e.stopPropagation(); setInstallPkg(storeKey) }}>{t('plugin.market.installToProfile')}</Button>] : []),
                     ]}
                   >
                     <List.Item.Meta
@@ -354,6 +354,7 @@ export default function MarketSection(): JSX.Element {
       />
       <InstallToProfileModal
         installPkg={installPkg}
+        versions={installPkg !== null ? storeMap.get(installPkg) ?? [] : []}
         onClose={() => setInstallPkg(null)}
         onDone={async () => { await refreshStoreNames() }}
       />

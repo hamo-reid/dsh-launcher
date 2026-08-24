@@ -10,6 +10,8 @@ import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { logger } from './logger.ts'
+import { nodeEnvironment } from './node-env.ts'
+import { nodePreferenceValue } from './settings.ts'
 
 const require = createRequire(import.meta.url)
 
@@ -51,13 +53,19 @@ function summarizePnpmOut(out: string): string {
     .join('\n')
 }
 
+/** Node to drive pnpm with: the setting-preferred one when usable, else the
+ * bundled Node (keeps pnpm available offline even without a system node). */
+function resolvePnpmNode(): string {
+  return nodeEnvironment(nodePreferenceValue()).prefer === 'system' ? 'node' : process.execPath
+}
+
 /** Run `pnpm <args>` with cwd, resolving on process exit. */
 export function runPnpm(cwd: string, args: readonly string[]): Promise<PnpmResult> {
   return new Promise((resolve) => {
     logger.debug(`pnpm ${args.join(' ')} @ ${cwd}`)
     let child: ReturnType<typeof spawn>
     try {
-      child = spawn(process.execPath, [resolvePnpmEntry(), ...args], {
+      child = spawn(resolvePnpmNode(), [resolvePnpmEntry(), ...args], {
         cwd,
         // Absolute execPath + array args: no shell, so a spacey packaged exe name
         // or a spacey pnpm-entry path is passed correctly (no quoting hazards).

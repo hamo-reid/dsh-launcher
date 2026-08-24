@@ -5,7 +5,7 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { existsExecutable, resolveLaunchEntry } from './dsh.ts'
-import { listPlugins } from './plugins.ts'
+import { findInstalledDir, listPlugins } from './plugins.ts'
 import type { DshEntry, HealthIssue } from '../../shared/types.ts'
 
 /** True when a dsh's bundle-node launch entry can't be resolved — the structural
@@ -41,10 +41,13 @@ export function checkHealth(dshes: DshEntry[], storeDir: string): HealthIssue[] 
   } else if (!existsSync(storeDir)) {
     issues.push({ kind: 'store-missing', label: storeDir, path: storeDir, missing: true })
   } else {
-    for (const p of listPlugins(storeDir)) {
-      const pluginDir = join(storeDir, 'node_modules', p.name)
-      if (!existsSync(join(pluginDir, 'package.json'))) {
-        issues.push({ kind: 'plugin-missing', label: p.name, path: pluginDir, missing: true })
+    // Every archived plugin (unique by name) must resolve to an installed copy;
+    // in the versioned layout that is one of its version dirs node_modules.
+    const names = new Set(listPlugins(storeDir).map(p => p.name))
+    for (const name of names) {
+      const installed = findInstalledDir([], storeDir, name)
+      if (installed === undefined) {
+        issues.push({ kind: 'plugin-missing', label: name, path: join(storeDir, name), missing: true })
       }
     }
   }

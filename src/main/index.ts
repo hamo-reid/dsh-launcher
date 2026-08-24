@@ -13,6 +13,7 @@ import { registerHomeDataIpc } from './ipc/home-data.ts'
 import { registerTrashIpc } from './ipc/trash.ts'
 import { registerMarketIpc } from './ipc/market.ts'
 import { registerSettingsIpc } from './ipc/settings.ts'
+import { registerStoreIpc } from './ipc/store.ts'
 import { hookWindowMaximize, registerWindowIpc } from './ipc/window.ts'
 import { registerLogsIpc } from './ipc/logs.ts'
 import { initLogger, logger } from './core/logger.ts'
@@ -183,6 +184,7 @@ function registerIpc(): void {
   registerHomeIpc()
   registerPluginsIpc()
   registerMarketIpc()
+  registerStoreIpc()
   registerDshIpc()
   registerHomeDataIpc()
   registerTrashIpc()

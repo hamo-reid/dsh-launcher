@@ -37,8 +37,9 @@ describe('checkHealth', () => {
     writeFileSync(shim, '@echo off')
     const home = dir('dsh/home')
     const store = dir('store')
-    writeFileSync(join(store, 'package.json'), JSON.stringify({ name: 'store', private: true, dependencies: { p1: '^1.0.0' } }))
-    writeFileSync(join(dir('store/node_modules/p1'), 'package.json'), JSON.stringify({ name: 'p1', version: '1.0.0' }))
+    writeFileSync(join(store, 'package.json'), JSON.stringify({ name: 'store', private: true, dependencies: {} }))
+    // an archived version makes the store healthy
+    writeFileSync(join(dir('store/archive/p1/1.0.0/node_modules/p1'), 'package.json'), JSON.stringify({ name: 'p1', version: '1.0.0' }))
 
     expect(checkHealth([entry(shim, home)], store)).toEqual([])
   })
@@ -82,7 +83,7 @@ describe('checkHealth', () => {
     writeFileSync(join(store, 'package.json'), JSON.stringify({ name: 'store', private: true, dependencies: { gone: '^2.0.0' } }))
     // package.json lists `gone`, but node_modules/gone is absent.
     expect(checkHealth([entry(shim, dir('dsh5/home'))], store))
-      .toContainEqual({ kind: 'plugin-missing', label: 'gone', path: join(store, 'node_modules', 'gone'), missing: true })
+      .toContainEqual({ kind: 'plugin-missing', label: 'gone', path: join(store, 'gone'), missing: true })
   })
 
   it('flags a dsh whose launch entry is broken (incomplete install)', () => {

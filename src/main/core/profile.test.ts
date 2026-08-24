@@ -223,7 +223,7 @@ describe('importProfile', () => {
   })
 
   it('reuses an existing store version when it satisfies the range', async () => {
-    const pkgDir = join(store(), 'node_modules', 'npmA')
+    const pkgDir = join(store(), 'archive', 'npmA', '1.2.0', 'node_modules', 'npmA')
     mkdirSync(pkgDir, { recursive: true })
     writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ version: '1.2.0' }))
     const payload = JSON.stringify({

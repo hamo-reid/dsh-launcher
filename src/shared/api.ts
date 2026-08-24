@@ -91,11 +91,11 @@ export interface WindowApi {
     getDir: () => Promise<IpcResult<{ dir: string }>>
     setDir: (dir: string) => Promise<IpcResult<boolean>>
     list: () => Promise<IpcResult<InstalledPlugin[]>>
-    add: (source: string) => Promise<IpcResult<string>>
+    add: (source: string, name?: string) => Promise<IpcResult<string>>
     addLocal: (kind: 'folder' | 'zip') => Promise<IpcResult<string>>
     installOptions: () => Promise<IpcResult<{ id: string; name: string; version?: string; profiles: string[] }[]>>
-    installToProfile: (profile: string, pkg: string, dshId?: string) => Promise<IpcResult<string>>
-    remove: (name: string) => Promise<IpcResult<string>>
+    installToProfile: (profile: string, pkg: string, version?: string, dshId?: string) => Promise<IpcResult<string>>
+    remove: (name: string, version?: string) => Promise<IpcResult<string>>
     listCombo: (profile: string) => Promise<IpcResult<ComboPlugin[]>>
     overview: () => Promise<IpcResult<InstalledOverviewRow[]>>
     reveal: (name: string) => Promise<IpcResult<boolean>>
@@ -157,6 +157,8 @@ export interface WindowApi {
     minimize: () => Promise<IpcResult<boolean>>
     toggleMaximize: () => Promise<IpcResult<boolean>>
     close: () => Promise<IpcResult<boolean>>
+    /** Hard quit — bypasses the minimize-to-tray close guard (migration "exit"). */
+    quit: () => Promise<IpcResult<boolean>>
     isMaximized: () => Promise<IpcResult<boolean>>
     /** Resolve a close prompt: minimize-to-tray (`'tray'`) or quit; `remember`
      * persists the choice as the close behaviour and stops future prompts. */
@@ -165,6 +167,14 @@ export interface WindowApi {
     onAskClose: (callback: (info: { running?: string }) => void) => () => void
     /** Push event mirroring maximize state (for the title-bar icon). Returns an unsubscribe. */
     onMaximizeState: (callback: (maximized: boolean) => void) => () => void
+  }
+
+  store: {
+    /** Whether the plugin store still holds legacy flat packages awaiting the
+     * one-time legacy → versioned migration. Read-only probe for the consent dialog. */
+    needsMigration: () => Promise<IpcResult<boolean>>
+    /** Run the one-time migration after the user consents. Idempotent no-op when already versioned. */
+    migrate: () => Promise<IpcResult<{ migrated: boolean }>>
   }
 
   dsh: {

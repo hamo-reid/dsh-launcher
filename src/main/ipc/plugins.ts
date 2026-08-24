@@ -70,9 +70,9 @@ export function registerPluginsIpc(): void {
     }
   })
 
-  ipcMain.handle('plugins:add', async (_event, source: string): Promise<IpcResult<string>> => {
+  ipcMain.handle('plugins:add', async (_event, source: string, name?: string): Promise<IpcResult<string>> => {
     try {
-      const result = await addPlugin(pluginDir(), source)
+      const result = await addPlugin(pluginDir(), source, name)
       return result.ok ? { ok: true, value: '已下载到本地存储：' + result.text } : fail('store.installFailed', { detail: result.text })
     } catch (error) {
       return failFromError(error)
@@ -110,22 +110,22 @@ export function registerPluginsIpc(): void {
   })
 
   // Point a profile (under a chosen dsh) at a locally-downloaded plugin.
-  ipcMain.handle('plugins:installToProfile', async (_event, profile: string, pkg: string, dshId?: string): Promise<IpcResult<string>> => {
+  ipcMain.handle('plugins:installToProfile', async (_event, profile: string, pkg: string, version?: string, dshId?: string): Promise<IpcResult<string>> => {
     try {
       const entry = dshId !== undefined ? readDshState().dshes.find(d => d.id === dshId) : undefined
       const base = entry !== undefined && entry.profilesDir !== undefined
         ? entry.profilesDir
         : entry !== undefined ? join(entry.home, 'profiles') : undefined
-      const result = await installIntoProfile(profile, pkg, pluginDir(), base)
+      const result = await installIntoProfile(profile, pkg, pluginDir(), base, { version })
       return result.ok ? { ok: true, value: result.text } : fail('store.operationFailed', { detail: result.text })
     } catch (error) {
       return failFromError(error)
     }
   })
 
-  ipcMain.handle('plugins:remove', async (_event, name: string): Promise<IpcResult<string>> => {
+  ipcMain.handle('plugins:remove', async (_event, name: string, version?: string): Promise<IpcResult<string>> => {
     try {
-      const result = await removePlugin(pluginDir(), name)
+      const result = await removePlugin(pluginDir(), name, version)
       return result.ok ? { ok: true, value: result.text } : fail('store.operationFailed', { detail: result.text })
     } catch (error) {
       return failFromError(error)

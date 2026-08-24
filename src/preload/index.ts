@@ -125,16 +125,16 @@ const api = {
       ipcRenderer.invoke('plugins:setDir', dir),
     list: (): Promise<IpcResult<{ name: string; version: string }[]>> =>
       ipcRenderer.invoke('plugins:list'),
-    add: (source: string): Promise<IpcResult<string>> =>
-      ipcRenderer.invoke('plugins:add', source),
+    add: (source: string, name?: string): Promise<IpcResult<string>> =>
+      ipcRenderer.invoke('plugins:add', source, name),
     addLocal: (kind: 'folder' | 'zip'): Promise<IpcResult<string>> =>
       ipcRenderer.invoke('plugins:addLocal', kind),
-    installToProfile: (profile: string, pkg: string, dshId?: string): Promise<IpcResult<string>> =>
-      ipcRenderer.invoke('plugins:installToProfile', profile, pkg, dshId),
+    installToProfile: (profile: string, pkg: string, version?: string, dshId?: string): Promise<IpcResult<string>> =>
+      ipcRenderer.invoke('plugins:installToProfile', profile, pkg, version, dshId),
     installOptions: (): Promise<IpcResult<{ id: string; name: string; version?: string; profiles: string[] }[]>> =>
       ipcRenderer.invoke('plugins:installOptions'),
-    remove: (name: string): Promise<IpcResult<string>> =>
-      ipcRenderer.invoke('plugins:remove', name),
+    remove: (name: string, version?: string): Promise<IpcResult<string>> =>
+      ipcRenderer.invoke('plugins:remove', name, version),
     listCombo: (profile: string): Promise<IpcResult<ComboPlugin[]>> =>
       ipcRenderer.invoke('plugins:listCombo', profile),
     overview: (): Promise<IpcResult<InstalledOverviewRow[]>> =>
@@ -255,6 +255,7 @@ const api = {
     minimize: (): Promise<IpcResult<boolean>> => ipcRenderer.invoke('window:minimize'),
     toggleMaximize: (): Promise<IpcResult<boolean>> => ipcRenderer.invoke('window:toggleMaximize'),
     close: (): Promise<IpcResult<boolean>> => ipcRenderer.invoke('window:close'),
+    quit: (): Promise<IpcResult<boolean>> => ipcRenderer.invoke('window:quit'),
     isMaximized: (): Promise<IpcResult<boolean>> => ipcRenderer.invoke('window:isMaximized'),
     chooseClose: (action: 'tray' | 'quit', remember: boolean): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('window:chooseClose', action, remember),
@@ -268,6 +269,11 @@ const api = {
       ipcRenderer.on('window:maximized', handler)
       return () => { ipcRenderer.removeListener('window:maximized', handler) }
     },
+  },
+
+  store: {
+    needsMigration: (): Promise<IpcResult<boolean>> => ipcRenderer.invoke('store:needsMigration'),
+    migrate: (): Promise<IpcResult<{ migrated: boolean }>> => ipcRenderer.invoke('store:migrate'),
   },
 
   app: {

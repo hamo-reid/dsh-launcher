@@ -121,10 +121,28 @@ export function PluginDetailModal(p: PluginDetailModalProps): JSX.Element {
   )
 }
 
+// ── store membership ────────────────────────────────────────────────────────
+
+/** Build a plugin-name → archived versions map from `plugins:list` rows. The
+ * same plugin can hold several versions (the versioned store), so "in store" is
+ * "this name has at least one archived version", and install-to-profile offers
+ * the version list. */
+export function toStoreMap(rows: { name: string; version: string }[]): Map<string, string[]> {
+  const m = new Map<string, string[]>()
+  for (const p of rows) {
+    const a = m.get(p.name)
+    if (a === undefined) m.set(p.name, [p.version])
+    else a.push(p.version)
+  }
+  return m
+}
+
 // ── Install into a profile ─────────────────────────────────────────────────
 
 interface InstallToProfileModalProps {
   installPkg: string | null
+  /** Archived store versions of the plugin; the one to link is chosen here. */
+  versions: string[]
   onClose: () => void
   onDone: () => void | Promise<void>
 }
@@ -133,29 +151,33 @@ export function InstallToProfileModal(p: InstallToProfileModalProps): JSX.Elemen
   const [installScopes, setInstallScopes] = useState<{ id: string; name: string; version?: string; profiles: string[] }[]>([])
   const [installDsh, setInstallDsh] = useState<string>()
   const [installProfile, setInstallProfile] = useState<string>()
+  // Which archived version to link; defaults to the latest archived one.
+  const [version, setVersion] = useState<string>()
   const [installing, setInstalling] = useState(false)
 
   useEffect(() => {
     if (p.installPkg === null) return
+    setVersion(p.versions.length > 0 ? p.versions[p.versions.length - 1] : undefined)
     void (async () => {
       const opts = await window.api.plugins.installOptions()
       if (opts.ok) setInstallScopes(opts.value)
     })()
-  }, [p.installPkg])
+  }, [p.installPkg, p.versions])
 
   const doInstall = async (): Promise<void> => {
     if (p.installPkg === null || installDsh === undefined || installProfile === undefined) { void message.warning(t('plugin.install.needBoth')); return }
     setInstalling(true)
-    const res = await window.api.plugins.installToProfile(installProfile, p.installPkg, installDsh)
+    const res = await window.api.plugins.installToProfile(installProfile, p.installPkg, version, installDsh)
     setInstalling(false)
     if (!res.ok) { void message.error(apiErrorText(res)); return }
-    void message.success(`${p.installPkg} → ${installProfile}：${res.value}`)
+    void message.success(`${p.installPkg}${version !== undefined ? `@${version}` : ''} → ${installProfile}：${res.value}`)
     p.onClose()
     setInstallDsh(undefined)
     setInstallProfile(undefined)
     await p.onDone()
   }
 
+  const showVersionPicker = p.versions.length > 1
   return (
     <Modal title={t('plugin.install.title', { name: p.installPkg ?? '' })} open={p.installPkg !== null} okText={t('plugin.install.install')} onOk={() => void doInstall()}
       okButtonProps={{ disabled: installProfile === undefined }} onCancel={() => { p.onClose(); setInstallDsh(undefined); setInstallProfile(undefined) }}
@@ -163,6 +185,13 @@ export function InstallToProfileModal(p: InstallToProfileModalProps): JSX.Elemen
       <div style={{ marginBottom: 10, color: 'inherit' }}>
         {t('plugin.install.prompt', { name: p.installPkg ?? '' })}
       </div>
+      {showVersionPicker && (
+        <div style={{ marginBottom: 8 }}>
+          <FieldLabel>{t('plugin.install.version')}</FieldLabel>
+          <Select value={version} onChange={setVersion} style={{ width: '100%' }} placeholder={t('plugin.install.versionPlaceholder')}
+            options={p.versions.map(v => ({ value: v, label: v }))} />
+        </div>
+      )}
       <div style={{ marginBottom: 6 }}>
         <FieldLabel>{t('plugin.install.dsh')}</FieldLabel>
         <Select value={installDsh} onChange={v => { setInstallDsh(v); setInstallProfile(undefined) }} style={{ width: '100%' }} placeholder={t('plugin.install.dshPlaceholder')}

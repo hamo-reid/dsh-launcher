@@ -8,7 +8,7 @@ import { apiErrorText } from '../lib/ipc.ts'
 import AppShell from '../components/AppShell.tsx'
 import Panel from '../components/Panel.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
-import { DownloadVersionModal, PluginDetailModal, InstallToProfileModal } from './PluginsModals.tsx'
+import { DownloadVersionModal, PluginDetailModal, InstallToProfileModal, toStoreMap } from './PluginsModals.tsx'
 import MarketSection from './MarketSection.tsx'
 import type { InstalledOverviewRow, NpmSearchHit } from '../../../shared/types.ts'
 
@@ -45,7 +45,7 @@ export default function PluginsSection() {
   const [total, setTotal] = useState(0)
   const [searching, setSearching] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
-  const [storeNames, setStoreNames] = useState<Set<string>>(new Set())
+  const [storeMap, setStoreMap] = useState<Map<string, string[]>>(new Map())
   const [dlPkg, setDlPkg] = useState<string | null>(null)
   const fromRef = useRef(0)
 
@@ -79,7 +79,7 @@ export default function PluginsSection() {
 
   const refreshStoreNames = useCallback(async (): Promise<void> => {
     const r = await window.api.plugins.list()
-    if (r.ok) setStoreNames(new Set(r.value.map(p => p.name)))
+    if (r.ok) setStoreMap(toStoreMap(r.value))
   }, [])
 
   useEffect(() => {
@@ -293,13 +293,12 @@ export default function PluginsSection() {
               emptyText: (dq ?? '') === 'dsh' ? t('plugin.download.emptyHint') : t('plugin.download.noMatch'),
             }}
             renderItem={(hit) => {
-              const inStore = storeNames.has(hit.name)
+              const inStore = storeMap.has(hit.name)
               return (
                 <List.Item
                   actions={[
-                    inStore
-                      ? <Button type="primary" size="small" disabled={dirMissing} onClick={() => setInstallPkg(hit.name)}>{t('plugin.download.installToProfile')}</Button>
-                      : <Button type="primary" size="small" disabled={dirMissing} onClick={() => setDlPkg(hit.name)}>{t('plugin.version.download')}</Button>,
+                    <Button key="dl" size="small" disabled={dirMissing} onClick={() => setDlPkg(hit.name)}>{t('plugin.version.download')}</Button>,
+                    ...(inStore ? [<Button key="install" type="primary" size="small" onClick={() => setInstallPkg(hit.name)}>{t('plugin.download.installToProfile')}</Button>] : []),
                   ]}
                 >
                   <List.Item.Meta
@@ -384,6 +383,7 @@ export default function PluginsSection() {
     />
     <InstallToProfileModal
       installPkg={installPkg}
+      versions={installPkg !== null ? storeMap.get(installPkg) ?? [] : []}
       onClose={() => setInstallPkg(null)}
       onDone={async () => { await Promise.all([load(), refreshStoreNames()]) }}
     />
