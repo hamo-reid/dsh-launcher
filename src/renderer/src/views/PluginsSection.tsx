@@ -90,6 +90,15 @@ export default function PluginsSection() {
     })()
   }, [refreshStoreNames])
 
+  // 从市场 / 下载中心 / 安装切回「总览」时重载一次，让刚下载/安装的插件立即可
+  // 见 —— view 切换不重挂载本组件，否则总览会一直持有旧的挂载时数据。
+  const prevView = useRef<PluginView>(view)
+  useEffect(() => {
+    if (view === 'overview' && prevView.current !== 'overview') void load()
+    prevView.current = view
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view])
+
   // ── 实时搜索（防抖）+ 分页 ─────────────────────────────────────────
   const runSearch = useCallback(async (query: string, append: boolean): Promise<void> => {
     const q = query.trim()
