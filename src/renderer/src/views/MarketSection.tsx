@@ -139,7 +139,7 @@ export default function MarketSection(): JSX.Element {
   }
 
   const descOf = (p: MarketPlugin): string => p.description?.[lang] ?? p.description?.en ?? ''
-  const hasNpm = (p: MarketPlugin): boolean => p.npm !== undefined && p.npm !== null
+  const hasNpm = (p: MarketPlugin): boolean => typeof p.npm === 'string' && p.npm !== ''
 
   const downloadFromGitHub = async (p: MarketPlugin): Promise<void> => {
     setBusy(p.url)
@@ -242,14 +242,19 @@ export default function MarketSection(): JSX.Element {
               rowKey="url"
               locale={{ emptyText: t('plugin.market.empty') }}
               renderItem={(p: MarketPlugin) => {
-                const inStore = p.npm !== undefined && p.npm !== null && storeNames.has(p.npm)
+                // Store membership: npm plugins match by npm name; a GitHub-only
+                // entry is identified by its catalog name (dsh repos publish the
+                // repo package.json name), so a repo download is recognised in
+                // the store and its install button correctly targets it.
+                const storeKey = p.npm && p.npm.trim() !== '' ? p.npm : p.name
+                const inStore = storeNames.has(storeKey)
                 return (
                   <List.Item
                     style={{ cursor: 'pointer' }}
                     onClick={() => setDetail(p)}
                     actions={[
                       inStore
-                        ? <Button size="small" type="primary" onClick={e => { e.stopPropagation(); setInstallPkg(p.npm!) }}>{t('plugin.market.installToProfile')}</Button>
+                        ? <Button size="small" type="primary" onClick={e => { e.stopPropagation(); setInstallPkg(storeKey) }}>{t('plugin.market.installToProfile')}</Button>
                         : hasNpm(p)
                           ? <Button size="small" disabled={busy !== null} onClick={e => { e.stopPropagation(); setDlPkg(p.npm!) }}>{t('plugin.market.download')}</Button>
                           : <Button size="small" loading={busy === p.url} onClick={e => { e.stopPropagation(); void downloadFromGitHub(p) }}>{t('plugin.market.downloadGitHub')}</Button>,
