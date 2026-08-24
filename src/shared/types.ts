@@ -347,3 +347,62 @@ export interface OnboardingPayload {
   /** Preferred node for launching dsh (`'system'` | `'bundled'`). */
   nodePreference?: 'system' | 'bundled'
 }
+
+// ── community market (awesome-dsh-plugin catalog) ────────────────────────────
+
+/**
+ * One plugin entry from the curated community catalog (`/plugins.json`),
+ * as published by awesome-dsh-plugin and refreshed daily by its CI.
+ *
+ * The `null`-vs-0 rule is load-bearing: `stars`/`downloads` of `null` mean
+ * "the upstream has no value" (a coverage gap), NEVER a popularity of zero —
+ * sorting must treat them as unknown, not as bottom-of-the-leaderboard.
+ */
+export interface MarketPlugin {
+  name: string
+  owner: string
+  /** Canonical identity key — the GitHub repo URL. Stable across renames; the
+   * unique field to use when matching installed/installed names. */
+  url: string
+  category: string
+  /** Bilingual description, keyed by locale code (`en`/`zh`…). */
+  description: Record<string, string>
+  /** Published npm package name, when the repo publishes one (installation
+   * prefers this over a raw GitHub download). `null`/absent → GitHub-only. */
+  npm?: string | null
+  /** Star count as refreshed by upstream CI (not live). `null` = unknown. */
+  stars?: number | null
+  /** npm downloads in the last 30 days. `null` = unknown (not zero). */
+  downloads?: number | null
+  /** The one-line install command the catalog prints for this plugin. */
+  install: string
+  /** ISO date the entry was added to the catalog. */
+  added?: string
+  /** Catalog-side deprecation flag; when true, `replacement` names the successor. */
+  deprecated?: boolean
+  /** Catalog name of the suggested replacement plugin, when deprecated. */
+  replacement?: string
+}
+
+/** The whole curated catalog: categories + the plugin list. */
+export interface MarketCatalog {
+  /** ISO date the upstream last refreshed the list. */
+  updated: string
+  count: number
+  /** Category id → localized label, e.g. `{ ui: { en: 'UI', zh: 'UI 增强' } }`. */
+  categories: Record<string, Record<string, string>>
+  plugins: MarketPlugin[]
+}
+
+/** Which origin the market catalog is loaded from — a user-chosen pipeline. */
+export type MarketSource = 'official' | 'custom'
+
+/** The market's current loading route + any custom URL, for the UI picker. */
+export interface MarketSourceState {
+  source: MarketSource
+  /** Custom `plugins.json` URL, only meaningful when `source === 'custom'`. */
+  url: string
+}
+
+/** Sort orders for the market list. */
+export type MarketSort = 'stars' | 'downloads' | 'newest'

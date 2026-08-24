@@ -11,6 +11,7 @@ import { registerPluginsIpc } from './ipc/plugins.ts'
 import { registerDshIpc } from './ipc/dsh.ts'
 import { registerHomeDataIpc } from './ipc/home-data.ts'
 import { registerTrashIpc } from './ipc/trash.ts'
+import { registerMarketIpc } from './ipc/market.ts'
 import { registerSettingsIpc } from './ipc/settings.ts'
 import { hookWindowMaximize, registerWindowIpc } from './ipc/window.ts'
 import { registerLogsIpc } from './ipc/logs.ts'
@@ -181,6 +182,7 @@ function registerIpc(): void {
   registerProfileIpc()
   registerHomeIpc()
   registerPluginsIpc()
+  registerMarketIpc()
   registerDshIpc()
   registerHomeDataIpc()
   registerTrashIpc()

@@ -13,6 +13,7 @@ import { dirname, join } from 'node:path'
 import initSqlJs, { type Database } from 'sql.js'
 import { logger } from './logger.ts'
 import type { DshEntry } from './dsh.ts'
+import type { MarketSource } from '../../shared/types.ts'
 
 export interface AppSettings {
   /** Directory where downloaded/installed plugins are kept. */
@@ -38,6 +39,11 @@ export interface AppSettings {
   nodePreference?: 'system' | 'bundled'
   /** Whether the first-run onboarding wizard has been completed. */
   onboarded?: boolean
+  /** Which origin the community market loads its catalog from (`'official'`
+   * = the canonical `plugins.json`; `'custom'` = a user-supplied mirror URL). */
+  marketSource?: MarketSource
+  /** Custom market catalog URL, used when `marketSource === 'custom'`. */
+  marketUrl?: string
 }
 
 const KEY = 'app'

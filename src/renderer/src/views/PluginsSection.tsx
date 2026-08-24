@@ -9,9 +9,10 @@ import AppShell from '../components/AppShell.tsx'
 import Panel from '../components/Panel.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
 import { DownloadVersionModal, PluginDetailModal, InstallToProfileModal } from './PluginsModals.tsx'
+import MarketSection from './MarketSection.tsx'
 import type { InstalledOverviewRow, NpmSearchHit } from '../../../shared/types.ts'
 
-type PluginView = 'overview' | 'download' | 'install'
+type PluginView = 'overview' | 'download' | 'install' | 'market'
 
 const PAGE_SIZE = 25
 
@@ -60,6 +61,7 @@ export default function PluginsSection() {
 
   const menuItems = [
     { key: 'overview' as const, label: t('plugin.view.overview') },
+    { key: 'market' as const, label: t('plugin.view.market') },
     { key: 'download' as const, label: t('plugin.view.download') },
     { key: 'install' as const, label: t('plugin.view.install') },
   ]
@@ -259,6 +261,8 @@ export default function PluginsSection() {
           </Panel>
         </Space>
       )}
+
+      {view === 'market' && <MarketSection />}
 
       {view === 'download' && (
         <Space direction="vertical" style={{ width: '100%' }} size="middle">

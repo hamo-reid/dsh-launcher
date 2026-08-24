@@ -17,6 +17,9 @@ import type {
   ImportStep,
   InstalledOverviewRow,
   IpcResult,
+  MarketCatalog,
+  MarketPlugin,
+  MarketSourceState,
   NodeEnvironment,
   NpmSearchHit,
   OnboardingPayload,
@@ -143,6 +146,15 @@ const api = {
       ipcRenderer.invoke('plugins:search', query, opts),
     pkgVersions: (name: string): Promise<IpcResult<PackageVersionInfo>> =>
       ipcRenderer.invoke('plugins:pkgVersions', name),
+  },
+
+  market: {
+    list: (opts?: { source?: MarketSourceState }): Promise<IpcResult<MarketCatalog>> =>
+      ipcRenderer.invoke('market:list', opts),
+    source: (): Promise<IpcResult<MarketSourceState>> => ipcRenderer.invoke('market:source'),
+    setSource: (next: MarketSourceState): Promise<IpcResult<boolean>> => ipcRenderer.invoke('market:setSource', next),
+    resolve: (url: string): Promise<IpcResult<{ spec: string | null; plugin: MarketPlugin | null }>> =>
+      ipcRenderer.invoke('market:resolve', url),
   },
 
   settings: {

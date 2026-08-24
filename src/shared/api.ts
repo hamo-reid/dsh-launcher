@@ -20,6 +20,9 @@ import type {
   InstalledOverviewRow,
   InstalledPlugin,
   IpcResult,
+  MarketCatalog,
+  MarketPlugin,
+  MarketSourceState,
   NodeEnvironment,
   NpmSearchHit,
   OnboardingPayload,
@@ -99,6 +102,19 @@ export interface WindowApi {
     search: (query: string, opts?: { from?: number; size?: number }) => Promise<IpcResult<{ hits: NpmSearchHit[]; total: number }>>
     /** Full version list + dist-tags for the version picker. */
     pkgVersions: (name: string) => Promise<IpcResult<PackageVersionInfo>>
+  }
+
+  market: {
+    /** Fetch the community catalog for the current route. Throws (→ IpcResult
+     * failure) when the route is unreachable — the renderer surfaces the reason
+     * and offers a retry / a different route. */
+    list: (opts?: { source?: MarketSourceState }) => Promise<IpcResult<MarketCatalog>>
+    /** Current loading route (persisted), for the pipeline picker. */
+    source: () => Promise<IpcResult<MarketSourceState>>
+    /** Persist a loading-route change (`false` when the custom URL is invalid). */
+    setSource: (next: MarketSourceState) => Promise<IpcResult<boolean>>
+    /** Resolve one catalog entry (by url) to its install spec + meta. */
+    resolve: (url: string) => Promise<IpcResult<{ spec: string | null; plugin: MarketPlugin | null }>>
   }
 
   trash: {
