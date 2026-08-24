@@ -23,6 +23,13 @@ describe('installSucceeded', () => {
     expect(installSucceeded('ERR_PNPM_OUTDATED_LOCKFILE: Cannot install with frozen-lockfile')).toBe(false)
     expect(installSucceeded('')).toBe(false)
   })
+
+  it('is false when resolution failed with added 0 (progress line, not install)', () => {
+    // A dependency-resolve failure can exit non-zero yet leave `added 0` in the
+    // progress lines — that must not be mistaken for a successful install.
+    expect(installSucceeded('Progress: resolved 98, reused 98, downloaded 0, added 0')).toBe(false)
+    expect(installSucceeded('added 0 packages in 1s')).toBe(false)
+  })
 })
 
 describe('runPnpm', () => {

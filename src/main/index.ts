@@ -18,7 +18,8 @@ import { hookWindowMaximize, registerWindowIpc } from './ipc/window.ts'
 import { registerLogsIpc } from './ipc/logs.ts'
 import { initLogger, logger } from './core/logger.ts'
 import { askOnCloseEnabled, closeToTrayEnabled, loadSettings, openDatabase, saveSettings } from './core/settings.ts'
-import { configureAppState } from './core/appState.ts'
+import { configureAppState, pluginDir } from './core/appState.ts'
+import { repairArchiveLinks } from './core/plugins.ts'
 
 // Process-level breadcrumbs for anything that escapes the IPC try/catch.
 process.on('uncaughtException', (error) => logger.error('uncaughtException', error))
@@ -205,6 +206,12 @@ app.whenReady().then(async () => {
   await openDatabase(join(app.getPath('userData'), 'app.sqlite'))
   // Give app-level state the Electron `userData` dir for its defaults.
   configureAppState(app.getPath('userData'))
+
+  // Rewire any pre-existing broken archive top-level links (installed before the
+  // install-time re-link existed) so previously-downloaded plugins surface again.
+  // Fire-and-forget: a clean store is a read-only no-op; the IPC path reads live
+  // disk, so whatever succeeds here is already visible by the time the UI asks.
+  repairArchiveLinks(pluginDir()).catch(error => logger.warn(`store relink failed: ${String(error)}`))
 
   registerIpc()
   createWindow()

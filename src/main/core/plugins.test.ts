@@ -18,7 +18,7 @@ import { runPnpm } from './pnpm.ts'
 import {
   addLocalPlugin, addPlugin, buildInstalledOverview, findInstalledDir, initStore,
   installIntoProfile, installedStoreVersion, listPlugins, listProfileScopes,
-  migrateStore, needsStoreMigration, readPluginReadme, removePlugin,
+  migrateStore, needsStoreMigration, readPluginReadme, removePlugin, storeVersions,
 } from './plugins.ts'
 import * as appStateModule from './appState.ts'
 import type { DshScope } from './appState.ts'
@@ -156,7 +156,11 @@ describe('local installs', () => {
       return { ok: true, text: 'added' }
     })
     await addLocalPlugin(store(), zipPath)
-    const fileArg = vi.mocked(runPnpm).mock.calls.at(-1)?.[1][1] as string
+    // installSource now also runs a re-link `pnpm install` after archiving, so find
+    // the `add` call specifically rather than assuming it is the last one.
+    const addCall = vi.mocked(runPnpm).mock.calls.find(([, args]) => args[0] === 'add')
+    expect(addCall).toBeDefined()
+    const fileArg = addCall![1][1] as string
     expect(fileArg.startsWith('file:')).toBe(true)
     expect(fileArg).toContain('.import')
     expect(listPlugins(store())).toContainEqual({ name: 'inner', version: '1.0.0' })
@@ -396,6 +400,62 @@ describe('legacy migration', () => {
     await migrateStore(store())
     expect(listPlugins(store())).toContainEqual({ name: 'occ', version: '1.0.0' })
     expect(needsStoreMigration(store())).toBe(false)
+  })
+})
+
+describe('scoped packages (real-name multi-level archive)', () => {
+  it('listPlugins / storeVersions surface scoped packages by real name', () => {
+    seedVersion('@acme/tool', '1.2.3')
+    // archive/@acme/tool/1.2.3/node_modules/@acme/tool
+    expect(storeVersions(store(), '@acme/tool')).toEqual(['1.2.3'])
+    expect(listPlugins(store())).toContainEqual({ name: '@acme/tool', version: '1.2.3' })
+    expect(existsSync(join(store(), 'archive', '@acme', 'tool', '1.2.3', 'node_modules', '@acme', 'tool', 'package.json'))).toBe(true)
+  })
+
+  it('addPlugin downloads a scoped package into the nested archive layout', async () => {
+    vi.mocked(runPnpm).mockImplementation(async (dir) => {
+      mkPkg(join(dir, 'node_modules', '@scope', 'name'), '2.0.0')
+      return { ok: true, text: 'added' }
+    })
+    const r = await addPlugin(store(), '@scope/name@^2')
+    expect(r.ok).toBe(true)
+    expect(listPlugins(store())).toContainEqual({ name: '@scope/name', version: '2.0.0' })
+    expect(existsSync(join(store(), 'archive', '@scope', 'name', '2.0.0', 'node_modules', '@scope', 'name', 'package.json'))).toBe(true)
+  })
+
+  it('keeps multiple scoped versions and separate scope siblings', async () => {
+    seedVersion('@acme/tool', '1.0.0')
+    seedVersion('@acme/tool', '1.1.0')
+    seedVersion('@acme/other', '0.5.0')
+    expect(listPlugins(store())).toContainEqual({ name: '@acme/tool', version: '1.0.0' })
+    expect(listPlugins(store())).toContainEqual({ name: '@acme/tool', version: '1.1.0' })
+    expect(listPlugins(store())).toContainEqual({ name: '@acme/other', version: '0.5.0' })
+  })
+
+  it('removing a single scoped version keeps siblings and the scope dir', async () => {
+    seedVersion('@acme/tool', '1.0.0')
+    seedVersion('@acme/tool', '1.1.0')
+    const r = await removePlugin(store(), '@acme/tool', '1.0.0')
+    expect(r.ok).toBe(true)
+    expect(listPlugins(store())).toContainEqual({ name: '@acme/tool', version: '1.1.0' })
+    expect(listPlugins(store())).not.toContainEqual({ name: '@acme/tool', version: '1.0.0' })
+    expect(existsSync(join(store(), 'archive', '@acme', 'tool'))).toBe(true)
+  })
+
+  it('removing the last scoped version prunes the empty scope dir', async () => {
+    seedVersion('@acme/tool', '1.0.0')
+    await removePlugin(store(), '@acme/tool') // whole plugin
+    expect(existsSync(join(store(), 'archive', '@acme', 'tool'))).toBe(false)
+    expect(existsSync(join(store(), 'archive', '@acme'))).toBe(false) // empty @scope shell swept away
+  })
+
+  it('migrateStore absorbs a legacy scoped package under its real name', async () => {
+    writeFileSync(join(store(), 'package.json'), JSON.stringify({ name: 'plugin-store', private: true, dependencies: { '@old/scope': '^1.0.0' } }))
+    mkPkg(join(store(), 'node_modules', '@old', 'scope'), '1.0.0', { name: '@old/scope' })
+    mockSourceInstall()
+    await migrateStore(store())
+    expect(listPlugins(store())).toContainEqual({ name: '@old/scope', version: '1.0.0' })
+    expect(existsSync(join(store(), 'archive', '@old', 'scope', '1.0.0', 'node_modules', '@old', 'scope', 'package.json'))).toBe(true)
   })
 })
 

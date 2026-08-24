@@ -36,7 +36,10 @@ function resolvePnpmEntry(): string {
  * (e.g. it emits `ERR_PNPM_IGNORED_BUILDS` and exits 1, but every package is
  * present in the output). Key on the install-output markers, not the exit code. */
 export function installSucceeded(text: string): boolean {
-  return /added \d+|Done in/.test(text)
+  // At least one package must actually have been added. `added 0` (e.g. pnpm's
+  // progress lines after a resolution failure) is NOT success — matching it would
+  // hide the real error and let a failed install fall through to a false ok.
+  return /added [1-9][0-9]*|Done in/.test(text)
 }
 
 /** Collapse ANSI colours, progress carriage-returns and blank lines, then keep
