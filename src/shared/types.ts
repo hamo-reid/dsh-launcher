@@ -406,3 +406,39 @@ export interface MarketSourceState {
 
 /** Sort orders for the market list. */
 export type MarketSort = 'stars' | 'downloads' | 'newest'
+
+/** One page of the market list, filtered + sorted + sliced in the main process.
+ *
+ * The market is paginated end-to-end so the first paint never pulls or renders
+ * the whole catalog: `market:list` applies the query (q/category/sort), then
+ * hands back `pageSize` items + a `total` to drive the pagination control. */
+export interface MarketPage {
+  /** ISO date the upstream last refreshed the catalog. */
+  updated: string
+  /** Matched plugins after the filter, BEFORE slicing — the pagination total. */
+  total: number
+  /** Category id → localized label, re-sent so the filter dropdown survives a reload. */
+  categories: Record<string, Record<string, string>>
+  /** The rows on this page. */
+  items: MarketPlugin[]
+  /** 1-based page actually served (clamped into [1, lastPage]). */
+  page: number
+  pageSize: number
+}
+
+/** Query + pagination for `market:list`. Everything except `source` narrows the
+ * rows before slicing; `source` selects the loading route. */
+export interface MarketListOpts {
+  source?: MarketSourceState
+  /** Force a network revalidation. When omitted/false, the main process serves
+   * the memoized catalog for the route — so pagination, search and sort become
+   * instant local slices. Pass true for a manual refresh / on a failed first load. */
+  refresh?: boolean
+  page?: number
+  pageSize?: number
+  /** Free-text search across name / owner / npm / descriptions. */
+  q?: string
+  /** Category id to restrict to; empty/absent = all. */
+  category?: string
+  sort?: MarketSort
+}

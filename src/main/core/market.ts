@@ -14,7 +14,7 @@
 
 import { loadSettings, saveSettings } from './settings.ts'
 import { logger } from './logger.ts'
-import type { MarketCatalog, MarketPlugin, MarketSort, MarketSource, MarketSourceState } from '../../shared/types.ts'
+import type { MarketCatalog, MarketPage, MarketPlugin, MarketSort, MarketSource, MarketSourceState } from '../../shared/types.ts'
 
 /** The canonical catalog address (GitHub Pages behind a CDN). */
 export const MARKET_OFFICIAL_URL = 'https://awesome-dsh-plugin.com/plugins.json'
@@ -84,6 +84,33 @@ let served: { url: string; etag: string | null; modified: string | null; data: M
 /** Drop the memo so the next call is unconditional (route change / tests). */
 export function forgetCatalog(): void {
   served = null
+}
+
+/** The single URL the current route resolves to (the first source in order). */
+export function catalogUrl(state: MarketSourceState): string {
+  return sourcesFor(state)[0].url
+}
+
+/** The memoized catalog for a URL, or null when absent or for a different URL.
+ * A pure memory read — never touches the network. */
+export function cachedCatalog(url: string): MarketCatalog | null {
+  return served?.url === url ? served.data : null
+}
+
+/**
+ * Serve the catalog for a route from the closest possible place. When we already
+ * hold that URL in memory (and the caller did not ask to refresh) this returns
+ * the memo as-is — so every pagination / search / sort is an instant local slice
+ * with zero network. Otherwise it falls through to `loadMarket` (first access,
+ * route change, or an explicit refresh), which revalidates over the network.
+ */
+export async function resolveMarket(state: MarketSourceState, refresh = false): Promise<MarketCatalog> {
+  const url = catalogUrl(state)
+  if (!refresh) {
+    const mem = cachedCatalog(url)
+    if (mem !== null) return mem
+  }
+  return loadMarket(state)
 }
 
 /** Parse + sanity-check a fetched catalog body. Throws with a terse reason. */
@@ -176,6 +203,45 @@ export function queryCatalog(
   if (sort === 'downloads') return sortByDesc(rows, p => p.downloads)
   // newest — most recent `added` first, unknown dates last.
   return sortByDesc(rows, p => (p.added === undefined ? null : Date.parse(p.added)))
+}
+
+// ── pagination (query then slice one page) ───────────────────────────────────
+
+/** Upper bound on a single market page — a sanity cap, not a UX default. */
+const MAX_PAGE_SIZE = 100
+/** Default rows per page when the caller does not say otherwise. */
+const DEFAULT_PAGE_SIZE = 20
+
+function clampPageSize(n: number | undefined): number {
+  const v = n ?? DEFAULT_PAGE_SIZE
+  if (Number.isNaN(v) || v < 1) return 1
+  return Math.min(Math.floor(v), MAX_PAGE_SIZE)
+}
+
+/**
+ * Apply the query (q/category/sort) then slice a single page off the result.
+ * Pure — pageCatalog(catalog, opts) → MarketPage, so the renderer can be handed
+ * a bounded slice and the pagination total without ever seeing the full list.
+ * `page` is clamped into [1, lastPage] so a stale page ref (after a narrower
+ * filter) never yields an empty window.
+ */
+export function pageCatalog(
+  catalog: MarketCatalog,
+  opts: { q?: string; category?: string; sort?: MarketSort; page?: number; pageSize?: number } = {},
+): MarketPage {
+  const rows = queryCatalog(catalog, { q: opts.q, category: opts.category, sort: opts.sort })
+  const pageSize = clampPageSize(opts.pageSize)
+  const total = rows.length
+  const lastPage = Math.max(1, Math.ceil(total / pageSize))
+  const page = Math.min(Math.max(1, Math.floor(opts.page ?? 1)), lastPage)
+  return {
+    updated: catalog.updated,
+    total,
+    categories: catalog.categories ?? {},
+    items: rows.slice((page - 1) * pageSize, page * pageSize),
+    page,
+    pageSize,
+  }
 }
 
 // ── install target resolution (the security boundary) ───────────────────────

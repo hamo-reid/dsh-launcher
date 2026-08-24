@@ -3,9 +3,9 @@
  * this file only wires the channels and reports failures the launcher way. */
 
 import { ipcMain } from 'electron'
-import { installSpecFor, loadMarket, marketSourceState, setMarketSourceState } from '../core/market.ts'
+import { installSpecFor, marketSourceState, pageCatalog, resolveMarket, setMarketSourceState } from '../core/market.ts'
 import { fail, failFromError } from '../core/errors.ts'
-import type { IpcResult, MarketCatalog, MarketSourceState } from '../../shared/types.ts'
+import type { IpcResult, MarketCatalog, MarketListOpts, MarketPage, MarketSourceState } from '../../shared/types.ts'
 
 /**
  * The catalog the renderer was most recently served, keyed so a route switch
@@ -17,14 +17,17 @@ import type { IpcResult, MarketCatalog, MarketSourceState } from '../../shared/t
 let catalog: MarketCatalog | null = null
 
 export function registerMarketIpc(): void {
-  ipcMain.handle('market:list', async (_event, opts: { source?: MarketSourceState } = {}) => {
+  ipcMain.handle('market:list', async (_event, opts: MarketListOpts = {}): Promise<IpcResult<MarketPage>> => {
     try {
       const state = opts.source !== undefined
         ? opts.source
         : marketSourceState()
-      const data = await loadMarket(state)
+      // Memoized-catalog fast path: no network unless refresh forces one or the
+      // route changed. Filter + slice happen locally, so paging/search/sort are
+      // instant; the renderer only ever holds a bounded slice + total.
+      const data = await resolveMarket(state, opts.refresh === true)
       catalog = data
-      return { ok: true, value: data }
+      return { ok: true, value: pageCatalog(data, opts) }
     } catch (error) {
       return failFromError(error)
     }

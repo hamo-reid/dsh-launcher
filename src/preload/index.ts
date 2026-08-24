@@ -17,7 +17,8 @@ import type {
   ImportStep,
   InstalledOverviewRow,
   IpcResult,
-  MarketCatalog,
+  MarketListOpts,
+  MarketPage,
   MarketPlugin,
   MarketSourceState,
   NodeEnvironment,
@@ -149,7 +150,7 @@ const api = {
   },
 
   market: {
-    list: (opts?: { source?: MarketSourceState }): Promise<IpcResult<MarketCatalog>> =>
+    list: (opts?: MarketListOpts): Promise<IpcResult<MarketPage>> =>
       ipcRenderer.invoke('market:list', opts),
     source: (): Promise<IpcResult<MarketSourceState>> => ipcRenderer.invoke('market:source'),
     setSource: (next: MarketSourceState): Promise<IpcResult<boolean>> => ipcRenderer.invoke('market:setSource', next),

@@ -3,7 +3,7 @@
  * the network couple (`loadMarket`) is exercised only through a stubbed fetch. */
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { installSpecFor, loadMarket, queryCatalog } from './market.ts'
+import { forgetCatalog, installSpecFor, loadMarket, pageCatalog, queryCatalog, resolveMarket } from './market.ts'
 import type { MarketCatalog, MarketPlugin } from '../../shared/types.ts'
 
 const mk = (over: Partial<MarketPlugin> = {}): MarketPlugin => ({
@@ -96,6 +96,61 @@ describe('queryCatalog', () => {
   })
 })
 
+// ── pageCatalog ──────────────────────────────────────────────────────────────
+
+describe('pageCatalog', () => {
+  const c = cat(Array.from({ length: 5 }, (_, i) => mk({ name: `p${i}`, stars: 100 - i })))
+
+  it('slices a page and reports the total', () => {
+    const page = pageCatalog(c, { page: 1, pageSize: 2 })
+    expect(page.total).toBe(5)
+    expect(page.items.map(p => p.name)).toEqual(['p0', 'p1'])
+    expect(page.page).toBe(1)
+    expect(page.pageSize).toBe(2)
+  })
+
+  it('advances the window per page', () => {
+    const page = pageCatalog(c, { page: 3, pageSize: 2 })
+    expect(page.items.map(p => p.name)).toEqual(['p4'])
+  })
+
+  it('clamps an out-of-range page into [1, lastPage]', () => {
+    // past-the-end page clamps to the last page, not an empty slice
+    expect(pageCatalog(c, { page: 99, pageSize: 2 }).page).toBe(3)
+    // a degenerate page clamps up to 1
+    expect(pageCatalog(c, { page: 0, pageSize: 2 }).page).toBe(1)
+  })
+
+  it('clamps pageSize into [1, MAX_PAGE_SIZE] and defaults to 20', () => {
+    expect(pageCatalog(c).pageSize).toBe(20)
+    expect(pageCatalog(c, { pageSize: 0 }).pageSize).toBe(1)
+    expect(pageCatalog(c, { pageSize: -3 }).pageSize).toBe(1)
+    expect(pageCatalog(c, { pageSize: 9999 }).pageSize).toBe(100)
+  })
+
+  it('applies the query before slicing', () => {
+    const c2 = cat([
+      mk({ name: 'alpha', category: 'ui', stars: 100 }),
+      mk({ name: 'beta', category: 'model', stars: 99 }),
+    ])
+    const page = pageCatalog(c2, { category: 'model', page: 1, pageSize: 10 })
+    expect(page.total).toBe(1)
+    expect(page.items.map(p => p.name)).toEqual(['beta'])
+  })
+
+  it('passes categories through for the filter dropdown', () => {
+    const page = pageCatalog(c, { pageSize: 1 })
+    expect(page.categories).toHaveProperty('ui')
+  })
+
+  it('handles an empty match set with a single empty page', () => {
+    const page = pageCatalog(cat([]), { page: 1, pageSize: 10 })
+    expect(page.total).toBe(0)
+    expect(page.items).toEqual([])
+    expect(page.page).toBe(1)
+  })
+})
+
 // ── loadMarket (single origin, via stubbed fetch) ───────────────────────────
 
 /** Minimal stand-in for a fetch Response. Real `Response` can't be built with
@@ -136,5 +191,30 @@ describe('loadMarket', () => {
   it('throws (never serves stale) when the origin is unreachable', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => fakeRes(500)))
     await expect(loadMarket({ source: 'official', url: '' })).rejects.toThrow()
+  })
+})
+
+// ── resolveMarket (memo fast-path vs network) ────────────────────────────────
+
+describe('resolveMarket', () => {
+  const body = JSON.stringify({ updated: '2026-01-01', count: 1, categories: {}, plugins: [mk()] })
+
+  it('serves the memo after one network load — no second fetch', async () => {
+    forgetCatalog()
+    const fn = vi.fn(async () => fakeRes(200, body, '"v1"'))
+    vi.stubGlobal('fetch', fn)
+    const first = await resolveMarket({ source: 'official', url: '' })
+    const second = await resolveMarket({ source: 'official', url: '' })
+    expect(second).toBe(first) // same memo object, not a re-fetch
+    expect(fn).toHaveBeenCalledTimes(1)
+  })
+
+  it('refresh forces a network revalidation', async () => {
+    forgetCatalog()
+    const fn = vi.fn(async () => fakeRes(200, body, '"v1"'))
+    vi.stubGlobal('fetch', fn)
+    await resolveMarket({ source: 'official', url: '' })
+    await resolveMarket({ source: 'official', url: '' }, true)
+    expect(fn).toHaveBeenCalledTimes(2)
   })
 })

@@ -20,7 +20,8 @@ import type {
   InstalledOverviewRow,
   InstalledPlugin,
   IpcResult,
-  MarketCatalog,
+  MarketListOpts,
+  MarketPage,
   MarketPlugin,
   MarketSourceState,
   NodeEnvironment,
@@ -105,10 +106,13 @@ export interface WindowApi {
   }
 
   market: {
-    /** Fetch the community catalog for the current route. Throws (→ IpcResult
-     * failure) when the route is unreachable — the renderer surfaces the reason
-     * and offers a retry / a different route. */
-    list: (opts?: { source?: MarketSourceState }) => Promise<IpcResult<MarketCatalog>>
+    /** Fetch one page of the community catalog for the current route, applying
+     * the query (q/category/sort) in the main process. By default serves the
+     * memoized catalog so paging/search/sort are instant local slices; pass
+     * `refresh: true` (manual refresh, retry) to revalidate over the network.
+     * Throws (→ IpcResult failure) when a network load is unreachable. Returns
+     * a bounded slice + total, never the whole catalog. */
+    list: (opts?: MarketListOpts) => Promise<IpcResult<MarketPage>>
     /** Current loading route (persisted), for the pipeline picker. */
     source: () => Promise<IpcResult<MarketSourceState>>
     /** Persist a loading-route change (`false` when the custom URL is invalid). */

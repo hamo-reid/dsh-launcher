@@ -7,9 +7,9 @@
  * spec through this view.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  Alert, Button, Input, List, message, Modal, Select, Space, Spin, Tag, theme,
+  Alert, Button, Input, List, message, Modal, Pagination, Select, Space, Spin, Tag, theme,
 } from 'antd'
 import { LoadingOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
@@ -18,7 +18,7 @@ import Panel from '../components/Panel.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
 import FieldLabel from '../components/FieldLabel.tsx'
 import { DownloadVersionModal, InstallToProfileModal } from './PluginsModals.tsx'
-import type { MarketCatalog, MarketPlugin, MarketSort, MarketSourceState } from '../../../shared/types.ts'
+import type { MarketPlugin, MarketSort, MarketSourceState } from '../../../shared/types.ts'
 
 const num = (n: number): string => new Intl.NumberFormat().format(n)
 
@@ -27,18 +27,28 @@ export default function MarketSection(): JSX.Element {
   const { token } = theme.useToken()
   const lang = i18n.language === 'zh' ? 'zh' : 'en'
 
-  // Catalog + loading route.
-  const [catalog, setCatalog] = useState<MarketCatalog | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [srcState, setSrcState] = useState<MarketSourceState>({ source: 'official', url: '' })
+  // Loading route; null until the persisted route is read back on mount.
+  const [srcState, setSrcState] = useState<MarketSourceState | null>(null)
   const [customUrl, setCustomUrl] = useState('')
   const [savingSource, setSavingSource] = useState(false)
 
-  // Browse filters.
+  // Server-side query → one page of rows + total (never the whole catalog).
+  const [rows, setRows] = useState<MarketPlugin[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const [categories, setCategories] = useState<{ id: string; label: string }[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  // Browse filters — `q` is the debounced query, `qInput` the raw field text.
+  const [qInput, setQInput] = useState('')
   const [q, setQ] = useState('')
   const [category, setCategory] = useState('')
   const [sort, setSort] = useState<MarketSort>('stars')
+
+  // Monotonic request id: a late response from a superseded request is dropped.
+  const seqRef = useRef(0)
 
   // Store membership (for in-store marking + which plugins are downloadable).
   const [storeNames, setStoreNames] = useState<Set<string>>(new Set())
@@ -54,78 +64,79 @@ export default function MarketSection(): JSX.Element {
     if (r.ok) setStoreNames(new Set(r.value.map(p => p.name)))
   }, [])
 
-  const load = useCallback(async (stateOverride = srcState): Promise<void> => {
+  // The one request path. Reads the current filter/page state (fresh via the
+  // useCallback deps) and applies the query server-side; a stale response is
+  // ignored so slow pages never clobber a newer one.
+  const load = useCallback(async (refresh = false): Promise<void> => {
+    if (srcState === null) return
+    const seq = ++seqRef.current
     setLoading(true)
     setError('')
-    const r = await window.api.market.list({ source: stateOverride })
+    // Pagination / search / sort hit the memoized catalog (instant, no network);
+    // only a manual refresh forces a revalidation.
+    const r = await window.api.market.list({ source: srcState, page, pageSize, q, category, sort, refresh })
+    if (seq !== seqRef.current) return // superseded — a newer request is in flight
     setLoading(false)
     if (!r.ok) { setError(apiErrorText(r)); return }
-    setCatalog(r.value)
-  }, [srcState])
+    setRows(r.value.items)
+    setTotal(r.value.total)
+    setPage(r.value.page)
+    setPageSize(r.value.pageSize)
+    setCategories(Object.entries(r.value.categories ?? {}).map(([id, labels]) => ({
+      id,
+      label: labels?.[lang] ?? labels?.en ?? id,
+    })))
+  }, [srcState, page, pageSize, q, category, sort, lang])
 
-  // Fetch the persisted route once, then load the catalog.
+  // Read the persisted loading route back once, then let the query effect fire.
   useEffect(() => {
     void (async () => {
       const s = await window.api.market.source()
       if (s.ok) {
-        setSrcState(s.value)
         setCustomUrl(s.value.url)
-        await load(s.value)
+        setSrcState(s.value)
       }
     })()
     void refreshStoreNames()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Debounce the search box so a re-query happens only after the user pauses.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setQ(qInput.trim())
+      setPage(1)
+    }, 300)
+    return () => clearTimeout(t)
+  }, [qInput])
+
+  // Any change to the query / page / route refetches (srcState has to be in
+  // hand first, else we'd fire before the persisted route is known).
+  useEffect(() => {
+    if (srcState === null) return
+    void load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, category, sort, page, pageSize, srcState])
+
   const applySource = async (): Promise<void> => {
+    if (srcState === null) return
     const next: MarketSourceState = { source: srcState.source, url: customUrl }
     setSavingSource(true)
     const r = await window.api.market.setSource(next)
     setSavingSource(false)
     if (!r.ok) { void message.error(apiErrorText(r)); return }
     if (!r.value) { void message.error(t('plugin.market.invalidUrl')); return }
+    // Route change → back to the first page of the (now) new catalog. The
+    // query effect refetches once srcState flips.
+    setPage(1)
     setSrcState(next)
-    await load(next)
     void message.success(t('plugin.market.sourceSaved'))
   }
-
-  const categories = useMemo(() => {
-    const m = catalog?.categories
-    if (m == null) return []
-    return Object.entries(m).map(([id, labels]) => ({ id, label: labels?.[lang] ?? labels?.en ?? id }))
-  }, [catalog, lang])
 
   const catLabel = (id: string): string => {
     const hit = categories.find(c => c.id === id)
     return hit?.label ?? id
   }
-
-  const rows = useMemo(() => {
-    if (catalog === null) return []
-    const needle = q.trim().toLowerCase()
-    let out = catalog.plugins
-    if (category !== '') out = out.filter(p => p.category === category)
-    if (needle !== '') {
-      out = out.filter(p =>
-        p.name.toLowerCase().includes(needle) ||
-        p.owner.toLowerCase().includes(needle) ||
-        (p.npm ?? '').toLowerCase().includes(needle) ||
-        Object.values(p.description ?? {}).some(d => d.toLowerCase().includes(needle)),
-      )
-    }
-    const numKey = (p: MarketPlugin): number | null | undefined => sort === 'stars' ? p.stars : p.downloads
-    return [...out].sort((a, b) => {
-      if (sort === 'newest') return String(b.added ?? '').localeCompare(String(a.added ?? ''))
-      const av = numKey(a)
-      const bv = numKey(b)
-      const an = av === null || av === undefined
-      const bn = bv === null || bv === undefined
-      if (an && bn) return 0
-      if (an) return 1
-      if (bn) return -1
-      return bv - av
-    })
-  }, [catalog, category, q, sort])
 
   const descOf = (p: MarketPlugin): string => p.description?.[lang] ?? p.description?.en ?? ''
   const hasNpm = (p: MarketPlugin): boolean => p.npm !== undefined && p.npm !== null
@@ -148,7 +159,7 @@ export default function MarketSection(): JSX.Element {
   return (
     <Space direction="vertical" style={{ width: '100%' }} size="middle">
       <SectionHeading
-        title={t('plugin.market.title', { count: catalog?.count ?? 0 })}
+        title={t('plugin.market.title', { count: total })}
         description={t('plugin.market.desc')}
       />
 
@@ -156,15 +167,15 @@ export default function MarketSection(): JSX.Element {
       <Panel title={t('plugin.market.sourceLabel')}>
         <Space wrap style={{ width: '100%' }} align="center">
           <Select
-            value={srcState.source}
-            onChange={v => setSrcState(prev => ({ ...prev, source: v as MarketSourceState['source'] }))}
+            value={srcState?.source ?? 'official'}
+            onChange={v => setSrcState(prev => ({ source: v as MarketSourceState['source'], url: prev?.url ?? '' }))}
             style={{ minWidth: 200 }}
             options={[
               { value: 'official', label: t('plugin.market.source.official') },
               { value: 'custom', label: t('plugin.market.source.custom') },
             ]}
           />
-          {srcState.source === 'custom' && (
+          {srcState?.source === 'custom' && (
             <Input
               allowClear
               value={customUrl}
@@ -173,10 +184,10 @@ export default function MarketSection(): JSX.Element {
               style={{ minWidth: 320, maxWidth: 480 }}
             />
           )}
-          <Button loading={savingSource} onClick={() => void applySource()} disabled={srcState.source === 'custom' && !customUrl.trim()}>
+          <Button loading={savingSource} onClick={() => void applySource()} disabled={srcState?.source === 'custom' && !customUrl.trim()}>
             {t('common.save')}
           </Button>
-          <Button icon={<ReloadOutlined />} onClick={() => void load()} disabled={loading}>
+          <Button icon={<ReloadOutlined />} onClick={() => void load(true)} disabled={loading}>
             {t('plugin.market.refresh')}
           </Button>
         </Space>
@@ -188,23 +199,23 @@ export default function MarketSection(): JSX.Element {
           showIcon
           message={t('plugin.market.loadFailed')}
           description={error}
-          action={<Button size="small" onClick={() => void load()}>{t('common.retry')}</Button>}
+          action={<Button size="small" onClick={() => void load(true)}>{t('common.retry')}</Button>}
         />
       )}
 
-      {catalog !== null && (
+      {srcState !== null && (
         <Panel>
           <Space wrap style={{ marginBottom: token.paddingSM }}>
             <Input
               allowClear
-              value={q}
-              onChange={e => setQ(e.target.value)}
+              value={qInput}
+              onChange={e => setQInput(e.target.value)}
               placeholder={t('plugin.market.searchPlaceholder')}
               style={{ maxWidth: 320 }}
             />
             <Select
               value={category}
-              onChange={setCategory}
+              onChange={v => { setCategory(v); setPage(1) }}
               style={{ minWidth: 150 }}
               options={[
                 { value: '', label: t('plugin.market.categoryAll') },
@@ -213,7 +224,7 @@ export default function MarketSection(): JSX.Element {
             />
             <Select
               value={sort}
-              onChange={v => setSort(v as MarketSort)}
+              onChange={v => { setSort(v as MarketSort); setPage(1) }}
               style={{ minWidth: 150 }}
               options={[
                 { value: 'stars', label: t('plugin.market.sort.stars') },
@@ -266,6 +277,18 @@ export default function MarketSection(): JSX.Element {
                   </List.Item>
                 )
               }}
+            />
+          )}
+          {total > 0 && (
+            <Pagination
+              style={{ textAlign: 'center', marginTop: token.paddingSM }}
+              current={page}
+              pageSize={pageSize}
+              total={total}
+              showSizeChanger
+              pageSizeOptions={[10, 20, 50]}
+              onChange={(p) => setPage(p)}
+              onShowSizeChange={(_current, size) => { setPageSize(size); setPage(1) }}
             />
           )}
         </Panel>
