@@ -1,13 +1,26 @@
 /**
- * Tests for the pnpm content-level success heuristic: pnpm can exit non-zero
- * (e.g. ERR_PNPM_IGNORED_BUILDS) yet still have installed everything, so we key
- * on install-output markers rather than the exit code. Pure string logic.
+ * pnpm wiring tests. `installSucceeded` is pure string logic; `runPnpm` is driven
+ * entirely by a mocked spawn so every terminal branch (clean / ignored-builds /
+ * genuine failure / spawn error / in-flight abort) is covered without spawning a
+ * real child or needing a network install.
  */
-import { describe, expect, it } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { EventEmitter } from 'node:events'
 import { installSucceeded, runPnpm } from './pnpm.ts'
+
+const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }))
+vi.mock('node:child_process', () => ({ spawn: spawnMock }))
+
+/** A controllable ChildProcess look-alike: EventEmitter for `on`/`emit`, plus the
+ * pid/stdout/stderr runPnpm reads. */
+function fakeChild(pid = 321): EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; pid: number } {
+  const child = Object.assign(new EventEmitter(), {
+    pid,
+    stdout: new EventEmitter(),
+    stderr: new EventEmitter(),
+  })
+  return child
+}
 
 describe('installSucceeded', () => {
   it('is true when output shows added packages', () => {
@@ -32,28 +45,63 @@ describe('installSucceeded', () => {
   })
 })
 
-describe('runPnpm', () => {
-  it('resolves ok=true with version text for a clean invocation', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'pm-pnpm-'))
-    try {
-      const { ok, text } = await runPnpm(dir, ['--version'])
-      expect(ok).toBe(true)
-      expect(text.trim()).toMatch(/^\d+\.\d+\.\d+/)
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
+describe('runPnpm (spawn mocked)', () => {
+  beforeEach(() => spawnMock.mockReset())
+
+  it('resolves ok on a clean exit-0 run', async () => {
+    const child = fakeChild()
+    spawnMock.mockReturnValue(child)
+    const p = runPnpm('/dir', ['install'])
+    child.stdout.emit('data', Buffer.from('Progress: resolved 5, added 5 done'))
+    child.emit('close', 0)
+    await expect(p).resolves.toMatchObject({ ok: true })
   })
 
-  it('resolves aborted when the caller\'s signal is already aborted', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'pm-abort-'))
-    try {
-      const controller = new AbortController()
-      controller.abort()
-      const res = await runPnpm(dir, ['--version'], controller.signal)
-      expect(res.ok).toBe(false)
-      expect(res.aborted).toBe(true)
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
+  it('counts a non-zero exit as ok when output shows packages added', async () => {
+    const child = fakeChild()
+    spawnMock.mockReturnValue(child)
+    const p = runPnpm('/dir', ['install'])
+    child.stdout.emit('data', Buffer.from('ERR_PNPM_IGNORED_BUILDS\nadded 3 packages'))
+    child.emit('close', 1)
+    await expect(p).resolves.toMatchObject({ ok: true })
+  })
+
+  it('reports failure on a non-zero exit with no install markers', async () => {
+    const child = fakeChild()
+    spawnMock.mockReturnValue(child)
+    const p = runPnpm('/dir', ['install'])
+    child.stderr.emit('data', Buffer.from('ERR_PNPM_OUTDATED_LOCKFILE: Cannot install'))
+    child.emit('close', 1)
+    const r = await p
+    expect(r.ok).toBe(false)
+    expect(r.text).toContain('ERR_PNPM_OUTDATED_LOCKFILE')
+  })
+
+  it('resolves a spawn error event as a failure with its message', async () => {
+    const child = fakeChild()
+    spawnMock.mockReturnValue(child)
+    const p = runPnpm('/dir', ['install'])
+    child.emit('error', new Error('spawn ENOENT'))
+    await expect(p).resolves.toMatchObject({ ok: false, text: 'spawn ENOENT' })
+  })
+
+  it('honours an already-aborted signal and reports aborted', async () => {
+    const child = fakeChild()
+    spawnMock.mockReturnValue(child)
+    const ac = new AbortController()
+    ac.abort()
+    const p = runPnpm('/dir', ['install'], ac.signal)
+    child.emit('close', 1)
+    await expect(p).resolves.toMatchObject({ ok: false, aborted: true })
+  })
+
+  it('aborts a run in flight when the signal fires', async () => {
+    const child = fakeChild()
+    spawnMock.mockReturnValue(child)
+    const ac = new AbortController()
+    const p = runPnpm('/dir', ['install'], ac.signal)
+    ac.abort() // triggers onAbort → killProcessTree (taskkill spawn, ignored)
+    child.emit('close', 1)
+    await expect(p).resolves.toMatchObject({ ok: false, aborted: true })
   })
 })
