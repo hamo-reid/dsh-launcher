@@ -130,10 +130,13 @@ export default function PluginsSection() {
     fromRef.current = start + r.value.hits.length
   }, [])
 
+  // 仅进入「下载中心」视图才发起实时搜索 —— 挂载/停在「总览」不请求，避免每次
+  // 进入插件管理页都对默认关键词空搜一次；切入下载中心则自动搜当前关键词。
   useEffect(() => {
+    if (view !== 'download') return
     const timer = setTimeout(() => void runSearch(dq, false), 300)
     return () => clearTimeout(timer)
-  }, [dq, runSearch])
+  }, [dq, view, runSearch])
 
   const loadMore = (): void => void runSearch(dq, true)
 
