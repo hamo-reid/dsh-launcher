@@ -529,7 +529,7 @@ const en: typeof zh = {
     'plugin.market.sort.newest': 'Newest',
     'plugin.market.empty': 'No plugins match',
     'plugin.market.sourceLabel': 'Catalog source',
-    'plugin.market.source.official': 'Official (awesome-dsh-plugin.com)',
+    'plugin.market.source.official': 'awesome-dsh-plugin.com',
     'plugin.market.source.custom': 'Custom mirror URL',
     'plugin.market.customUrlPlaceholder': 'https://your-mirror.example/plugins.json',
     'plugin.market.sourceSaved': 'Catalog source saved',

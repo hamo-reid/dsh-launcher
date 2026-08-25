@@ -527,7 +527,7 @@ const zh = {
     'plugin.market.sort.newest': '最新',
     'plugin.market.empty': '没有匹配的插件',
     'plugin.market.sourceLabel': '目录来源',
-    'plugin.market.source.official': '官方（awesome-dsh-plugin.com）',
+    'plugin.market.source.official': 'awesome-dsh-plugin.com',
     'plugin.market.source.custom': '自定义镜像 URL',
     'plugin.market.customUrlPlaceholder': 'https://你的镜像.example/plugins.json',
     'plugin.market.sourceSaved': '目录来源已保存',

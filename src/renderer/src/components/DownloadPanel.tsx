@@ -87,7 +87,7 @@ function DownloadDetailModal({ session, onClose }: {
       open={session !== null}
       onCancel={onClose}
       footer={<Button onClick={onClose}>{t('common.close')}</Button>}
-      width={MODAL.narrow}
+      width={MODAL.wide}
     >
       {session !== null && (
         showSteps ? (

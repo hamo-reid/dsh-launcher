@@ -11,12 +11,13 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Alert, Button, Input, List, message, Modal, Pagination, Select, Space, Spin, Tag, theme,
 } from 'antd'
-import { LoadingOutlined, ReloadOutlined } from '@ant-design/icons'
+import { GithubOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
 import Panel from '../components/Panel.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
 import FieldLabel from '../components/FieldLabel.tsx'
+import { MODAL } from '../theme.ts'
 import { DownloadVersionModal, InstallToProfileModal, toStoreMap } from './PluginsModals.tsx'
 import type { MarketPlugin, MarketSort, MarketSourceState } from '../../../shared/types.ts'
 
@@ -308,7 +309,7 @@ export default function MarketSection(): JSX.Element {
         open={detail !== null}
         onCancel={() => setDetail(null)}
         footer={null}
-        width={520}
+        width={MODAL.wide}
       >
         {detail !== null && (
           <Space direction="vertical" style={{ width: '100%' }} size="middle">
@@ -334,7 +335,7 @@ export default function MarketSection(): JSX.Element {
             <div>
               <FieldLabel>{t('plugin.market.field.source')}</FieldLabel>
               <Space wrap>
-                <Button size="small" icon={<LoadingOutlined />} onClick={() => void window.api.run.openExternal(detail.url)}>
+                <Button size="small" icon={<GithubOutlined />} onClick={() => void window.api.run.openExternal(detail.url)}>
                   GitHub
                 </Button>
                 {hasNpm(detail) && <Button size="small" onClick={() => void window.api.run.openExternal(`https://www.npmjs.com/package/${detail.npm}`)}>npm</Button>}
