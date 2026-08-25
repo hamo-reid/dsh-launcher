@@ -58,7 +58,6 @@ export interface WindowApi {
   /** Stream of per-step import progress (for the import dialog). Returns an unsubscribe. */
   onImportEvent: (callback: (step: ImportStep) => void) => () => void
   missingBundles: (name: string) => Promise<IpcResult<string[]>>
-  launchProfile: (name: string) => Promise<IpcResult<boolean>>
   layers: (name: string) => Promise<IpcResult<ProfileLayer[]>>
   addRow: (name: string, row: RowCreateInput) => Promise<IpcResult<boolean>>
   setRowConfig: (name: string, id: string, configText: string) => Promise<IpcResult<boolean>>

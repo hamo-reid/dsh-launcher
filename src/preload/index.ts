@@ -67,8 +67,6 @@ const api = {
   },
   missingBundles: (name: string): Promise<IpcResult<string[]>> =>
     ipcRenderer.invoke('profile:missingBundles', name),
-  launchProfile: (name: string): Promise<IpcResult<boolean>> =>
-    ipcRenderer.invoke('profile:launch', name),
   layers: (name: string): Promise<IpcResult<ProfileLayer[]>> =>
     ipcRenderer.invoke('profile:layers', name),
   addRow: (name: string, row: RowCreateInput): Promise<IpcResult<boolean>> =>

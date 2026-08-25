@@ -103,11 +103,19 @@ function createWindow(): void {
     if (/^https?:/i.test(url)) void shell.openExternal(url)
     return { action: 'deny' }
   })
+  // The app must never navigate away from its own renderer. Keep the preload-
+  // exposed IPC surface away from attacker-controllable pages (an arbitrary
+  // file:// page navigating from a XSS'd renderer would inherit `window.api`).
+  // Allow only the app's own initial URL; route external http(s) to the browser.
+  const isOwnPage = (url: string): boolean => {
+    const dev = process.env['ELECTRON_RENDERER_URL']
+    if (dev !== undefined) return url.startsWith(new URL(dev).origin)
+    return url.startsWith('file://') && url.includes('/renderer/index.html')
+  }
   win.webContents.on('will-navigate', (event, url) => {
-    if (/^https?:/i.test(url)) {
-      event.preventDefault()
-      void shell.openExternal(url)
-    }
+    if (isOwnPage(url)) return
+    event.preventDefault()
+    if (/^https?:/i.test(url)) void shell.openExternal(url)
   })
 
   // Ask whether to minimize-to-tray or quit when closing, unless the user

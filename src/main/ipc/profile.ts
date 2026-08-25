@@ -2,7 +2,6 @@
  * layer (`profile:*`). */
 
 import { app, dialog, ipcMain, shell } from 'electron'
-import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import AdmZip from 'adm-zip'
@@ -19,8 +18,7 @@ import {
   cloneProfile, createProfile, exportProfile, importProfile, listLocalBundles, listProfileSummaries,
   mirrorProfile, PROFILE_TEMPLATES, removeBundle, reorderBundle, softDeleteProfile, type ProfileSummary,
 } from '../core/profile.ts'
-import { activeDshEntry, contextForEntry, pluginDir, readDshState } from '../core/appState.ts'
-import { baseLaunch } from '../core/dsh.ts'
+import { contextForEntry, pluginDir, readDshState } from '../core/appState.ts'
 import { addDirToZip, dedentRowBlock, verifyDisabledState } from '../core/app-util.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
 import type {
@@ -411,26 +409,6 @@ export function registerProfileIpc(): void {
       if (!existsSync(path)) writeFileSync(path, '[]\n')
       const error = await shell.openPath(path)
       return error === '' ? { ok: true, value: true } : fail('shell.openPath', { detail: error })
-    } catch (error) {
-      return failFromError(error)
-    }
-  })
-
-  ipcMain.handle('profile:launch', (_event, name: string): IpcResult<boolean> => {
-    // Launch the active dsh with this profile in its own terminal window.
-    const entry = activeDshEntry()
-    if (entry === undefined) return fail(E.needActiveDsh)
-    try {
-      const command = `${baseLaunch(entry.execPath)} --profile ${name}`
-      const env = { ...process.env, DSH_HOME: entry.home }
-      if (process.platform === 'win32') {
-        spawn('cmd.exe', ['/c', 'start', `"dsh ${name}"`, 'cmd', '/k', command], {
-          detached: true, stdio: 'ignore', env,
-        }).unref()
-      } else {
-        spawn(command, { detached: true, stdio: 'ignore', shell: true, env }).unref()
-      }
-      return { ok: true, value: true }
     } catch (error) {
       return failFromError(error)
     }
