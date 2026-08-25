@@ -32,6 +32,56 @@ let tray: Tray | null = null
 let quitting = false
 app.on('before-quit', () => { quitting = true })
 
+// ── 启动画面（splash）────────────────────────────────────────────────────────
+// Portable / 冷启动里 Electron 就绪前的解范围内（DB 打开、i18n、渲染 bundle
+// 解析）可能很慢。用一个无 JS 的极轻 data:URL 加载页立刻给出「正在启动」反馈，
+// 主窗口渲染就绪（`ready-to-show`）后收起。解压那一段发生在进程启动前，无法
+// 用应用自身 UI 覆盖（electron-builder portable 自带系统级解压进度）。
+const SPLASH_HTML = `<!doctype html><html><head><meta charset="utf-8"><style>
+html,body{margin:0;height:100%;background:transparent;overflow:hidden;display:flex;align-items:center;justify-content:center;font-family:-apple-system,'Segoe UI',Roboto,'PingFang SC','Microsoft YaHei',sans-serif}
+.card{width:340px;padding:28px;border-radius:16px;background:linear-gradient(160deg,#1c2740,#0f1526);color:#fff;display:flex;flex-direction:column;gap:16px;align-items:center;box-shadow:0 12px 40px rgba(0,0,0,.35)}
+.brand{font-size:20px;font-weight:700;letter-spacing:.3px}
+.sub{font-size:12px;color:rgba(255,255,255,.7)}
+.spinner{width:40px;height:40px;border:4px solid rgba(255,255,255,.18);border-top-color:#4f7bff;border-radius:50%;animation:spin .9s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.bar{width:100%;height:5px;border-radius:3px;overflow:hidden;background:rgba(255,255,255,.14)}
+.bar>i{display:block;height:100%;width:45%;border-radius:3px;background:linear-gradient(90deg,#4f7bff,#7aa2ff);animation:slide 1.1s ease-in-out infinite}
+@keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(260%)}}
+</style></head><body><div class="card">
+<div class="brand">DSH Launcher</div>
+<div class="spinner"></div>
+<div class="bar"><i></i></div>
+<div class="sub">正在启动…</div>
+</div></body></html>`
+
+let splash: BrowserWindow | null = null
+let revealTimer: NodeJS.Timeout | undefined
+
+/** Create + show the lightweight startup splash (frameless, transparent). */
+function createSplash(): void {
+  splash = new BrowserWindow({
+    width: 380,
+    height: 240,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    show: false,
+    center: true,
+    skipTaskbar: true,
+    webPreferences: { sandbox: true, contextIsolation: true },
+  })
+  splash.once('ready-to-show', () => { if (splash !== null && !splash.isDestroyed()) splash.show() })
+  void splash.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(SPLASH_HTML))
+    .catch(err => logger.warn(`splash load failed: ${String(err)}`))
+}
+
+/** Tear down the splash (idempotent: safe when never created / already closed). */
+function closeSplash(): void {
+  if (splash !== null && !splash.isDestroyed()) splash.close()
+  splash = null
+  if (revealTimer !== undefined) { clearTimeout(revealTimer); revealTimer = undefined }
+}
+
 function createWindow(): void {
   const win = new BrowserWindow({
     width: 1440,
@@ -39,6 +89,9 @@ function createWindow(): void {
     minWidth: 1280,
     minHeight: 720,
     title: 'DSH Launcher',
+    // Keep hidden until the renderer is ready; revealed behind the startup splash
+    // so a slow Portable/cold start never flashes a blank window.
+    show: false,
     // Frameless: the renderer provides its own title bar (brand + window controls).
     frame: false,
     webPreferences: {
@@ -52,6 +105,23 @@ function createWindow(): void {
     },
   })
   hookWindowMaximize(win)
+
+  // Close the splash and show the window once the renderer is ready. A 15s
+  // fallback still dismisses the splash even if ready-to-show never fires
+  // (degrades to the previous show-immediately behaviour rather than hanging).
+  revealTimer = setTimeout(() => {
+    closeSplash()
+    if (!win.isDestroyed()) win.show()
+  }, 15000)
+  win.once('ready-to-show', () => {
+    if (revealTimer !== undefined) { clearTimeout(revealTimer); revealTimer = undefined }
+    closeSplash()
+    if (!win.isDestroyed()) { win.show(); win.focus() }
+  })
+  win.on('closed', () => {
+    if (revealTimer !== undefined) { clearTimeout(revealTimer); revealTimer = undefined }
+    closeSplash()
+  })
 
   // ── 系统托盘（Windows 左下角）托管 ────────────────────────────────────────
   // 图标复用 build/icon.ico;右键菜单含运行状态 + 显示/隐藏 + 退出。
@@ -213,6 +283,10 @@ app.whenReady().then(async () => {
   // 数据目录确定后立即初始化日志，早于任何业务/数据库工作。
   initLogger(join(app.getPath('userData'), 'logs'))
   logger.info('app starting', { version: app.getVersion() != null ? `v${app.getVersion()}` : '' })
+
+  // Show the startup splash as early as possible — before the DB open / renderer
+  // load that a cold start must wait on.
+  createSplash()
 
   // Open the SQLite settings database before any IPC touches it.
   await openDatabase(join(app.getPath('userData'), 'app.sqlite'))
