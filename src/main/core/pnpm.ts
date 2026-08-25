@@ -33,8 +33,12 @@ function resolvePnpmEntry(): string {
     // `app.asar.unpacked` — Electron can't `require` it from inside `app.asar`, so
     // resolve it there by `process.resourcesPath`. In dev there is no unpacked
     // pnpm, so fall back to a normal `require.resolve`.
-    const unpacked = join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'pnpm', 'bin', 'pnpm.cjs')
-    pnpmEntry = existsSync(unpacked)
+    // `process.resourcesPath` only exists under Electron; guard it so the node-side
+    // tests (and dev) fall straight back to `require.resolve` without `join` NaN.
+    const unpacked = process.resourcesPath !== undefined
+      ? join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'pnpm', 'bin', 'pnpm.cjs')
+      : ''
+    pnpmEntry = (unpacked !== '' && existsSync(unpacked))
       ? unpacked
       : join(dirname(require.resolve('pnpm')), 'bin', 'pnpm.cjs')
   }

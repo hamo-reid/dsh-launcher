@@ -97,6 +97,15 @@ describe('store basics', () => {
     expect(installedStoreVersion(store(), 'ghost')).toBeUndefined()
   })
 
+  it('storeVersions order by semver, not dictionary — 0.10.0 above 0.9.5', () => {
+    // A dictionary sort() would yield ['0.10.0','0.9.5'] and pick 0.9.5 as the
+    // "latest"; semver ordering must rank 0.9.5 < 0.10.0 and pick 0.10.0.
+    seedVersion('pkg-b', '0.9.5')
+    seedVersion('pkg-b', '0.10.0')
+    expect(storeVersions(store(), 'pkg-b')).toEqual(['0.9.5', '0.10.0'])
+    expect(installedStoreVersion(store(), 'pkg-b')).toBe('0.10.0')
+  })
+
   it('addPlugin archives into archive/ and removePlugin uninstalls', async () => {
     // simulate pnpm resolving the install into the plugin's staging project
     vi.mocked(runPnpm).mockImplementation(async (dir) => {

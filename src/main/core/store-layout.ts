@@ -12,6 +12,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { logger } from './logger.ts'
+import { compareVersionsLoose } from './version.ts'
 
 /** A profile manifest shape (bundle layers + dependencies) read by the store. */
 export interface ProfileManifestShape {
@@ -85,7 +86,10 @@ export function storeVersions(storeDir: string, name: string): string[] {
     .filter(e => e.isDirectory() && e.name !== '.staging')
     .map(e => e.name)
     .filter(v => existsSync(join(root, v, 'node_modules', name, 'package.json')))
-    .sort()
+    // Semver ordering, not dictionary: `0.10.0` must rank above `0.9.5`, so
+    // `latestStoreVersion` (the last entry) and any default version pick resolve
+    // to the true newest release rather than the lexicographically-last string.
+    .sort((a, b) => compareVersionsLoose(a, b))
 }
 
 /** Highest archived version of a plugin, or `undefined` when none is present.
