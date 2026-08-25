@@ -6,7 +6,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import { useDownloads } from '../hooks/useDownloads.ts'
 import { StepIcon } from './StepIcon.tsx'
-import { MODAL } from '../theme.ts'
+import { LAYOUT, MODAL } from '../theme.ts'
 import type { DownloadSessionInfo } from '../../../shared/types.ts'
 
 const STATUS_COLOR: Record<DownloadSessionInfo['status'], string> = {
@@ -164,6 +164,14 @@ export default function DownloadPanel(): JSX.Element {
         title={t('download.panel.title', { count: downloads.length })}
         placement="right"
         width={440}
+        // Offset this drawer's mask + panel below the app's on-top brand row, so
+        // its mask never darkens (nor click-dismisses over) the header while the
+        // tab bar below stays normally masked. Official `styles` (not global css)
+        // because antd6's mask is position:absolute inside the drawer root.
+        styles={{
+          mask: { top: LAYOUT.headerHeight },
+          wrapper: { top: LAYOUT.headerHeight },
+        }}
         open={open}
         onClose={() => setOpen(false)}
       >

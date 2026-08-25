@@ -19,6 +19,10 @@ export const LAYOUT = {
   /** Standard content padding (px). */
   pagePadding: 16,
   pagePaddingLG: 24,
+  /** Height of the on-top brand row (title + download entrance + window
+   * controls). Modal/Drawer masks are offset below it (`--pm-header-top`, see
+   * `global.css`) so the brand row is never darkened or dismiss-on-click. */
+  headerHeight: 52,
 } as const
 
 /** Responsive modal widths: `wide` for list/detail dialogs, `narrow` for small
@@ -84,6 +88,7 @@ export const themes: Record<'light' | 'dark', ThemeConfig> = {
  * page background) follows the active theme. Set by ThemeProvider. */
 export function cssVars(isDark: boolean): Record<string, string> {
   return {
+    '--pm-header-top': `${LAYOUT.headerHeight}px`,
     '--pm-bg': isDark ? 'rgba(0,0,0,0.28)' : (lightToken.colorBgLayout ?? '#f4f6fb'),
     '--pm-surface-border': isDark
       ? (darkToken.colorBorder ?? 'rgba(255,255,255,0.16)')

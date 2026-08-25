@@ -48,3 +48,13 @@ body {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* Modal masks start below the app's on-top brand row (offset `--pm-header-top`),
+   so they never darken — nor dismiss-on-click over — the header. Drawers offset
+   the same way via their official `styles` prop (antd6's drawer mask is
+   position:absolute inside the drawer root, so a global selector is unreliable).
+   The `body` prefix + `!important` beat antd's runtime cssinjs rules. */
+body .ant-modal-mask,
+body .ant-modal-wrap {
+  top: var(--pm-header-top, 52px) !important;
+}

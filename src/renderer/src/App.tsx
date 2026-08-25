@@ -6,6 +6,7 @@ import {
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { useAppLang } from './i18n'
+import { LAYOUT } from './theme.ts'
 import OnboardingModal from './components/OnboardingModal.tsx'
 import CloseConfirmModal from './components/CloseConfirmModal.tsx'
 import DownloadPanel from './components/DownloadPanel.tsx'
@@ -140,7 +141,7 @@ export default function App() {
             alignItems: 'center',
             justifyContent: 'space-between',
             paddingLeft: 16,
-            height: 52,
+            height: LAYOUT.headerHeight,
             borderBottom: `1px solid ${token.colorBorder}`,
             WebkitAppRegion: 'drag',
           } as CSSProperties}
