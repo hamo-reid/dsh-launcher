@@ -2,7 +2,7 @@
  * install-into-profile picker. Each owns its own local state & data loading. */
 
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Modal, Select, Space, Spin, Tabs, Tag, message, theme } from 'antd'
+import { Alert, Button, Modal, Popconfirm, Select, Space, Spin, Tabs, Tag, Tooltip, message, theme } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
 import ReactMarkdown, { type Components } from 'react-markdown'
@@ -40,8 +40,12 @@ function PluginReadme({ text, dir }: { text: string; dir: string }): JSX.Element
 interface PluginDetailModalProps {
   target: InstalledOverviewRow | null
   busy: boolean
+  /** Archived versions of the plugin in the store — the ones a single-version
+   * delete operates on. */
+  storeVersions: string[]
   onClose: () => void
   onUninstall: (name: string) => void
+  onUninstallVersion: (name: string, version: string) => void
   onReveal: (name: string) => void
   onInstallToProfile: (name: string) => void
 }
@@ -69,7 +73,25 @@ export function PluginDetailModal(p: PluginDetailModalProps): JSX.Element {
           <Button onClick={() => void p.onReveal(target.name)}>{t('plugin.detail.reveal')}</Button>
           {target.inStore === true && (
             <>
-              <Button danger loading={p.busy} onClick={() => void p.onUninstall(target.name)}>{t('plugin.detail.uninstall')}</Button>
+              <Button danger type="primary" ghost loading={p.busy}
+                onClick={() => {
+                  const using = (target?.usage ?? []).map(u => `DSH「${u.dsh}」· profile「${u.profile}」`)
+                  // Cascade: the plugin is in use, so the user must know the
+                  // profiles will lose their reference along with the store removal.
+                  Modal.confirm({
+                    title: using.length > 0
+                      ? t('plugin.detail.removeAllCascade', { name: target.name })
+                      : t('plugin.detail.removeAllVersionsConfirm', { name: target.name }),
+                    content: using.length > 0
+                      ? t('plugin.detail.removeAllCascadeList', { profiles: using.join('、') })
+                      : undefined,
+                    okText: t('common.confirm'),
+                    okButtonProps: { danger: true },
+                    onOk: () => { void p.onUninstall(target.name) },
+                  })
+                }}>
+                {t('plugin.detail.removeAllVersions')}
+              </Button>
               <Button type="primary" onClick={() => { void p.onInstallToProfile(target.name) }}>{t('plugin.detail.installToProfile')}</Button>
             </>
           )}
@@ -88,9 +110,45 @@ export function PluginDetailModal(p: PluginDetailModalProps): JSX.Element {
               </Space>
               <div>
                 <FieldLabel>{t('plugin.detail.versionsLabel')}</FieldLabel>
-                {target === null || target.versions.length === 0
+                {target !== null && p.storeVersions.length === 0 && (target.versions.length === 0)
                   ? <span style={{ color: token.colorTextSecondary }}>{t('plugin.detail.noVersions')}</span>
-                  : target.versions.map(v => <div key={v} style={{ fontFamily: 'monospace', fontSize: token.fontSize }}>{v}</div>)}
+                  : (
+                    <div>
+                      {/* 本地存储归档版本 —— 逐个可管理：未使用可单删，使用中标记并禁用 */}
+                      {p.storeVersions.length > 0 && p.storeVersions.map(v => {
+                        const users = (target?.usage ?? []).filter(u => u.version === v).map(u => u.profile)
+                        const inUse = users.length > 0
+                        return (
+                          <div key={v} style={{ display: 'flex', alignItems: 'center', padding: '4px 0', borderBottom: `1px solid ${token.colorSplit}` }}>
+                            <Tag color="blue" style={{ flexShrink: 0 }}>{t('plugin.detail.storeTag')}</Tag>
+                            <span style={{ fontFamily: 'monospace', marginInline: 6, color: token.colorText }}>{v}</span>
+                            {inUse
+                              ? (
+                                <Tooltip title={t('plugin.detail.inUseBy', { profiles: users.join('、') })}>
+                                  <Tag color="green" style={{ marginInlineStart: 'auto' }}>{t('plugin.detail.versionInUse')}</Tag>
+                                </Tooltip>
+                              )
+                              : (
+                                <span style={{ marginInlineStart: 'auto' }}>
+                                  <Popconfirm title={t('plugin.detail.removeVersionConfirm', { version: v })}
+                                    okText={t('common.confirm')} okButtonProps={{ danger: true }}
+                                    onConfirm={() => { if (target !== null) void p.onUninstallVersion(target.name, v) }}>
+                                    <Button size="small" danger type="text" loading={p.busy}>{t('plugin.detail.removeVersion')}</Button>
+                                  </Popconfirm>
+                                </span>
+                              )}
+                          </div>
+                        )
+                      })}
+                      {/* 非 store 的已解析版本（内置 bundle / 本地 link）—— 只读展示 */}
+                      {(target?.versions ?? []).filter(v => !p.storeVersions.includes(v)).map(v => (
+                        <div key={v} style={{ display: 'flex', alignItems: 'center', padding: '4px 0', borderBottom: `1px solid ${token.colorSplit}` }}>
+                          <Tag color="purple" style={{ flexShrink: 0 }}>{t('plugin.detail.notInStore')}</Tag>
+                          <span style={{ fontFamily: 'monospace', marginInline: 6, color: token.colorText }}>{v}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
               </div>
               <div>
                 <FieldLabel>{t('plugin.detail.usageTab')}</FieldLabel>
@@ -98,9 +156,10 @@ export function PluginDetailModal(p: PluginDetailModalProps): JSX.Element {
                   ? <span style={{ color: token.colorTextSecondary }}>{t('plugin.detail.noUsage')}</span>
                   : (target?.usage ?? []).map((u, i) => (
                       <div key={i} style={{ padding: '6px 0', fontSize: token.fontSize, lineHeight: 1.6, borderBottom: i < (target?.usage.length ?? 0) - 1 ? `1px solid ${token.colorSplit}` : 0 }}>
-                        <span style={{ fontFamily: 'monospace' }}>DSH「{u.dsh}」</span>
+                        <span>DSH「{u.dsh}」</span>
                         {u.dshVersion !== undefined && <Tag style={{ marginInline: 4 }}>v{u.dshVersion}</Tag>}
-                        <span style={{ fontFamily: 'monospace' }}>· profile「{u.profile}」</span>
+                        <span>· profile「{u.profile}」</span>
+                        {u.version !== undefined && <Tag style={{ marginInline: 4, fontFamily: 'monospace' }}>@{u.version}</Tag>}
                       </div>
                     ))}
               </div>

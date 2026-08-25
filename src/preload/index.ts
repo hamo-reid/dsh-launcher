@@ -17,6 +17,7 @@ import type {
   ImportStep,
   InstalledOverviewRow,
   IpcResult,
+  PluginUsagePoint,
   MarketListOpts,
   MarketPage,
   MarketPlugin,
@@ -135,6 +136,8 @@ const api = {
       ipcRenderer.invoke('plugins:installOptions'),
     remove: (name: string, version?: string): Promise<IpcResult<string>> =>
       ipcRenderer.invoke('plugins:remove', name, version),
+    uninstall: (name: string): Promise<IpcResult<{ removed: PluginUsagePoint[] }>> =>
+      ipcRenderer.invoke('plugins:uninstall', name),
     listCombo: (profile: string): Promise<IpcResult<ComboPlugin[]>> =>
       ipcRenderer.invoke('plugins:listCombo', profile),
     overview: (): Promise<IpcResult<InstalledOverviewRow[]>> =>

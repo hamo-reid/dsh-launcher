@@ -51,7 +51,16 @@ export interface PluginUsagePoint {
   dsh: string
   dshVersion?: string
   profile: string
+  /** The resolved version of this plugin actually installed in the profile's
+   * `node_modules` (read from its `package.json`). Absent when the profile has
+   * not been installed yet, or the plugin isn't resolved into its node_modules. */
+  version?: string
 }
+
+/** How an archived plugin version got into the store. `dsh` = shipped with the
+ * harness (never archived); `store` = archived but its origin predates source
+ * tracking (unresolved). */
+export type PluginSource = 'github' | 'npm' | 'local' | 'dsh' | 'store'
 
 /** One row of the installed-plugin overview. */
 export interface InstalledOverviewRow {
@@ -59,6 +68,9 @@ export interface InstalledOverviewRow {
   versions: string[]
   usage: PluginUsagePoint[]
   inStore: boolean
+  /** Distinct origins of the archived versions (GitHub / npm / local folder),
+   * plus `dsh` when it is a built-in template. Empty when nothing resolved. */
+  sources: PluginSource[]
   /** True for a dsh-bundled template (used by a profile but not in the store):
    * shown as built-in, not a manageable plugin. */
   builtin?: boolean

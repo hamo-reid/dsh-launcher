@@ -18,7 +18,8 @@ import { runPnpm } from './pnpm.ts'
 import {
   addLocalPlugin, addPlugin, buildInstalledOverview, findInstalledDir, initStore,
   installIntoProfile, installedStoreVersion, listPlugins, listProfileScopes,
-  migrateStore, needsStoreMigration, readPluginReadme, removePlugin, storeVersions,
+  migrateStore, needsStoreMigration, readPluginReadme, removePlugin,
+  removePluginFromProfiles, storeVersions,
 } from './plugins.ts'
 import * as appStateModule from './appState.ts'
 import type { DshScope } from './appState.ts'
@@ -238,19 +239,44 @@ describe('buildInstalledOverview', () => {
     // template bundle in use but not in store → builtin
     const tpl = rows.find(r => r.name === 'tpl')!
     expect(tpl.builtin).toBe(true)
-    expect(tpl.usage).toEqual([{ dsh: 'dsh@d', dshVersion: 'd', profile: 'p1' }])
+    expect(tpl.usage).toEqual([{ dsh: 'dsh@d', dshVersion: 'd', profile: 'p1', version: '9.9.9' }])
+    // built-in template (in use, not in store) → sourced from the dsh harness.
+    expect(tpl.sources).toEqual(['dsh'])
 
     const bundleA = rows.find(r => r.name === 'bundleA')!
     expect(bundleA.inStore).toBe(true)
     expect(bundleA.builtin).toBe(false)
+    // bundleA is a bundle layer of p1 but is NOT resolved into p1's node_modules
+    // here → its usage version stays undefined (signals "not applied yet").
+    expect(bundleA.usage).toEqual([{ dsh: 'dsh@d', dshVersion: 'd', profile: 'p1', version: undefined }])
+    // no origin record → falls back to a generic "store" source.
+    expect(bundleA.sources).toEqual(['store'])
 
     // store-only download, no usage → still listed, not builtin
     const only = rows.find(r => r.name === 'storeOnly')!
     expect(only.inStore).toBe(true)
     expect(only.builtin).toBe(false)
     expect(only.usage).toEqual([])
+    expect(only.sources).toEqual(['store'])
 
     expect(names.sort()).toEqual(['bundleA', 'fileA', 'storeOnly', 'tpl'])
+  })
+
+  it('labels archived versions by their recorded source (github/npm/local/store)', () => {
+    seedVersion('gh', '1.0.0')
+    seedVersion('npmPkg', '2.0.0')
+    seedVersion('loc', '3.0.0')
+    seedVersion('old', '4.0.0') // no sidecar record → store
+    writeFileSync(join(store(), '.pm-sources.json'), JSON.stringify({
+      'gh@1.0.0': 'github', 'npmPkg@2.0.0': 'npm', 'loc@3.0.0': 'local',
+    }))
+
+    const rows = buildInstalledOverview([], store())
+    const byName = (n: string): { sources: string[] } => rows.find(r => r.name === n)!
+    expect(byName('gh').sources).toEqual(['github'])
+    expect(byName('npmPkg').sources).toEqual(['npm'])
+    expect(byName('loc').sources).toEqual(['local'])
+    expect(byName('old').sources).toEqual(['store'])
   })
 
   it('skips a profile with an unreadable manifest', () => {
@@ -259,6 +285,52 @@ describe('buildInstalledOverview', () => {
     mkdirSync(join(base, 'broken'), { recursive: true })
     writeFileSync(join(base, 'broken', 'package.json'), '{ not json')
     expect(buildInstalledOverview([scope('d', homeD)], store())).toEqual([])
+  })
+})
+
+describe('removePluginFromProfiles', () => {
+  it('detaches a linked plugin from every using profile (link dep + bundle layer)', async () => {
+    const homeD = join(root, 'home-cascade')
+    const base = join(homeD, 'profiles')
+    mkProfile(base, 'p1', {
+      dependencies: { '@scope/plug': 'link:C:/store/archive/@scope/plug/1.0.0/node_modules/@scope/plug' },
+      dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@scope/plug'] } },
+    })
+    mkProfile(base, 'p2', { dependencies: { '@scope/plug': 'link:C:/store/archive/@scope/plug/1.0.0/node_modules/@scope/plug', other: '^1' } })
+    mkProfile(base, 'p3', { dependencies: { unrelated: '^1' } })
+    // Simulate the installed node_modules copies the overview would otherwise scan.
+    mkPkg(join(base, 'p1', 'node_modules', '@scope', 'plug'), '1.0.0')
+    mkPkg(join(base, 'p2', 'node_modules', '@scope', 'plug'), '1.0.0')
+
+    const affected = await removePluginFromProfiles([scope('c', homeD)], '@scope/plug')
+
+    expect(affected).toHaveLength(2)
+    // the plugin's folder is PHYSICALLY removed from both profiles.
+    expect(existsSync(join(base, 'p1', 'node_modules', '@scope', 'plug'))).toBe(false)
+    expect(existsSync(join(base, 'p2', 'node_modules', '@scope', 'plug'))).toBe(false)
+    const p1 = JSON.parse(readFileSync(join(base, 'p1', 'package.json'), 'utf8'))
+    expect(p1.dependencies?.['@scope/plug']).toBeUndefined()
+    expect(p1.dsh?.profile?.bundles).toEqual(['@deepseek-ai/dsh-base'])
+    const p2 = JSON.parse(readFileSync(join(base, 'p2', 'package.json'), 'utf8'))
+    expect(p2.dependencies?.['@scope/plug']).toBeUndefined()
+    expect(p2.dependencies?.other).toBe('^1')
+    // untouched profile keeps its own deps
+    const p3 = JSON.parse(readFileSync(join(base, 'p3', 'package.json'), 'utf8'))
+    expect(p3.dependencies?.unrelated).toBe('^1')
+    expect(runPnpm).toHaveBeenCalledTimes(2)
+  })
+
+  it('leaves a profile whose spec is an npm range untouched', async () => {
+    const homeD = join(root, 'home-cascade2')
+    const base = join(homeD, 'profiles')
+    mkProfile(base, 'p1', { dependencies: { plug: '^1.0.0' } })
+
+    const affected = await removePluginFromProfiles([scope('c', homeD)], 'plug')
+
+    expect(affected).toHaveLength(0)
+    const p1 = JSON.parse(readFileSync(join(base, 'p1', 'package.json'), 'utf8'))
+    expect(p1.dependencies?.plug).toBe('^1.0.0')
+    expect(runPnpm).not.toHaveBeenCalled()
   })
 })
 

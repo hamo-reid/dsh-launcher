@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } 
 import { join, resolve } from 'node:path'
 import {
   addLocalPlugin, addPlugin, buildInstalledOverview, findInstalledDir, initStore, installIntoProfile, listPlugins,
-  listProfileScopes, readPluginReadme, removePlugin,
+  listProfileScopes, readPluginReadme, removePlugin, removePluginFromProfiles,
 } from '../core/plugins.ts'
 import { listComboPlugins } from '../core/combo.ts'
 import { dshScopes, pluginDir, readDshState } from '../core/appState.ts'
@@ -14,7 +14,7 @@ import { loadSettings, saveSettings } from '../core/settings.ts'
 import { inlineRelativeImages } from '../core/app-util.ts'
 import { fetchPackageVersions, npmSearch } from '../core/npm.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
-import type { ComboPlugin, InstalledOverviewRow, IpcResult, NpmSearchHit, PackageVersionInfo } from '../../shared/types.ts'
+import type { ComboPlugin, InstalledOverviewRow, IpcResult, NpmSearchHit, PackageVersionInfo, PluginUsagePoint } from '../../shared/types.ts'
 
 /** Validate + persist the plugin-store location (shared by `plugins:setDir`
  * and the onboarding wizard). On success the dir is made usable and saved. */
@@ -127,6 +127,21 @@ export function registerPluginsIpc(): void {
     try {
       const result = await removePlugin(pluginDir(), name, version)
       return result.ok ? { ok: true, value: result.text } : fail('store.operationFailed', { detail: result.text })
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Cascade "full uninstall": detach the plugin from every profile that links it
+  // (dropping the link dep + bundle layer + pnpm install frees the store archive
+  // from junction-occupied Windows), then remove the whole plugin from the store.
+  // Returns which profiles were detached so the renderer can surface them.
+  ipcMain.handle('plugins:uninstall', async (_event, name: string): Promise<IpcResult<{ removed: PluginUsagePoint[] }>> => {
+    try {
+      const removed = await removePluginFromProfiles(dshScopes(), name)
+      const res = removePlugin(pluginDir(), name)
+      if (!res.ok) return fail('store.operationFailed', { detail: res.text })
+      return { ok: true, value: { removed } }
     } catch (error) {
       return failFromError(error)
     }

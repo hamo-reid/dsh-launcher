@@ -11,6 +11,7 @@ export type {
   ProfileLayer,
   RowCreateInput,
   PluginUsagePoint,
+  PluginSource,
   InstalledOverviewRow,
   ProfileDetail,
   IpcResult,

@@ -20,6 +20,7 @@ import type {
   InstalledOverviewRow,
   InstalledPlugin,
   IpcResult,
+  PluginUsagePoint,
   MarketListOpts,
   MarketPage,
   MarketPlugin,
@@ -96,6 +97,10 @@ export interface WindowApi {
     installOptions: () => Promise<IpcResult<{ id: string; name: string; version?: string; profiles: string[] }[]>>
     installToProfile: (profile: string, pkg: string, version?: string, dshId?: string) => Promise<IpcResult<string>>
     remove: (name: string, version?: string) => Promise<IpcResult<string>>
+    /** Cascade full uninstall: detach the plugin from every using profile, then
+     * remove the whole plugin (all versions) from the store. Returns the detached
+     * usage points. */
+    uninstall: (name: string) => Promise<IpcResult<{ removed: PluginUsagePoint[] }>>
     listCombo: (profile: string) => Promise<IpcResult<ComboPlugin[]>>
     overview: () => Promise<IpcResult<InstalledOverviewRow[]>>
     reveal: (name: string) => Promise<IpcResult<boolean>>

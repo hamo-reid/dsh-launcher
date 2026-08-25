@@ -16,6 +16,15 @@ type PluginView = 'overview' | 'download' | 'install' | 'market'
 
 const PAGE_SIZE = 25
 
+/** Semantically-coloured source tags for the overview "source" column. */
+const SOURCE_COLORS: Record<string, string> = {
+  github: 'green',
+  npm: 'blue',
+  local: 'cyan',
+  dsh: 'purple',
+  store: 'default',
+}
+
 function fmtDate(iso: string): string {
   const d = new Date(iso)
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString()
@@ -66,15 +75,17 @@ export default function PluginsSection() {
     { key: 'install' as const, label: t('plugin.view.install') },
   ]
 
-  const load = async (): Promise<void> => {
+  const load = async (): Promise<InstalledOverviewRow[] | undefined> => {
     setOverviewLoading(true)
     const r = await window.api.plugins.overview()
     setOverviewLoading(false)
-    if (r.ok) setOverview(r.value)
+    let rows: InstalledOverviewRow[] | undefined
+    if (r.ok) { setOverview(r.value); rows = r.value }
     else void message.error(apiErrorText(r))
     // Which store plugins have a missing node_modules dir (for stale marking).
     const h = await window.api.settings.checkHealth()
     if (h.ok) setStaleStoreNames(new Set(h.value.filter(x => x.kind === 'plugin-missing').map(x => x.label)))
+    return rows
   }
 
   const refreshStoreNames = useCallback(async (): Promise<void> => {
@@ -124,12 +135,32 @@ export default function PluginsSection() {
 
   const uninstall = async (name: string): Promise<void> => {
     setBusy(true)
-    const res = await window.api.plugins.remove(name)
+    // Cascade full uninstall: detach the plugin from every using profile, then
+    // remove the whole plugin from the store (frees the archive on Windows).
+    const res = await window.api.plugins.uninstall(name)
     setBusy(false)
     if (!res.ok) { void message.error(apiErrorText(res)); setTarget(null); return }
+    const detached = res.value.removed.length
     setTarget(null)
-    void message.success(t('plugin.uninstalled', { name }))
+    void message.success(detached > 0
+      ? t('plugin.uninstalledCascade', { name, count: detached })
+      : t('plugin.uninstalled', { name }))
     await Promise.all([load(), refreshStoreNames()])
+  }
+
+  // Remove a SINGLE archived version from the store. Keeps the detail modal open
+  // so the user can keep managing the remaining versions — the target is re-synced
+  // to the fresh overview (and closed if this was the plugin's last version).
+  const uninstallVersion = async (name: string, version: string): Promise<void> => {
+    setBusy(true)
+    const res = await window.api.plugins.remove(name, version)
+    setBusy(false)
+    if (!res.ok) { void message.error(apiErrorText(res)); return }
+    void message.success(t('plugin.version.uninstalled', { name, version }))
+    const rows = await load()
+    const fresh = rows?.find(x => x.name === name)
+    setTarget(fresh !== undefined ? fresh : null)
+    await refreshStoreNames()
   }
 
   // Remove a stale store plugin (its dir is missing on disk): confirm, then the
@@ -242,17 +273,28 @@ export default function PluginsSection() {
                 render: (versions: string[]) => <span title={versions.join('、')}>{versionCell(versions)}</span>,
               },
               {
+                title: t('plugin.overview.colSource'),
+                key: 'source',
+                width: 150,
+                render: (_: unknown, r: InstalledOverviewRow) => (
+                  <Space size={4} wrap>
+                    {(r.sources ?? []).map(s => (
+                      <Tag key={s} color={SOURCE_COLORS[s] ?? 'default'}>{t(`plugin.source.${s}`)}</Tag>
+                    ))}
+                    {r.sources.length === 0 && <span style={{ color: token.colorTextTertiary }}>-</span>}
+                  </Space>
+                ),
+              },
+              {
                 title: t('plugin.overview.colUsage'),
                 key: 'usage',
-                width: 180,
+                width: 140,
                 render: (_: unknown, r: InstalledOverviewRow) => {
                   const dshs = new Set(r.usage.map(u => u.dsh))
                   return (
                     <Space size={4} wrap>
                       <Tag>{t('plugin.overview.usageN', { count: r.usage.length })}</Tag>
                       <Tag>{t('plugin.overview.dshN', { count: dshs.size })}</Tag>
-                      {r.builtin === true ? <Tag color="purple">{t('plugin.overview.builtin')}</Tag> : null}
-                      {r.inStore && <Tag color="blue">{t('plugin.overview.storeTag')}</Tag>}
                     </Space>
                   )
                 },
@@ -385,8 +427,10 @@ export default function PluginsSection() {
     <PluginDetailModal
       target={target}
       busy={busy}
+      storeVersions={target !== null ? storeMap.get(target.name) ?? [] : []}
       onClose={() => setTarget(null)}
       onUninstall={name => void uninstall(name)}
+      onUninstallVersion={(name, version) => void uninstallVersion(name, version)}
       onReveal={name => void revealDir(name)}
       onInstallToProfile={name => { setTarget(null); setInstallPkg(name) }}
     />
