@@ -1,0 +1,129 @@
+/**
+ * Plugin download session manager. Every user-visible download (download center,
+ * market, install view) runs as one cancellable session tracked here: a session
+ * owns an AbortController whose signal flows all the way into `runPnpm` (kills
+ * the pnpm child tree), and `installSource` cleans its own `.staging` on cancel.
+ *
+ * The renderer's global download panel reads `listPluginDownloads()` and is kept
+ * up to date via `onDownloadsChange`. Sessions are removed once they reach a
+ * terminal state, so the panel shows live work only (plus a cleanup affordance
+ * for any half-written staging/import leftovers).
+ */
+import { existsSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { deleteTreePhysical, installSource, packageNameFromSource } from './plugins.ts'
+import { logger } from './logger.ts'
+import type { DownloadSessionInfo } from '../../shared/types.ts'
+
+export type DownloadStatus = DownloadSessionInfo['status']
+
+interface DownloadSession {
+  id: string
+  name: string
+  source: string
+  status: DownloadStatus
+  message?: string
+  controller: AbortController
+}
+
+/** Live sessions by id. Kept only while downloading; removed on completion. */
+const active = new Map<string, DownloadSession>()
+let seq = 0
+let emit: ((list: DownloadSessionInfo[]) => void) | undefined
+
+/** Register the listener that pushes session snapshots (the IPC layer wires this
+ * to `webContents.send('download:change', …)`). */
+export function onDownloadsChange(fn: (list: DownloadSessionInfo[]) => void): void {
+  emit = fn
+}
+
+function snapshot(): DownloadSessionInfo[] {
+  return [...active.values()].map(({ id, name, source, status, message }) => ({ id, name, source, status, message }))
+}
+
+function notify(): void {
+  emit?.(snapshot())
+}
+
+/** Current live download sessions (by insertion order). */
+export function listPluginDownloads(): DownloadSessionInfo[] {
+  return snapshot()
+}
+
+/** Kick off a cancellable download of `source` into the store. Resolves with the
+ * session id; the async work lands a status update + change notification. */
+export function startPluginDownload(storeDir: string, source: string, name?: string): string {
+  const installName = (name ?? packageNameFromSource(source)).trim()
+  const id = `dl-${++seq}`
+  const controller = new AbortController()
+  const session: DownloadSession = {
+    id,
+    name: installName === '' ? source : installName,
+    source,
+    status: 'running',
+    controller,
+  }
+  active.set(id, session)
+  notify()
+
+  void (async () => {
+    try {
+      const res = await installSource(storeDir, installName === '' ? source : installName, source, controller.signal)
+      if (controller.signal.aborted) { session.status = 'cancelled'; session.message = 'cancelled' }
+      else if (res.ok) { session.status = 'done' }
+      else { session.status = 'failed'; session.message = res.text }
+    } catch (error) {
+      session.status = 'failed'
+      session.message = error instanceof Error ? error.message : String(error)
+    } finally {
+      active.delete(id)
+      notify()
+      logger.info(`plugin download ${session.name}: ${session.status}`)
+    }
+  })()
+
+  return id
+}
+
+/** Cancel a running download. No-op when the session is unknown or already done. */
+export function cancelPluginDownload(id: string): boolean {
+  const session = active.get(id)
+  if (session === undefined) return false
+  if (session.status !== 'running') return false
+  session.controller.abort()
+  return true
+}
+
+/**
+ * Remove half-written download leftovers: every `archive/<name>/.staging` (an
+ * interrupted pnpm project) and the zip-extract dir `store/.import`. Returns the
+ * paths that were cleaned. Routing stays garbage-safe: nested `.staging` dirs
+ * that are newly-created mid-scan are left for the next pass.
+ */
+export function cleanupPluginDownloads(storeDir: string): { removed: string[] } {
+  const removed: string[] = []
+  const arc = join(storeDir, 'archive')
+  if (existsSync(arc)) {
+    for (const top of readdirSync(arc, { withFileTypes: true })) {
+      if (!top.isDirectory() || top.name === '.staging') continue
+      const scopeDir = join(arc, top.name)
+      // Scoped plugins nest one level deeper: archive/@scope/<name>.
+      const horizons = top.name.startsWith('@')
+        ? readdirSync(scopeDir).filter(e => e !== '.staging').map(e => join(scopeDir, e))
+        : [scopeDir]
+      for (const h of horizons) {
+        if (!existsSync(h)) continue
+        const staging = join(h, '.staging')
+        if (!existsSync(staging)) continue
+        deleteTreePhysical(staging)
+        removed.push(staging.replace(/\\/g, '/'))
+      }
+    }
+  }
+  const imp = join(storeDir, '.import')
+  if (existsSync(imp)) {
+    deleteTreePhysical(imp)
+    removed.push(imp.replace(/\\/g, '/'))
+  }
+  return { removed }
+}

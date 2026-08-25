@@ -17,7 +17,7 @@ vi.mock('./pnpm.ts', async (importActual) => {
 import { runPnpm } from './pnpm.ts'
 import {
   addLocalPlugin, addPlugin, buildInstalledOverview, findInstalledDir, initStore,
-  installIntoProfile, installedStoreVersion, listPlugins, listProfileScopes,
+  installIntoProfile, installSource, installedStoreVersion, listPlugins, listProfileScopes,
   migrateStore, needsStoreMigration, readPluginReadme, removePlugin,
   removePluginFromProfiles, storeVersions,
 } from './plugins.ts'
@@ -105,7 +105,7 @@ describe('store basics', () => {
     })
     await addPlugin(store(), 'foo@^1')
     const staging = join(store(), 'archive', 'foo', '.staging')
-    expect(runPnpm).toHaveBeenCalledWith(staging, ['add', 'foo@^1', '--fetch-retries=3', '--fetch-retry-maxtimeout=60000'])
+    expect(runPnpm).toHaveBeenCalledWith(staging, ['add', 'foo@^1', '--fetch-retries=3', '--fetch-retry-maxtimeout=60000'], undefined)
     expect(listPlugins(store())).toContainEqual({ name: 'foo', version: '1.2.3' })
     await removePlugin(store(), 'foo')
     expect(existsSync(join(store(), 'archive', 'foo'))).toBe(false)
@@ -136,7 +136,7 @@ describe('local installs', () => {
     const r = await addLocalPlugin(store(), src)
     expect(r.ok).toBe(true)
     const staging = join(store(), 'archive', 'src-plugin', '.staging')
-    expect(runPnpm).toHaveBeenCalledWith(staging, ['add', `file:${src}`, '--fetch-retries=3', '--fetch-retry-maxtimeout=60000'])
+    expect(runPnpm).toHaveBeenCalledWith(staging, ['add', `file:${src}`, '--fetch-retries=3', '--fetch-retry-maxtimeout=60000'], undefined)
     expect(listPlugins(store())).toContainEqual({ name: 'src-plugin', version: '1.0.0' })
   })
 
@@ -331,6 +331,19 @@ describe('removePluginFromProfiles', () => {
     const p1 = JSON.parse(readFileSync(join(base, 'p1', 'package.json'), 'utf8'))
     expect(p1.dependencies?.plug).toBe('^1.0.0')
     expect(runPnpm).not.toHaveBeenCalled()
+  })
+})
+
+describe('installSource (cancellation)', () => {
+  it('cleans its staging dir and surfaces aborted when cancelled', async () => {
+    const name = 'abortedPkg'
+    vi.mocked(runPnpm).mockResolvedValueOnce({ ok: false, aborted: true, text: 'cancelled' })
+    const staging = join(join(store(), 'archive'), name, '.staging')
+    const res = await installSource(store(), name, `${name}@1.0.0`, new AbortController().signal)
+    expect(res.ok).toBe(false)
+    expect(res.aborted).toBe(true)
+    // the half-downloaded pnpm project is gone
+    expect(existsSync(staging)).toBe(false)
   })
 })
 

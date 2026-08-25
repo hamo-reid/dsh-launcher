@@ -6,7 +6,7 @@
  * rows (the lesson from earlier enable/disable work that re-dumped and lost them).
  */
 
-import type { ClassifiedRow, PluginRow, RowCreateInput } from './types.ts'
+import type { ClassifiedRow, PluginRow, RowCreateInput } from '../../shared/types.ts'
 
 /** Matches a `- id: xxx` row start (optionally quoted id). */
 const ID_RE = /^(\s*)- id:\s*'?([^'\s]+)'?\s*$/

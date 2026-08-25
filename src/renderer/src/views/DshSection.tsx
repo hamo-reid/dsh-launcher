@@ -13,23 +13,7 @@ import ConfigRow from '../components/ConfigRow.tsx'
 import Panel from '../components/Panel.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
 import { AddDshModal, DataMirrorModal, DshRemoveModal, OfficialInstallModal, RenameDshModal, UpdateDshModal } from './DshModals.tsx'
-
-interface DshEntry {
-  id: string
-  name: string
-  execPath: string
-  version: string
-  home: string
-  launch?: string
-  /** True only for app-managed (official install) dsh — deletable from here. */
-  managed?: boolean
-  /** Effective (resolved) profile dir, computed in main. */
-  profileDir?: string
-  /** Configured profile-dir override, if any. */
-  profilesDir?: string
-  /** Directory holding this dsh's executable (for reveal in explorer). */
-  dir?: string
-}
+import type { DshEntry } from '../../../shared/types.ts'
 
 /** DSH 页：安装(官方安装) + 管理(列表)；弹窗在 `DshModals`。套统一 AppShell。 */
 export default function DshSection() {

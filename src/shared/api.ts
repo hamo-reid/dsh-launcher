@@ -14,6 +14,7 @@ import type {
   DshInstallStep,
   DshUpdateInfo,
   DshUpdateResult,
+  DownloadSessionInfo,
   HealthIssue,
   ImportProfileResult,
   ImportStep,
@@ -72,7 +73,6 @@ export interface WindowApi {
   openPatchSource: (name: string) => Promise<IpcResult<boolean>>
 
   home: {
-    load: () => Promise<IpcResult<{ rows: PluginRow[]; text: string }>>
     setDisabled: (id: string, disabled: boolean) => Promise<IpcResult<boolean>>
   }
 
@@ -107,6 +107,17 @@ export interface WindowApi {
     search: (query: string, opts?: { from?: number; size?: number }) => Promise<IpcResult<{ hits: NpmSearchHit[]; total: number }>>
     /** Full version list + dist-tags for the version picker. */
     pkgVersions: (name: string) => Promise<IpcResult<PackageVersionInfo>>
+  }
+
+  /** Cancellable, parallel plugin download sessions (global download panel). */
+  downloads: {
+    start: (source: string, name?: string) => Promise<IpcResult<{ id: string }>>
+    list: () => Promise<IpcResult<DownloadSessionInfo[]>>
+    cancel: (id: string) => Promise<IpcResult<boolean>>
+    cleanup: () => Promise<IpcResult<{ removed: string[] }>>
+    /** Subscribe to live session-snapshot pushes from the main process. Returns
+     * an unsubscribe function. */
+    onChange: (fn: (list: DownloadSessionInfo[]) => void) => () => void
   }
 
   market: {
@@ -183,7 +194,6 @@ export interface WindowApi {
 
   dsh: {
     list: () => Promise<IpcResult<{ dshes: DshEntry[]; activeDshId?: string }>>
-    detect: () => Promise<IpcResult<DshEntry[]>>
     add: (path: string) => Promise<IpcResult<DshEntry>>
     remove: (id: string, opts?: { deleteFiles?: boolean }) => Promise<IpcResult<boolean>>
     setActive: (id: string) => Promise<IpcResult<boolean>>

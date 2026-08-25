@@ -62,6 +62,21 @@ export interface PluginUsagePoint {
  * tracking (unresolved). */
 export type PluginSource = 'github' | 'npm' | 'local' | 'dsh' | 'store'
 
+/** Lifecycle state of a plugin download task. */
+export type DownloadStatus = 'running' | 'done' | 'failed' | 'cancelled'
+
+/** One plugin download task, visible to the renderer's global download panel. */
+export interface DownloadSessionInfo {
+  id: string
+  /** Display/install name (package name) resolved from the source. */
+  name: string
+  /** The pnpm source spec (`name@ver`, `github:owner/repo`, `file:…`). */
+  source: string
+  status: DownloadStatus
+  /** Failure/cancel detail, when any. */
+  message?: string
+}
+
 /** One row of the installed-plugin overview. */
 export interface InstalledOverviewRow {
   name: string
@@ -112,6 +127,9 @@ export interface DshEntry {
   home: string
   /** Optional override for this dsh's profiles directory (default `<home>/profiles`). */
   profilesDir?: string
+  /** Effective (resolved) profiles directory, computed at read time after any
+   * override; distinct from the configured `profilesDir`. */
+  profileDir?: string
   /** Persisted app-managed marker (set on official install; the read side merges
    * it with a path-derived check so a clobbered marker still leaves an app
    * install deletable). System/globally-installed dsh are never managed. */

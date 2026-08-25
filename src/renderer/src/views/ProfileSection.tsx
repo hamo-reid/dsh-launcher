@@ -18,14 +18,7 @@ import {
   CloneProfileModal, CreateProfileModal, ExportProfileModal, ImportProfileModal, MirrorProfileModal, RunFailModal,
 } from './ProfileModals.tsx'
 import { LAYOUT } from '../theme.ts'
-import type { TrashItem } from '../../../shared/types.ts'
-
-interface ProfileSummary {
-  name: string
-  bundles: number
-  plugins: number
-  patchRows: number
-}
+import type { ProfileSummary, TrashItem } from '../../../shared/types.ts'
 
 type View = 'profiles' | 'trash'
 

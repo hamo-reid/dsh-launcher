@@ -64,6 +64,9 @@ export default function MarketSection(): JSX.Element {
     if (r.ok) setStoreMap(toStoreMap(r.value))
   }, [])
 
+  // Keep the in-store tag current as downloads settle (any session change).
+  useEffect(() => window.api.downloads.onChange(() => { void refreshStoreNames() }), [refreshStoreNames])
+
   // The one request path. Reads the current filter/page state (fresh via the
   // useCallback deps) and applies the query server-side; a stale response is
   // ignored so slow pages never clobber a newer one.
@@ -147,10 +150,10 @@ export default function MarketSection(): JSX.Element {
       const r = await window.api.market.resolve(p.url)
       if (!r.ok) { void message.error(apiErrorText(r)); return }
       if (r.value.spec === null) { void message.error(t('plugin.market.noSource')); return }
-      const add = await window.api.plugins.add(r.value.spec, p.name)
+      // Fire a cancellable session; progress/cancel live in the global panel.
+      const add = await window.api.downloads.start(r.value.spec, p.name)
       if (!add.ok) { void message.error(apiErrorText(add)); return }
-      void message.success(t('plugin.market.addedToStore', { spec: r.value.spec }))
-      await refreshStoreNames()
+      void message.success(t('plugin.market.downloadStarted', { spec: r.value.spec }))
     } finally {
       setBusy(null)
     }

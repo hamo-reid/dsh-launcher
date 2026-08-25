@@ -11,8 +11,6 @@ export default defineConfig({
       include: ['src/main/core/**/*.ts'],
       // 排除入口/仅内置插件（combo 数据用内置插件，无需测试）。
       exclude: [
-        'src/main/core/types.ts',
-        'src/main/core/combo.plugins.ts',
         '**/*.test.ts',
         '**/*.d.ts',
       ],

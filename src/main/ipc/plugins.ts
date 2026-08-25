@@ -1,7 +1,7 @@
 /** IPC for the plugin store (`plugins:*`): store dir, network/local downloads,
  * install-into-profile, search, overview, README and reveal. */
 
-import { ipcMain, dialog, shell } from 'electron'
+import { BrowserWindow, ipcMain, dialog, shell } from 'electron'
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import {
@@ -9,12 +9,15 @@ import {
   listProfileScopes, readPluginReadme, removePlugin, removePluginFromProfiles,
 } from '../core/plugins.ts'
 import { listComboPlugins } from '../core/combo.ts'
+import {
+  cancelPluginDownload, cleanupPluginDownloads, listPluginDownloads, onDownloadsChange, startPluginDownload,
+} from '../core/pluginDownloads.ts'
 import { dshScopes, pluginDir, readDshState } from '../core/appState.ts'
 import { loadSettings, saveSettings } from '../core/settings.ts'
 import { inlineRelativeImages } from '../core/app-util.ts'
 import { fetchPackageVersions, npmSearch } from '../core/npm.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
-import type { ComboPlugin, InstalledOverviewRow, IpcResult, NpmSearchHit, PackageVersionInfo, PluginUsagePoint } from '../../shared/types.ts'
+import type { ComboPlugin, DownloadSessionInfo, InstalledOverviewRow, IpcResult, NpmSearchHit, PackageVersionInfo, PluginUsagePoint } from '../../shared/types.ts'
 
 /** Validate + persist the plugin-store location (shared by `plugins:setDir`
  * and the onboarding wizard). On success the dir is made usable and saved. */
@@ -204,6 +207,49 @@ export function registerPluginsIpc(): void {
       return { ok: true, value: true }
     } catch (error) {
       return failFromError(error)
+    }
+  })
+
+  // ── download sessions (cancellable, parallel) ─────────────────────────────
+
+  ipcMain.handle('downloads:start', (_event, source: string, name?: string): IpcResult<{ id: string }> => {
+    try {
+      if (pluginDir() === '') return fail(E.storeNotConfigured)
+      return { ok: true, value: { id: startPluginDownload(pluginDir(), source, name) } }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  ipcMain.handle('downloads:list', (): IpcResult<DownloadSessionInfo[]> => {
+    try {
+      return { ok: true, value: listPluginDownloads() }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  ipcMain.handle('downloads:cancel', (_event, id: string): IpcResult<boolean> => {
+    try {
+      return { ok: true, value: cancelPluginDownload(id) }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  ipcMain.handle('downloads:cleanup', (): IpcResult<{ removed: string[] }> => {
+    try {
+      return { ok: true, value: cleanupPluginDownloads(pluginDir()) }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Push live session snapshots to every renderer (matched by the shared
+  // `downloads:change` channel), mirroring how `run:event` streams output.
+  onDownloadsChange((list) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('download:change', list)
     }
   })
 }

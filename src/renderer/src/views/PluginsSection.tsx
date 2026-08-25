@@ -93,6 +93,10 @@ export default function PluginsSection() {
     if (r.ok) setStoreMap(toStoreMap(r.value))
   }, [])
 
+  // When any download session settles, refresh the in-store tags (a finished
+  // download flips the plugin to "in store" without needing a manual reload).
+  useEffect(() => window.api.downloads.onChange(() => { void refreshStoreNames() }), [refreshStoreNames])
+
   useEffect(() => {
     void (async () => {
       const d = await window.api.plugins.getDir()
@@ -187,14 +191,14 @@ export default function PluginsSection() {
     if (!r.ok) void message.error(apiErrorText(r))
   }
 
-  const install = async (): Promise<void> => {
+  const install = (): void => {
     const s = source.trim()
     if (s === '') return
-    setBusyAction('network')
-    const res = await window.api.plugins.add(s)
-    setBusyAction(null)
-    if (!res.ok) { void message.error(apiErrorText(res)); setLog('') } else { setLog(res.value); void message.success(t('plugin.installedStore')) }
-    await Promise.all([load(), refreshStoreNames()]) // 总览 + 在库名单同步刷新
+    setLog('')
+    // Fire a cancellable download session; progress/cancel live in the global
+    // download panel. Store tags refresh when any session settles.
+    void window.api.downloads.start(s)
+    void message.info(t('plugin.download.started'))
   }
 
   const addLocal = async (kind: 'folder' | 'zip'): Promise<void> => {

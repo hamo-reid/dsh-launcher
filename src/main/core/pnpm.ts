@@ -19,6 +19,8 @@ export interface PnpmResult {
   ok: boolean
   /** Trimmed combined stdout+stderr. */
   text: string
+  /** True when the run was cut short via the caller's AbortSignal. */
+  aborted?: boolean
 }
 
 /** pnpm's JS entry, resolved from node_modules (inside the packaged asar at
@@ -62,8 +64,10 @@ function resolvePnpmNode(): string {
   return nodeEnvironment(nodePreferenceValue()).prefer === 'system' ? 'node' : process.execPath
 }
 
-/** Run `pnpm <args>` with cwd, resolving on process exit. */
-export function runPnpm(cwd: string, args: readonly string[]): Promise<PnpmResult> {
+/** Run `pnpm <args>` with cwd, resolving on process exit. When `signal` is given
+ * and the caller aborts it, the pnpm child (and its sub-process tree) is killed
+ * and the promise resolves with `{ ok: false, aborted: true }`. */
+export function runPnpm(cwd: string, args: readonly string[], signal?: AbortSignal): Promise<PnpmResult> {
   return new Promise((resolve) => {
     logger.debug(`pnpm ${args.join(' ')} @ ${cwd}`)
     let child: ReturnType<typeof spawn>
@@ -81,11 +85,30 @@ export function runPnpm(cwd: string, args: readonly string[]): Promise<PnpmResul
       resolve({ ok: false, text: error instanceof Error ? error.message : String(error) })
       return
     }
+    const onAbort = (): void => { if (child.pid !== undefined) killProcessTree(child.pid) }
+    if (signal !== undefined) {
+      // Aborted before spawn: kill as soon as the child exists.
+      if (signal.aborted) onAbort()
+      else signal.addEventListener('abort', onAbort, { once: true })
+    }
     let out = ''
     child.stdout?.on('data', (data: Buffer) => { out += String(data) })
     child.stderr?.on('data', (data: Buffer) => { out += String(data) })
-    child.on('error', (error) => { logger.warn(`pnpm failed to run: ${error.message}`); resolve({ ok: false, text: error.message }) })
+    child.on('error', (error) => {
+      signal?.removeEventListener('abort', onAbort)
+      logger.warn(`pnpm failed to run: ${error.message}`)
+      resolve({ ok: false, text: error.message })
+    })
     child.on('close', (code) => {
+      signal?.removeEventListener('abort', onAbort)
+      // A user-cancel is distinct from a genuine failure — the caller may want to
+      // clean up its staging dir and surface "cancelled", not an error.
+      const aborted = signal !== undefined && signal.aborted
+      if (aborted) {
+        logger.warn(`pnpm aborted @ ${cwd}`)
+        resolve({ ok: false, text: 'cancelled', aborted: true })
+        return
+      }
       // Real installs (even when exit != 0, e.g. ignored build scripts) count as ok.
       const ok = code === 0 || installSucceeded(out)
       const tail = summarizePnpmOut(out)
@@ -98,4 +121,14 @@ export function runPnpm(cwd: string, args: readonly string[]): Promise<PnpmResul
       resolve({ ok, text: out.trim() })
     })
   })
+}
+
+/** Kill a process subtree: `taskkill /T /F` on Windows (whole tree), SIGTERM
+ * elsewhere. Best-effort — the child may already have exited. */
+function killProcessTree(pid: number): void {
+  if (process.platform === 'win32') {
+    try { spawn('taskkill', ['/pid', String(pid), '/T', '/F']) } catch { /* best-effort */ }
+  } else {
+    try { process.kill(pid, 'SIGTERM') } catch { /* best-effort */ }
+  }
 }

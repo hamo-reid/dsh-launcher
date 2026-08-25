@@ -43,4 +43,17 @@ describe('runPnpm', () => {
       rmSync(dir, { recursive: true, force: true })
     }
   })
+
+  it('resolves aborted when the caller\'s signal is already aborted', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pm-abort-'))
+    try {
+      const controller = new AbortController()
+      controller.abort()
+      const res = await runPnpm(dir, ['--version'], controller.signal)
+      expect(res.ok).toBe(false)
+      expect(res.aborted).toBe(true)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })

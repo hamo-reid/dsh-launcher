@@ -12,6 +12,7 @@ import type {
   DshInstallStep,
   DshUpdateInfo,
   DshUpdateResult,
+  DownloadSessionInfo,
   HealthIssue,
   ImportProfileResult,
   ImportStep,
@@ -89,8 +90,6 @@ const api = {
     ipcRenderer.invoke('profile:openPatchSource', name),
 
   home: {
-    load: (): Promise<IpcResult<{ rows: PluginRow[]; text: string }>> =>
-      ipcRenderer.invoke('home:load'),
     setDisabled: (id: string, disabled: boolean): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('home:setDisabled', id, disabled),
   },
@@ -150,6 +149,22 @@ const api = {
       ipcRenderer.invoke('plugins:pkgVersions', name),
   },
 
+  downloads: {
+    start: (source: string, name?: string): Promise<IpcResult<{ id: string }>> =>
+      ipcRenderer.invoke('downloads:start', source, name),
+    list: (): Promise<IpcResult<DownloadSessionInfo[]>> =>
+      ipcRenderer.invoke('downloads:list'),
+    cancel: (id: string): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('downloads:cancel', id),
+    cleanup: (): Promise<IpcResult<{ removed: string[] }>> =>
+      ipcRenderer.invoke('downloads:cleanup'),
+    onChange: (fn: (list: DownloadSessionInfo[]) => void): (() => void) => {
+      const listener = (_e: unknown, list: DownloadSessionInfo[]): void => fn(list)
+      ipcRenderer.on('download:change', listener)
+      return () => ipcRenderer.removeListener('download:change', listener)
+    },
+  },
+
   market: {
     list: (opts?: MarketListOpts): Promise<IpcResult<MarketPage>> =>
       ipcRenderer.invoke('market:list', opts),
@@ -200,7 +215,6 @@ const api = {
   dsh: {
     list: (): Promise<IpcResult<{ dshes: DshEntry[]; activeDshId?: string }>> =>
       ipcRenderer.invoke('dsh:list'),
-    detect: (): Promise<IpcResult<DshEntry[]>> => ipcRenderer.invoke('dsh:detect'),
     add: (path: string): Promise<IpcResult<DshEntry>> =>
       ipcRenderer.invoke('dsh:add', path),
     remove: (id: string, opts?: { deleteFiles?: boolean }): Promise<IpcResult<boolean>> =>

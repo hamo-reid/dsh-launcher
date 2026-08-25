@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next'
 import { useAppLang } from './i18n'
 import OnboardingModal from './components/OnboardingModal.tsx'
 import CloseConfirmModal from './components/CloseConfirmModal.tsx'
+import DownloadPanel from './components/DownloadPanel.tsx'
 import ProfileSection from './views/ProfileSection.tsx'
 import PluginsSection from './views/PluginsSection.tsx'
 import SettingsSection from './views/SettingsSection.tsx'
@@ -148,7 +149,12 @@ export default function App() {
           <Typography.Text strong style={{ fontSize: 15 }}>
             DSH Launcher
           </Typography.Text>
-          <WindowControls maximized={maximized} />
+          {/* Download entrance (only when downloads exist) + window controls.
+              Kept inside its own no-drag row so the header stays draggable. */}
+          <div style={{ display: 'flex', alignItems: 'center', WebkitAppRegion: 'no-drag' } as CSSProperties}>
+            <DownloadPanel />
+            <WindowControls maximized={maximized} />
+          </div>
         </div>
         <Tabs
           activeKey={tab}

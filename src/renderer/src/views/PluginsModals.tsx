@@ -299,12 +299,11 @@ export function DownloadVersionModal(p: DownloadVersionModalProps): JSX.Element 
 
   const doDownload = async (): Promise<void> => {
     if (p.pkg === null || version === undefined) return
-    setInstalling(true)
-    const r = await window.api.plugins.add(`${p.pkg}@${version}`)
-    setInstalling(false)
+    // Fire a cancellable session; progress/cancel + store refresh are handled by
+    // the global download panel, so the dialog simply closes once initiated.
+    const r = await window.api.downloads.start(`${p.pkg}@${version}`, p.pkg)
     if (!r.ok) { setError(apiErrorText(r)); return }
-    await p.onInstalled()
-    void message.success(t('plugin.version.downloaded', { spec: `${p.pkg}@${version}` }))
+    void message.success(t('plugin.version.downloadStarted', { spec: `${p.pkg}@${version}` }))
     p.onClose()
   }
 

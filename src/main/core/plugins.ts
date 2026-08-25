@@ -9,7 +9,7 @@ import AdmZip from 'adm-zip'
 import { runPnpm, type PnpmResult } from './pnpm.ts'
 import { logger } from './logger.ts'
 import { profilesDir } from './home.ts'
-import type { InstalledOverviewRow, PluginSource, PluginUsagePoint } from './types.ts'
+import type { InstalledOverviewRow, PluginSource, PluginUsagePoint } from '../../shared/types.ts'
 import { dshScopes, type DshScope } from './appState.ts'
 
 /** A dsh scope whose profiles we scan for usage. Re-exported for prior callers. */
@@ -206,7 +206,7 @@ export async function addPlugin(dir: string, source: string, name?: string): Pro
 
 /** Derive a package-name hint from a download source (`name@ver`, `name`, or a
  * `github:owner/repo` spec — brand guess for the repo tail). */
-function packageNameFromSource(source: string): string {
+export function packageNameFromSource(source: string): string {
   const trimmed = source.trim()
   const pure = trimmed.replace(/^github:/, '')
   if (trimmed.startsWith('github:')) {
@@ -383,7 +383,7 @@ async function rewriteProfileLinks(storeDir: string, moves: { old: string; next:
 
 /** Shared download path: build the source into a staging project, read the real
  * version, then hoist the whole project to `archive/<name>/<version>/`. */
-async function installSource(storeDir: string, name: string, source: string): Promise<PnpmResult> {
+export async function installSource(storeDir: string, name: string, source: string, signal?: AbortSignal): Promise<PnpmResult> {
   if (name.trim() === '') return { ok: false, text: '未能确定插件包名' }
   // Never add a version alongside a legacy flat package for the same plugin —
   // absorb old packages into the versioned layout first (and retarget any
@@ -394,7 +394,13 @@ async function installSource(storeDir: string, name: string, source: string): Pr
   rmSync(staging, { recursive: true, force: true })
   mkdirSync(staging, { recursive: true })
   initStore(staging) // a minimal project for `pnpm add` to resolve into
-  const result = await runPnpm(staging, ['add', source, '--fetch-retries=3', '--fetch-retry-maxtimeout=60000'])
+  const result = await runPnpm(staging, ['add', source, '--fetch-retries=3', '--fetch-retry-maxtimeout=60000'], signal)
+  // A user cancel: drop the half-downloaded staging dir and surface it as a
+  // cancel, not a failure — the download task manager treats it as cancelled.
+  if (result.aborted === true) {
+    rmSync(staging, { recursive: true, force: true })
+    return { ok: false, aborted: true, text: 'cancelled' }
+  }
   if (!result.ok) {
     rmSync(staging, { recursive: true, force: true })
     return result
@@ -547,7 +553,7 @@ export async function removePluginFromProfiles(dshes: DshScope[], pkg: string): 
  * symlink/junction FIRST (removing the link entry itself, never following it
  * into a target), then delete the remaining files/dirs. Deterministic.
  */
-function deleteTreePhysical(dir: string): void {
+export function deleteTreePhysical(dir: string): void {
   let entries
   try {
     entries = readdirSync(dir, { withFileTypes: true })
