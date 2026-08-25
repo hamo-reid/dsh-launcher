@@ -62,19 +62,40 @@ export interface PluginUsagePoint {
  * tracking (unresolved). */
 export type PluginSource = 'github' | 'npm' | 'local' | 'dsh' | 'store'
 
-/** Lifecycle state of a plugin download task. */
+/** Lifecycle state of a download task. */
 export type DownloadStatus = 'running' | 'done' | 'failed' | 'cancelled'
 
-/** One plugin download task, visible to the renderer's global download panel. */
+/** What kind of install a download session represents. */
+export type DownloadKind = 'plugin' | 'dsh'
+
+/** Per-step state of a task that has visible multi-stage progress (dsh install). */
+export type DownloadStepStatus = 'running' | 'ok' | 'error'
+
+/** One progress step of a multi-stage task (e.g. dsh install: version→install→register). */
+export interface DownloadStep {
+  /** Step key — maps to a localized label (`dsh.official.step.<key>` for dsh). */
+  key: string
+  status: DownloadStepStatus
+  detail?: string
+  /** Optional short tag, e.g. the resolved version number. */
+  meta?: string
+}
+
+/** One download task (plugin or dsh), visible to the renderer's global download panel. */
 export interface DownloadSessionInfo {
   id: string
-  /** Display/install name (package name) resolved from the source. */
+  kind: DownloadKind
+  /** Display/install name (package name, or dsh install name). */
   name: string
-  /** The pnpm source spec (`name@ver`, `github:owner/repo`, `file:…`). */
+  /** The pnpm source spec (`name@ver`, `github:owner/repo`, `file:…`) — plugin only. */
   source: string
+  /** Secondary line: plugin = the source spec; dsh = target version / description. */
+  detail?: string
   status: DownloadStatus
   /** Failure/cancel detail, when any. */
   message?: string
+  /** Live progress steps (dsh only; plugins run as a single front-and-back step). */
+  steps?: DownloadStep[]
 }
 
 /** One row of the installed-plugin overview. */
@@ -199,9 +220,10 @@ export interface DshInstallResult {
   dir: string
 }
 
-/** Streamed per-step progress of an official dsh install, pushed main → renderer
- * (`install:event`) so the dialog can render one status row per step. Mirrors
- * `ImportStep`: resolve the version first, then `pnpm add`, then register. */
+/** Streamed per-step progress of an official dsh install, emitted from the
+ * background dsh download session (see `core/pluginDownloads.ts`) and surfaced
+ * through the global download center's `steps` list. Mirrors `ImportStep`:
+ * resolve the version first, then `pnpm add`, then register. */
 export type DshInstallStep =
   | { kind: 'version'; state: 'running' | 'ok' | 'error'; version?: string; detail?: string }
   | { kind: 'install'; state: 'running' | 'ok' | 'error'; version?: string; detail?: string }

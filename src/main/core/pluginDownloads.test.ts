@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { installSource } from './plugins.ts'
-import { cancelPluginDownload, cleanupPluginDownloads, listPluginDownloads, startPluginDownload } from './pluginDownloads.ts'
+import { cancelPluginDownload, cleanupPluginDownloads, listPluginDownloads, startDshDownload, startPluginDownload } from './pluginDownloads.ts'
 
 vi.mock('./plugins.ts', async (importActual) => {
   const actual = await importActual<typeof import('./plugins.ts')>()
@@ -59,5 +59,28 @@ describe('pluginDownloads', () => {
     expect(removed.length).toBe(2)
     expect(existsSync(staging)).toBe(false)
     expect(existsSync(imp)).toBe(false)
+  })
+
+  it('tracks a dsh session with live steps, then removes it once done', async () => {
+    const id = startDshDownload('official', '官方安装', async patchStep => {
+      patchStep({ key: 'version', status: 'ok', meta: '1.0.0' })
+      patchStep({ key: 'install', status: 'running' })
+    })
+    const run = listPluginDownloads().find(d => d.id === id)!
+    expect(run.kind).toBe('dsh')
+    expect(run.detail).toBe('官方安装')
+    expect(run.steps).toEqual([
+      { key: 'version', status: 'ok', meta: '1.0.0' },
+      { key: 'install', status: 'running' },
+    ])
+    await settle()
+    // a settled dsh session is likewise removed server-side
+    expect(listPluginDownloads().find(d => d.id === id)).toBeUndefined()
+  })
+
+  it('surfaces a failing dsh job as a failed (removed) session', async () => {
+    const id = startDshDownload('official', '', async () => { throw new Error('boom') })
+    await settle()
+    expect(listPluginDownloads().find(d => d.id === id)).toBeUndefined()
   })
 })

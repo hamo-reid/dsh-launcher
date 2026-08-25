@@ -9,12 +9,10 @@ import { CheckCircleFilled, CloseCircleFilled, LoadingOutlined } from '@ant-desi
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
 import FieldLabel from '../components/FieldLabel.tsx'
-import { ErrorDetailModal } from '../components/ErrorDetailModal.tsx'
-import { StepIcon } from '../components/StepIcon.tsx'
 import { MODAL } from '../theme.ts'
 import { majorOfVersion } from '../../../shared/version.ts'
 import type {
-  DshDataImportResult, DshInstallResult, DshInstallStep, DshUpdateInfo, DshUpdateResult, PackageVersionInfo,
+  DshDataImportResult, DshUpdateInfo, PackageVersionInfo,
 } from '../../../shared/types.ts'
 
 // ── Add DSH ────────────────────────────────────────────────────────────────
@@ -178,49 +176,18 @@ interface OfficialInstallModalProps {
 export function OfficialInstallModal(p: OfficialInstallModalProps): JSX.Element {
   const { t } = useTranslation()
   const { token } = theme.useToken()
-  const [installing, setInstalling] = useState(false)
-  const [done, setDone] = useState(false)
   const [error, setError] = useState('')
-  const [result, setResult] = useState<DshInstallResult | null>(null)
-  const [detailView, setDetailView] = useState<string | null>(null)
   const [versionDir, setVersionDir] = useState('')
   const [installName, setInstallName] = useState('official')
   // npm 版本选择（官方包 @deepseek-ai/dsh）。
   const [pkgInfo, setPkgInfo] = useState<PackageVersionInfo | null>(null)
   const [version, setVersion] = useState('')
   const [versionsLoading, setVersionsLoading] = useState(false)
-  const rowsRef = useRef<InstallRow[]>([])
-  const [rows, setRows] = useState<InstallRow[]>([])
-
-  const upsert = (row: InstallRow): void => {
-    const next = [...rowsRef.current]
-    const at = next.findIndex(r => r.key === row.key)
-    if (at >= 0) next[at] = row
-    else next.push(row)
-    rowsRef.current = next
-    setRows(next)
-  }
-
-  // Stream per-step progress straight into the install rows.
-  useEffect(() => window.api.dsh.onInstallEvent((step: DshInstallStep) => {
-    upsert({
-      key: step.kind,
-      label: t(`dsh.official.step.${step.kind}`),
-      status: step.state,
-      meta: step.version !== undefined && step.version !== '' ? `v${step.version}` : undefined,
-      detail: step.detail,
-    })
-  }), [t])
 
   useEffect(() => {
     if (!p.open) return
     // 重新打开时重置状态，避免残留上一次的进度/结果。
-    setInstalling(false)
-    setDone(false)
     setError('')
-    setResult(null)
-    rowsRef.current = []
-    setRows([])
     setVersionDir('')
     setPkgInfo(null)
     setVersion('')
@@ -243,55 +210,34 @@ export function OfficialInstallModal(p: OfficialInstallModalProps): JSX.Element 
   }, [p.open])
 
   const doInstallOfficial = async (): Promise<void> => {
-    rowsRef.current = []
-    setRows([])
-    setError('')
-    setResult(null)
-    setDone(false)
-    setInstalling(true)
-    try {
-      const r = await window.api.dsh.installOfficial({
-        versionDir: versionDir.trim(),
-        name: installName.trim(),
-        // 版本留空 → undefined → 核心层解析 latest（修复「版本留空」BUG）
-        // (version ?? '')：allowClear 清除后 Select 的 onChange 会传 undefined，
-        // 直接 trim() 会抛 TypeError。
-        version: (version ?? '').trim() || undefined,
-        // 修复/重装模式强制覆盖同名安装（主进程先删再装）。
-        force: p.preset?.force === true,
-      })
-      if (!r.ok) { setError(apiErrorText(r)); setDone(true); return }
-      setResult(r.value)
-      setDone(true)
-      void message.success(t('dsh.official.installedNow', { version: r.value.version }))
-      await p.onDone()
-    } catch (e) {
-      setError(String(e instanceof Error ? e.message : e))
-      setDone(true)
-    } finally {
-      // 兜底：任何异常都结束 loading，杜绝「一直显示正在安装」。
-      setInstalling(false)
-    }
+    // Kicks off a **background** dsh download session and closes immediately; the
+    // global download center streams the install progress.
+    const r = await window.api.dsh.installOfficial({
+      versionDir: versionDir.trim(),
+      name: installName.trim(),
+      // 版本留空 → undefined → 核心层解析 latest（修复「版本留空」BUG）
+      version: (version ?? '').trim() || undefined,
+      // 修复/重装模式强制覆盖同名安装（主进程先删再装）。
+      force: p.preset?.force === true,
+    })
+    if (!r.ok) { void message.error(apiErrorText(r)); return }
+    void message.success(t('dsh.official.started'))
+    p.onClose()
+    await p.onDone()
   }
 
   return (
     <>
     <Modal title={p.preset?.force === true ? t('dsh.official.repairTitle') : t('dsh.official.title')} open={p.open}
-      onCancel={installing ? undefined : p.onClose}
-      closable={!installing} maskClosable={!installing} width={MODAL.wide}
-      footer={installing
-        ? <Button loading>{t('dsh.official.installing')}</Button>
-        : done
-          ? <Button type="primary" onClick={p.onClose}>{t('dsh.official.done')}</Button>
-          : (
-              <Space>
-                <Button onClick={p.onClose}>{t('common.cancel')}</Button>
-                <Button type="primary" onClick={() => void doInstallOfficial()}>{t('dsh.official.start')}</Button>
-              </Space>
-            )}>
+      onCancel={p.onClose} closable maskClosable width={MODAL.wide}
+      footer={(
+        <Space>
+          <Button onClick={p.onClose}>{t('common.cancel')}</Button>
+          <Button type="primary" onClick={() => void doInstallOfficial()}>{t('dsh.official.start')}</Button>
+        </Space>
+      )}>
       <Space direction="vertical" size="small" style={{ width: '100%' }}>
-        {!installing && !done && (
-          <>
+        <>
             <FieldLabel>{t('dsh.official.dirLabel')}</FieldLabel>
             <Input value={versionDir} onChange={e => setVersionDir(e.target.value)} placeholder={t('dsh.official.dirPlaceholder')} />
             <FieldLabel>{t('dsh.official.nameLabel')}</FieldLabel>
@@ -336,41 +282,9 @@ export function OfficialInstallModal(p: OfficialInstallModalProps): JSX.Element 
               <li>{t('dsh.official.step2')}</li>
               <li>{t('dsh.official.step3')}</li>
             </ol>
-          </>
-        )}
-
-        {/* 逐行进度：转圈 / 绿勾 / 红叉；安装结束仍保留在下面。 */}
-        {rows.length > 0 && (
-          <div style={{ borderTop: `1px solid ${token.colorSplit}`, paddingTop: token.paddingSM }}>
-            {rows.map(row => (
-              <div key={row.key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0' }}>
-                <StepIcon status={row.status} />
-                <span style={{ flex: 1, minWidth: 0 }}>{row.label}</span>
-                {row.meta !== undefined && (
-                  <span style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' }}>{row.meta}</span>
-                )}
-                {row.status === 'error' && (
-                  <Button type="link" size="small" style={{ padding: 0, color: token.colorError }} onClick={() => setDetailView(row.detail ?? '')}>{t('dsh.official.errorLabel')}</Button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {done && error !== '' && (
-          <Alert type="error" showIcon message={t('dsh.official.failed')} description={error} />
-        )}
-
-        {done && result !== null && (
-          <Alert type="success" showIcon
-            message={t('dsh.official.installedVersion', { version: result.version })}
-            description={`${t('dsh.official.resultPath')} ${result.execPath}\n${t('dsh.official.resultHome')} ${result.home}`} />
-        )}
+        </>
       </Space>
     </Modal>
-
-    <ErrorDetailModal open={detailView !== null} detail={detailView}
-      onClose={() => setDetailView(null)} title={t('dsh.official.failDetailTitle')} />
     </>
   )
 }
@@ -389,13 +303,11 @@ export function UpdateDshModal(p: UpdateDshModalProps): JSX.Element {
   const [info, setInfo] = useState<DshUpdateInfo | null>(null)
   const [checking, setChecking] = useState(false)
   const [ackMajor, setAckMajor] = useState(false)
-  const [applying, setApplying] = useState(false)
-  const [result, setResult] = useState<DshUpdateResult | null>(null)
   const [error, setError] = useState('')
 
   useEffect(() => {
     if (p.dsh === null) return
-    setInfo(null); setChecking(true); setAckMajor(false); setResult(null); setError('')
+    setInfo(null); setChecking(true); setAckMajor(false); setError('')
     let alive = true
     void (async () => {
       const r = await window.api.dsh.checkUpdate(p.dsh!.id)
@@ -407,21 +319,15 @@ export function UpdateDshModal(p: UpdateDshModalProps): JSX.Element {
     return () => { alive = false }
   }, [p.dsh?.id])
 
+  // Kicks off a **background** dsh download session and closes immediately; the
+  // global download center tracks progress and refresh (not this dialog).
   const doUpdate = async (version: string): Promise<void> => {
     if (p.dsh === null) return
-    setApplying(true)
-    setError('')
-    try {
-      const r = await window.api.dsh.update(p.dsh.id, { version, ackMajorRisk: ackMajor })
-      if (!r.ok) { setError(apiErrorText(r)); return }
-      setResult(r.value)
-      void message.success(t('dsh.update.newVersion', { version: r.value.version }))
-      await p.onDone()
-    } catch (e) {
-      setError(String(e instanceof Error ? e.message : e))
-    } finally {
-      setApplying(false)
-    }
+    const r = await window.api.dsh.update(p.dsh.id, { version, ackMajorRisk: ackMajor })
+    if (!r.ok) { void message.error(apiErrorText(r)); return }
+    void message.success(t('dsh.update.started'))
+    p.onClose()
+    await p.onDone()
   }
 
   // The update tracks offered (oldest → newest): `latest` stable and/or `next`
@@ -434,15 +340,11 @@ export function UpdateDshModal(p: UpdateDshModalProps): JSX.Element {
       ]
   const hasBump = tracks.some(t => t.majorBump)
 
-  const footer = applying
-    ? <Button loading>{t('dsh.update.applying')}</Button>
-    : result !== null
-      ? <Button type="primary" onClick={p.onClose}>{t('common.close')}</Button>
-      : <Button onClick={p.onClose}>{t('common.close')}</Button>
+  const footer = <Button onClick={p.onClose}>{t('common.close')}</Button>
 
   return (
     <Modal title={t('dsh.update.title', { name: p.dsh?.name ?? '' })} open={p.dsh !== null}
-      onCancel={applying ? undefined : p.onClose} closable={!applying} maskClosable={!applying}
+      onCancel={p.onClose} closable maskClosable
       width={MODAL.narrow} footer={footer} destroyOnClose>
       <Space direction="vertical" size="small" style={{ width: '100%' }}>
         {checking && <div><Spin size="small" /> {t('dsh.update.checking')}</div>}
@@ -481,7 +383,7 @@ export function UpdateDshModal(p: UpdateDshModalProps): JSX.Element {
                   </Space>
                   <Button
                     size="small" type="primary"
-                    disabled={applying || (trk.majorBump && !ackMajor)}
+                    disabled={trk.majorBump && !ackMajor}
                     onClick={() => void doUpdate(trk.version)}
                   >
                     {t('dsh.update.go')}
@@ -500,12 +402,7 @@ export function UpdateDshModal(p: UpdateDshModalProps): JSX.Element {
           </>
         )}
 
-        {result !== null && (
-          <Alert type="success" showIcon
-            message={t('dsh.update.newVersion', { version: result.version })}
-            description={`${t('dsh.update.backup')}: ${result.backupDir}`} />
-        )}
-      </Space>
+        </Space>
     </Modal>
   )
 }

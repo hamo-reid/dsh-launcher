@@ -13,20 +13,24 @@ import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { deleteTreePhysical, installSource, packageNameFromSource } from './plugins.ts'
 import { logger } from './logger.ts'
-import type { DownloadSessionInfo } from '../../shared/types.ts'
+import type { DownloadKind, DownloadSessionInfo, DownloadStep } from '../../shared/types.ts'
 
 export type DownloadStatus = DownloadSessionInfo['status']
 
 interface DownloadSession {
   id: string
+  kind: DownloadKind
   name: string
   source: string
+  detail?: string
   status: DownloadStatus
   message?: string
-  controller: AbortController
+  steps: DownloadStep[]
+  /** Cancellation signal — present only for cancellable (plugin) sessions. */
+  controller?: AbortController
 }
 
-/** Live sessions by id. Kept only while downloading; removed on completion. */
+/** Live sessions by id. Kept only while installing; removed on completion. */
 const active = new Map<string, DownloadSession>()
 let seq = 0
 let emit: ((list: DownloadSessionInfo[]) => void) | undefined
@@ -38,7 +42,9 @@ export function onDownloadsChange(fn: (list: DownloadSessionInfo[]) => void): vo
 }
 
 function snapshot(): DownloadSessionInfo[] {
-  return [...active.values()].map(({ id, name, source, status, message }) => ({ id, name, source, status, message }))
+  return [...active.values()].map(({ id, kind, name, source, detail, status, message, steps }) => ({
+    id, kind, name, source, detail, status, message, steps,
+  }))
 }
 
 function notify(): void {
@@ -58,9 +64,12 @@ export function startPluginDownload(storeDir: string, source: string, name?: str
   const controller = new AbortController()
   const session: DownloadSession = {
     id,
+    kind: 'plugin',
     name: installName === '' ? source : installName,
     source,
+    detail: source,
     status: 'running',
+    steps: [],
     controller,
   }
   active.set(id, session)
@@ -70,7 +79,7 @@ export function startPluginDownload(storeDir: string, source: string, name?: str
     try {
       const res = await installSource(storeDir, installName === '' ? source : installName, source, controller.signal)
       if (controller.signal.aborted) { session.status = 'cancelled'; session.message = 'cancelled' }
-      else if (res.ok) { session.status = 'done' }
+      else if (res.ok) { session.status = 'done'; session.message = res.text }
       else { session.status = 'failed'; session.message = res.text }
     } catch (error) {
       session.status = 'failed'
@@ -85,11 +94,61 @@ export function startPluginDownload(storeDir: string, source: string, name?: str
   return id
 }
 
-/** Cancel a running download. No-op when the session is unknown or already done. */
+/** Start a background dsh install/update session. Resolves with the session id;
+ * `job` receives a `patchStep` that upserts one progress step and broadcasts the
+ * snapshot, so the global download center tracks the dsh install live. Success is
+ * signalled by `job` resolving; a thrown error surfaces as a `failed` session
+ * (dsh upgrades are not cancellable today, so no AbortController is wired). */
+export function startDshDownload(
+  name: string,
+  detail: string,
+  job: (patchStep: (step: DownloadStep) => void) => Promise<void>,
+): string {
+  const id = `dl-${++seq}`
+  const steps: DownloadStep[] = []
+  const session: DownloadSession = {
+    id,
+    kind: 'dsh',
+    name,
+    source: '',
+    detail,
+    status: 'running',
+    steps,
+  }
+  active.set(id, session)
+  notify()
+
+  const patchStep = (step: DownloadStep): void => {
+    const at = steps.findIndex(s => s.key === step.key)
+    if (at >= 0) steps[at] = step
+    else steps.push(step)
+    notify()
+  }
+
+  void (async () => {
+    try {
+      await job(patchStep)
+      session.status = 'done'
+    } catch (error) {
+      session.status = 'failed'
+      session.message = error instanceof Error ? error.message : String(error)
+    } finally {
+      active.delete(id)
+      notify()
+      logger.info(`dsh install ${session.name}: ${session.status}`)
+    }
+  })()
+
+  return id
+}
+
+/** Cancel a running download. No-op when the session is unknown, already done, or
+ * not cancellable (dsh sessions have no AbortController). */
 export function cancelPluginDownload(id: string): boolean {
   const session = active.get(id)
   if (session === undefined) return false
   if (session.status !== 'running') return false
+  if (session.controller === undefined) return false
   session.controller.abort()
   return true
 }

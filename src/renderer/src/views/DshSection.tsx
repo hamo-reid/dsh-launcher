@@ -64,6 +64,15 @@ export default function DshSection() {
 
   useEffect(() => { void refresh() }, [])
 
+  // 后台的 dsh 下载/更新会话（已在统一下载中心展示）结束后联动刷新列表，
+  // 让新版本 / 新安装即时反映到 DSH 页。
+  useEffect(() => {
+    const off = window.api.downloads.onChange(list => {
+      if (list.some(d => d.kind === 'dsh' && d.status === 'done')) void refresh()
+    })
+    return off
+  }, [refresh])
+
   const activate = async (id: string, name: string): Promise<void> => {
     if (id === activeId) return
     const r = await window.api.dsh.setActive(id)

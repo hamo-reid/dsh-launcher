@@ -8,10 +8,7 @@ import type {
   DshDataImportResult,
   DshDataManifest,
   DshEntry,
-  DshInstallResult,
-  DshInstallStep,
   DshUpdateInfo,
-  DshUpdateResult,
   DownloadSessionInfo,
   HealthIssue,
   ImportProfileResult,
@@ -226,13 +223,8 @@ const api = {
       ipcRenderer.invoke('dsh:setHome', id, home),
     setProfileDir: (id: string, dir: string): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('dsh:setProfileDir', id, dir),
-    installOfficial: (options?: { versionDir?: string; name?: string; version?: string; force?: boolean }): Promise<IpcResult<DshInstallResult>> =>
+    installOfficial: (options?: { versionDir?: string; name?: string; version?: string; force?: boolean }): Promise<IpcResult<{ id: string }>> =>
       ipcRenderer.invoke('dsh:installOfficial', options),
-    onInstallEvent: (callback: (step: DshInstallStep) => void): (() => void) => {
-      const handler = (_: unknown, step: DshInstallStep): void => callback(step)
-      ipcRenderer.on('install:event', handler)
-      return () => { ipcRenderer.removeListener('install:event', handler) }
-    },
     pkgVersions: (): Promise<IpcResult<PackageVersionInfo>> =>
       ipcRenderer.invoke('dsh:pkgVersions'),
     getVersionDir: (): Promise<IpcResult<{ dir: string }>> =>
@@ -248,7 +240,7 @@ const api = {
       ipcRenderer.invoke('dsh:revealDir', id),
     checkUpdate: (id: string): Promise<IpcResult<DshUpdateInfo | null>> =>
       ipcRenderer.invoke('dsh:checkUpdate', id),
-    update: (id: string, opts?: { version?: string; ackMajorRisk?: boolean }): Promise<IpcResult<DshUpdateResult>> =>
+    update: (id: string, opts?: { version?: string; ackMajorRisk?: boolean }): Promise<IpcResult<{ id: string }>> =>
       ipcRenderer.invoke('dsh:update', id, opts),
   },
 

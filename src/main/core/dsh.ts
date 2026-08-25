@@ -16,6 +16,7 @@ import { runPnpm } from './pnpm.ts'
 import { fetchPackageVersions } from './npm.ts'
 import { compareVersionsLoose, majorOfVersion } from './version.ts'
 import { archiveHome } from './home-data.ts'
+import { readDshState, writeDshState } from './appState.ts'
 import type { DshEntry, DshInstallResult, DshInstallStep, DshUpdateInfo, DshUpdateResult, DshUpdateTrack } from '../../shared/types.ts'
 
 /** Re-export the shared dsh shape for existing core/ipc callers. */
@@ -437,6 +438,27 @@ export async function installOfficialDsh(
     await rm(home, { recursive: true, force: true }).catch(() => {})
     throw error
   }
+}
+
+/** Register a freshly installed official dsh in the app's dsh list (replacing
+ * any same-id stale entry) and make it active. Extracted from the IPC handler so
+ * the background install session and any direct registry path share one
+ * registration step. */
+export function registerInstalledDsh(versionDir: string, name: string, info: DshInstallResult): DshEntry {
+  const { dshes } = readDshState()
+  const entry: DshEntry = {
+    id: info.execPath,
+    name,
+    execPath: info.execPath,
+    version: info.version,
+    home: info.home,
+    // App-managed (in the version repo) — the only kind deletable from the DSH page.
+    managed: true,
+    // The version-repo root this install actually landed in — cleanup anchors here.
+    versionDir,
+  }
+  writeDshState([...dshes.filter(d => d.id !== entry.id), entry], entry.id)
+  return entry
 }
 
 // ── update (in-place upgrade of a managed dsh) ───────────────────────────────

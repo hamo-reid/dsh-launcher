@@ -10,10 +10,7 @@ import type {
   DshDataImportResult,
   DshDataManifest,
   DshEntry,
-  DshInstallResult,
-  DshInstallStep,
   DshUpdateInfo,
-  DshUpdateResult,
   DownloadSessionInfo,
   HealthIssue,
   ImportProfileResult,
@@ -199,9 +196,7 @@ export interface WindowApi {
     setActive: (id: string) => Promise<IpcResult<boolean>>
     setHome: (id: string, home: string) => Promise<IpcResult<boolean>>
     setProfileDir: (id: string, dir: string) => Promise<IpcResult<boolean>>
-    installOfficial: (options?: { versionDir?: string; name?: string; version?: string; force?: boolean }) => Promise<IpcResult<DshInstallResult>>
-    /** Streamed per-step progress of an official install (for the dialog). Returns an unsubscribe fn. */
-    onInstallEvent: (callback: (step: DshInstallStep) => void) => () => void
+    installOfficial: (options?: { versionDir?: string; name?: string; version?: string; force?: boolean }) => Promise<IpcResult<{ id: string }>>
     /** Published `@deepseek-ai/dsh` versions + dist-tags (for the official-install picker). */
     pkgVersions: () => Promise<IpcResult<PackageVersionInfo>>
     getVersionDir: () => Promise<IpcResult<{ dir: string }>>
@@ -212,8 +207,8 @@ export interface WindowApi {
     revealDir: (id: string) => Promise<IpcResult<boolean>>
     /** Whether a managed dsh has a newer release. `null` = up to date. */
     checkUpdate: (id: string) => Promise<IpcResult<DshUpdateInfo | null>>
-    /** In-place update a managed dsh (cross-major needs `ackMajorRisk`). */
-    update: (id: string, opts?: { version?: string; ackMajorRisk?: boolean }) => Promise<IpcResult<DshUpdateResult>>
+    /** In-place update a managed dsh (cross-major needs `ackMajorRisk`). Returns the new session id. */
+    update: (id: string, opts?: { version?: string; ackMajorRisk?: boolean }) => Promise<IpcResult<{ id: string }>>
   }
 
   data: {

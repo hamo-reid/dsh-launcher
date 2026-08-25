@@ -7,24 +7,35 @@ import { rm } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 import {
   baseLaunch, checkForDshUpdate, defaultHome, discoverVersionRepo, entryFromPath, existsExecutable,
-  installDir, installOfficialDsh, isDeletableDsh, probeDshs, readVersionFromPath, resolveDshPackage,
-  updateDsh, versionExists, type DshEntry,
+  installDir, installOfficialDsh, isDeletableDsh, probeDshs, readVersionFromPath, registerInstalledDsh,
+  resolveDshPackage, updateDsh, versionExists, type DshEntry,
 } from '../core/dsh.ts'
 import {
   dshVersionDir, effectiveProfileDir, readDshState, writeDshState,
 } from '../core/appState.ts'
+import { startDshDownload } from '../core/pluginDownloads.ts'
 import { loadSettings, saveSettings } from '../core/settings.ts'
 import { fetchPackageVersions } from '../core/npm.ts'
 import { majorOfVersion } from '../core/version.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
 import { logger } from '../core/logger.ts'
 import { handle } from './handle.ts'
-import type { DshInstallResult, DshUpdateInfo, DshUpdateResult, IpcResult, PackageVersionInfo } from '../../shared/types.ts'
+import type { DownloadStep, DshInstallStep, DshUpdateInfo, IpcResult, PackageVersionInfo } from '../../shared/types.ts'
 
 /** A filesystem-safe version name (defaults to `official`). */
 function safeVersionName(name: string | undefined): string {
   const cleaned = (name ?? '').replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, '-').trim()
   return cleaned === '' ? 'official' : cleaned
+}
+
+/** Map a dsh install progress step onto the shared download-center step model. */
+function toDownloadStep(step: DshInstallStep): DownloadStep {
+  return {
+    key: step.kind,
+    status: step.state,
+    detail: step.detail,
+    meta: step.version !== undefined && step.version !== '' ? step.version : undefined,
+  }
 }
 
 /** Physically delete a dsh install. App-managed version instances (under the
@@ -116,9 +127,11 @@ export function registerDshIpc(): void {
     return { ok: true, value: await checkForDshUpdate(entry.version) }
   })
 
-  // In-place update of a managed dsh: backup home → reinstall target version →
-  // refresh the entry version. Cross-major requires `ackMajorRisk` to proceed.
-  handle('dsh:update', async (event, id: string, opts?: { version?: string; ackMajorRisk?: boolean }): Promise<IpcResult<DshUpdateResult>> => {
+  // In-place update of a managed dsh: validates + kicks off a **background** dsh
+  // download session, so the global download center tracks progress (the caller
+  // closes its dialog immediately). Cross-major still requires `ackMajorRisk`.
+  // Returns the new session id instead of awaiting the full reinstall.
+  handle('dsh:update', async (_event, id: string, opts?: { version?: string; ackMajorRisk?: boolean }): Promise<IpcResult<{ id: string }>> => {
     const { dshes, activeDshId } = readDshState()
     const entry = dshes.find(d => d.id === id)
     if (entry === undefined) return fail(E.dshNotFound)
@@ -134,11 +147,13 @@ export function registerDshIpc(): void {
     if (majorBump && opts?.ackMajorRisk !== true) {
       return fail(E.dshMajorRisk, { current: entry.version, latest: target })
     }
-    const result = await updateDsh(entry, dshVersionDir(), { version: target },
-      step => event.sender.send('install:event', step))
-    writeDshState(dshes.map(d => d.id === id ? { ...d, version: result.version } : d), activeDshId)
-    logger.info(`dsh updated: ${entry.name} ${entry.version} → ${result.version} (backup ${result.backupDir})`)
-    return { ok: true, value: result }
+    const sessionId = startDshDownload(entry.name, `→ v${target}`, async patchStep => {
+      const result = await updateDsh(entry, dshVersionDir(), { version: target },
+        step => patchStep(toDownloadStep(step)))
+      writeDshState(dshes.map(d => d.id === id ? { ...d, version: result.version } : d), activeDshId)
+      logger.info(`dsh updated: ${entry.name} ${entry.version} → ${result.version} (backup ${result.backupDir})`)
+    })
+    return { ok: true, value: { id: sessionId } }
   })
 
   // Reveal a dsh's install directory in the OS file explorer.
@@ -255,7 +270,11 @@ export function registerDshIpc(): void {
     return { ok: true, value: [await entryFromPath(path)] }
   })
 
-  handle('dsh:installOfficial', async (event, options?: { versionDir?: string; name?: string; version?: string; force?: boolean }): Promise<IpcResult<DshInstallResult>> => {
+  // Official install → a **background** dsh download session: the same shared
+  // session manager as plugin downloads, so progress streams to the global
+  // download center (version → install → register) instead of blocking the dialog.
+  // Returns the new session id; the caller closes its dialog immediately.
+  handle('dsh:installOfficial', (_event, options?: { versionDir?: string; name?: string; version?: string; force?: boolean }): IpcResult<{ id: string }> => {
       const currentRoot = dshVersionDir()
       const requested = options?.versionDir?.trim()
       const versionDir = requested !== undefined && requested !== '' ? requested : currentRoot
@@ -266,39 +285,28 @@ export function registerDshIpc(): void {
       }
       const name = safeVersionName(options?.name)
       const target = join(versionDir, name)
-      if (versionExists(target)) {
+      // 非强制时沿用弹窗报错，避免误覆盖一个正常实例（强制重装在校验后的会话内清目录）。
+      if (versionExists(target) && options?.force !== true) {
+        return fail(E.dshVersionExists, { name })
+      }
+      const sessionId = startDshDownload(name, '官方安装', async patchStep => {
         // 修复/强制重装：先清掉残缺实例再装（home 由 installOfficialDsh 兜底清）。
-        // 非强制则沿用弹窗报错，避免误覆盖一个正常实例。
-        if (options?.force === true) {
+        if (options?.force === true && versionExists(target)) {
           await rm(target, { recursive: true, force: true }).catch(() => {})
-        } else {
-          return fail(E.dshVersionExists, { name })
         }
-      }
-      const info = await installOfficialDsh(versionDir, name, options?.version,
-        step => event.sender.send('install:event', step))
-      const { dshes } = readDshState()
-      const entry: DshEntry = {
-        id: info.execPath,
-        name,
-        execPath: info.execPath,
-        version: info.version,
-        home: info.home,
-        // App-managed (in the version repo) — the only kind deletable from the DSH page.
-        managed: true,
-        // The version-repo root this install actually landed in — cleanup anchors here.
-        versionDir,
-      }
-      event.sender.send('install:event', { kind: 'register', state: 'running' })
-      try {
-        writeDshState([...dshes.filter(d => d.id !== entry.id), entry], entry.id)
-      } catch (writeError) {
-        event.sender.send('install:event', { kind: 'register', state: 'error', detail: String(writeError) })
-        throw writeError
-      }
-      event.sender.send('install:event', { kind: 'register', state: 'ok', version: info.version })
-      logger.info(`dsh official installed: ${name} (v${info.version})`)
-      return { ok: true, value: info }
+        const info = await installOfficialDsh(versionDir, name, options?.version,
+          step => patchStep(toDownloadStep(step)))
+        patchStep({ key: 'register', status: 'running' })
+        try {
+          registerInstalledDsh(versionDir, name, info)
+        } catch (writeError) {
+          patchStep({ key: 'register', status: 'error', detail: String(writeError) })
+          throw writeError
+        }
+        patchStep({ key: 'register', status: 'ok', meta: info.version })
+        logger.info(`dsh official installed: ${name} (v${info.version})`)
+      })
+      return { ok: true, value: { id: sessionId } }
   })
 
   // Official-install version picker: published `@deepseek-ai/dsh` versions.
