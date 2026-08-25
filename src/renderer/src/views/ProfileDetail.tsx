@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert, Button, Input, List, Modal, Select, Space, Tag, theme, message,
 } from 'antd'
@@ -62,35 +62,31 @@ export default function ProfileDetailView({ name, onChanged }: Props) {
     return t('profile.layer.home')
   }
 
+  // A bumped sequence guards the last-write-wins: whenever `name` changes or a
+// handler triggers a refresh, every in-flight load past the newer seq is
+// discarded so a stale response can't overwrite fresher data (e.g. after a fast
+// A→B profile switch).
+const loadSeq = useRef(0)
   const load = async (): Promise<void> => {
+    const seq = ++loadSeq.current
     if (name === '') { setDetail(null); setLayers(null); setLoading(false); return }
     setLoading(true)
     const [detailRes, layersRes] = await Promise.all([
       window.api.loadProfile(name),
       window.api.layers(name),
     ])
+    if (seq !== loadSeq.current) return // a newer load superseded this one
     if (detailRes.ok) setDetail(detailRes.value)
     if (layersRes.ok) setLayers(layersRes.value)
     setLoading(false)
   }
 
   useEffect(() => {
-    let alive = true
     setDetail(null)
     setLayers(null)
     setLoading(true)
     if (name === '') { setLoading(false); return undefined }
-    void (async () => {
-      const [detailRes, layersRes] = await Promise.all([
-        window.api.loadProfile(name),
-        window.api.layers(name),
-      ])
-      if (!alive) return
-      if (detailRes.ok) setDetail(detailRes.value)
-      if (layersRes.ok) setLayers(layersRes.value)
-      setLoading(false)
-    })()
-    return () => { alive = false }
+    void load()
   }, [name])
 
   const lastSeen = useMemo(() => {

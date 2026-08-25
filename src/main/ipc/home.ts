@@ -5,7 +5,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { homePatchPath } from '../core/home.ts'
 import { setRowDisabled } from '../core/patch.ts'
 import { verifyDisabledState } from '../core/app-util.ts'
-import { fail, failFromError } from '../core/errors.ts'
+import { fail, failFromError, E } from '../core/errors.ts'
 import type { IpcResult } from '../../shared/types.ts'
 
 export function registerHomeIpc(): void {
@@ -17,7 +17,7 @@ export function registerHomeIpc(): void {
       writeFileSync(path, setRowDisabled(current, id, disabled))
       const after = readFileSync(path, 'utf8')
       if (verifyDisabledState(after, id, disabled)) return { ok: true, value: true }
-      return fail('patch.writeVerify', { id })
+      return fail(E.patchWriteVerify, { id })
     } catch (error) {
       return failFromError(error)
     }

@@ -6,7 +6,10 @@ import { Alert, Button, Checkbox, Input, Modal, Select, Space, message, theme } 
 import { CheckCircleFilled, CloseCircleFilled, LoadingOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
+import { ErrorDetailModal } from '../components/ErrorDetailModal.tsx'
+import { StepIcon } from '../components/StepIcon.tsx'
 import { MODAL } from '../theme.ts'
+import { majorOfVersion } from '../../../shared/version.ts'
 import type { ImportBundleSource, ImportProfileResult, ImportStep } from '../../../shared/types.ts'
 import type { RunFailInfo } from './useRunRuntime.tsx'
 
@@ -103,12 +106,6 @@ interface ImportRow {
   detail?: string
 }
 
-function StepIcon({ status }: { status: ImportRow['status'] }): JSX.Element {
-  if (status === 'running') return <LoadingOutlined spin style={{ color: '#faad14' }} />
-  if (status === 'ok') return <CheckCircleFilled style={{ color: '#52c41a' }} />
-  return <CloseCircleFilled style={{ color: '#ff4d4f' }} />
-}
-
 export function ImportProfileModal(p: ImportProfileModalProps): JSX.Element {
   const { t } = useTranslation()
   const { token } = theme.useToken()
@@ -167,11 +164,7 @@ export function ImportProfileModal(p: ImportProfileModalProps): JSX.Element {
     setRows([])
   }, [p.open, p.defaultName])
 
-  const majorOf = (v: string): number => {
-    const m = /^(\d+)/.exec(v.trim())
-    return m === null ? -1 : Number(m[1])
-  }
-  const mismatch = p.importDshVersion !== '' && majorOf(p.importDshVersion) !== majorOf(p.activeDshVersion)
+  const mismatch = p.importDshVersion !== '' && majorOfVersion(p.importDshVersion) !== majorOfVersion(p.activeDshVersion)
 
   const doImport = async (): Promise<void> => {
     const target = name.trim()
@@ -251,7 +244,7 @@ export function ImportProfileModal(p: ImportProfileModalProps): JSX.Element {
                         <span style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' }}>{row.meta}</span>
                       )}
                       {row.status === 'error' && (
-                        <Button type="link" size="small" style={{ padding: 0, color: '#ff4d4f' }} onClick={() => setDetailView(row.detail ?? '')}>{t('profile.import.errorLabel')}</Button>
+                        <Button type="link" size="small" style={{ padding: 0, color: token.colorError }} onClick={() => setDetailView(row.detail ?? '')}>{t('profile.import.errorLabel')}</Button>
                       )}
                     </div>
                   </div>
@@ -278,19 +271,8 @@ export function ImportProfileModal(p: ImportProfileModalProps): JSX.Element {
       </Space>
     </Modal>
 
-    {/* 失败详情：点击某行的 Error 弹出完整错误文本。 */}
-    <Modal title={t('profile.import.failDetailTitle')} open={detailView !== null} onOk={() => setDetailView(null)} onCancel={() => setDetailView(null)}
-      okText={t('common.close')} width={MODAL.wide}
-      footer={(
-        <Space>
-          <Button onClick={() => { if (detailView !== null) void navigator.clipboard.writeText(detailView) }}>{t('common.copy')}</Button>
-          <Button type="primary" onClick={() => setDetailView(null)}>{t('common.close')}</Button>
-        </Space>
-      )}>
-      <pre style={{ margin: 0, maxHeight: 400, overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: token.colorFillTertiary, padding: token.paddingSM, borderRadius: token.borderRadius }}>
-        {detailView}
-      </pre>
-    </Modal>
+    <ErrorDetailModal open={detailView !== null} detail={detailView}
+      onClose={() => setDetailView(null)} title={t('profile.import.failDetailTitle')} />
     </>
   )
 }

@@ -57,21 +57,46 @@ export function failFromError(error: unknown): IpcResult<never> {
   return { ok: false, code: 'internal', params: { detail: message }, error: message }
 }
 
-/** Common error codes, for reference / reuse in throwE/fail. */
+/** Common error codes, for reference / reuse in throwE/fail. The single source
+ * of truth — handlers should reference `E.*` instead of typing raw codes. */
 export const E = {
   internal: 'internal',
+  nameInvalid: 'name.invalid',
+  commonCancelled: 'common.cancelled',
+  // dsh
   needActiveDsh: 'dsh.needActive',
   dshNotFound: 'dsh.notFound',
   dshNotManaged: 'dsh.notManaged',
   dshUpToDate: 'dsh.upToDate',
   dshMajorRisk: 'dsh.majorRisk',
-  nameInvalid: 'name.invalid',
+  dshProtected: 'dsh.protected',
+  dshVersionExists: 'dsh.versionExists',
+  // profile
   profileExists: 'profile.exists',
   profileNotFound: 'profile.notFound',
+  bundleNotFound: 'bundle.notFound',
+  bundleNoRow: 'bundle.noRow',
+  patchWriteVerify: 'patch.writeVerify',
+  patchNothingToRemove: 'patch.nothingToRemove',
+  // store / plugins
   storeNotConfigured: 'store.notConfigured',
   storeNotDir: 'store.notDir',
-  trashConflict: 'trash.conflict',
-  bundleNotFound: 'bundle.notFound',
+  storeBadManifest: 'store.badManifest',
+  storeUnusable: 'store.unusable',
+  storeInstallFailed: 'store.installFailed',
+  storeOperationFailed: 'store.operationFailed',
+  pluginNotInstalled: 'plugin.notInstalled',
+  // market
+  marketEntryNotFound: 'market.entryNotFound',
+  // run
+  runAlreadyRunning: 'run.alreadyRunning',
+  runExecMissing: 'run.execMissing',
+  runExecLaunchResolve: 'run.execLaunchResolve',
+  runNotRunning: 'run.notRunning',
+  runOpenHttpOnly: 'run.openHttpOnly',
+  // misc
   npmNotFound: 'npm.notFound',
   yamlInvalid: 'yaml.invalid',
+  shellOpenPath: 'shell.openPath',
+  trashConflict: 'trash.conflict',
 } as const

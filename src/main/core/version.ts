@@ -41,14 +41,10 @@ export function compareVersionsLoose(a: string, b: string): number {
   }
 }
 
-/** Leading major component of a version (`2.0.0-beta` → 2), or `-1` unparseable. */
-export function majorOfVersion(v: string): number {
-  try {
-    return semver.major(v.trim())
-  } catch {
-    return -1
-  }
-}
+// majorOfVersion now lives in `src/shared/version.ts` (pure, no main-only deps)
+// so the renderer can reuse it without crossing the process boundary; re-exported
+// here to keep existing main-side import paths working.
+export { majorOfVersion } from '../../shared/version.ts'
 
 /**
  * Whether `version` satisfies `spec` using semver's range semantics

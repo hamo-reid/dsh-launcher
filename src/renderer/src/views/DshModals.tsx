@@ -9,7 +9,10 @@ import { CheckCircleFilled, CloseCircleFilled, LoadingOutlined } from '@ant-desi
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
 import FieldLabel from '../components/FieldLabel.tsx'
+import { ErrorDetailModal } from '../components/ErrorDetailModal.tsx'
+import { StepIcon } from '../components/StepIcon.tsx'
 import { MODAL } from '../theme.ts'
+import { majorOfVersion } from '../../../shared/version.ts'
 import type {
   DshDataImportResult, DshInstallResult, DshInstallStep, DshUpdateInfo, DshUpdateResult, PackageVersionInfo,
 } from '../../../shared/types.ts'
@@ -165,12 +168,6 @@ interface InstallRow {
   meta?: string
   detail?: string
 }
-function StepIcon({ status }: { status: InstallRow['status'] }): JSX.Element {
-  if (status === 'running') return <LoadingOutlined spin style={{ color: '#faad14' }} />
-  if (status === 'ok') return <CheckCircleFilled style={{ color: '#52c41a' }} />
-  return <CloseCircleFilled style={{ color: '#ff4d4f' }} />
-}
-
 interface OfficialInstallModalProps {
   open: boolean
   onClose: () => void
@@ -353,7 +350,7 @@ export function OfficialInstallModal(p: OfficialInstallModalProps): JSX.Element 
                   <span style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' }}>{row.meta}</span>
                 )}
                 {row.status === 'error' && (
-                  <Button type="link" size="small" style={{ padding: 0, color: '#ff4d4f' }} onClick={() => setDetailView(row.detail ?? '')}>{t('dsh.official.errorLabel')}</Button>
+                  <Button type="link" size="small" style={{ padding: 0, color: token.colorError }} onClick={() => setDetailView(row.detail ?? '')}>{t('dsh.official.errorLabel')}</Button>
                 )}
               </div>
             ))}
@@ -372,19 +369,8 @@ export function OfficialInstallModal(p: OfficialInstallModalProps): JSX.Element 
       </Space>
     </Modal>
 
-    {/* 失败详情：点击某行的 Error 弹出完整错误文本。 */}
-    <Modal title={t('dsh.official.failDetailTitle')} open={detailView !== null} onOk={() => setDetailView(null)} onCancel={() => setDetailView(null)}
-      okText={t('common.close')} width={MODAL.wide}
-      footer={(
-        <Space>
-          <Button onClick={() => { if (detailView !== null) void navigator.clipboard.writeText(detailView) }}>{t('common.copy')}</Button>
-          <Button type="primary" onClick={() => setDetailView(null)}>{t('common.close')}</Button>
-        </Space>
-      )}>
-      <pre style={{ margin: 0, maxHeight: 400, overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: token.colorFillTertiary, padding: token.paddingSM, borderRadius: token.borderRadius }}>
-        {detailView}
-      </pre>
-    </Modal>
+    <ErrorDetailModal open={detailView !== null} detail={detailView}
+      onClose={() => setDetailView(null)} title={t('dsh.official.failDetailTitle')} />
     </>
   )
 }
@@ -526,12 +512,6 @@ export function UpdateDshModal(p: UpdateDshModalProps): JSX.Element {
 
 // ── Data mirror (migrate a dsh's data to another dsh's home) ────────────────
 
-/** Leading major of a version string, or `null`. */
-function majorOf(version: string): number | null {
-  const m = /^(\d+)/.exec(version.trim())
-  return m === null ? null : Number(m[1])
-}
-
 interface DataMirrorModalProps {
   open: boolean
   /** The source dsh (whose data migrates); `null` hides the modal. */
@@ -560,8 +540,8 @@ export function DataMirrorModal(p: DataMirrorModalProps): JSX.Element {
 
   const target = targets.find(d => d.id === targetId)
   const crossMajor = target !== undefined && p.source !== null
-    && majorOf(target.version) !== null && majorOf(p.source.version) !== null
-    && majorOf(target.version) !== majorOf(p.source.version)
+    && majorOfVersion(target.version) !== -1 && majorOfVersion(p.source.version) !== -1
+    && majorOfVersion(target.version) !== majorOfVersion(p.source.version)
 
   const doMirror = async (): Promise<void> => {
     if (p.source === null || targetId === undefined) { void message.warning(t('data.mirror.noTarget')); return }

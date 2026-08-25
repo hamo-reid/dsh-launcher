@@ -4,7 +4,7 @@
 
 import { ipcMain } from 'electron'
 import { installSpecFor, marketSourceState, pageCatalog, resolveMarket, setMarketSourceState } from '../core/market.ts'
-import { fail, failFromError } from '../core/errors.ts'
+import { fail, failFromError, E } from '../core/errors.ts'
 import type { IpcResult, MarketCatalog, MarketListOpts, MarketPage, MarketSourceState } from '../../shared/types.ts'
 
 /**
@@ -54,9 +54,9 @@ export function registerMarketIpc(): void {
 
   ipcMain.handle('market:resolve', async (_event, url: string) => {
     try {
-      if (typeof url !== 'string' || url === '') return fail('market.entryNotFound')
+      if (typeof url !== 'string' || url === '') return fail(E.marketEntryNotFound)
       const plugin = catalog?.plugins.find(p => p.url === url) ?? null
-      if (plugin === null) return fail('market.entryNotFound')
+      if (plugin === null) return fail(E.marketEntryNotFound)
       return { ok: true, value: { spec: installSpecFor(plugin), plugin } }
     } catch (error) {
       return failFromError(error)

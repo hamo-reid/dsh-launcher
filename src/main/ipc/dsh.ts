@@ -147,7 +147,7 @@ export function registerDshIpc(): void {
     const entry = dshes.find(d => d.id === id)
     if (entry === undefined) return fail(E.dshNotFound)
     const error = await shell.openPath(installDir(entry.execPath))
-    return error === '' ? { ok: true, value: true } : fail('shell.openPath', { detail: error })
+    return error === '' ? { ok: true, value: true } : fail(E.shellOpenPath, { detail: error })
   })
 
   handle('dsh:add', async (_event, path: string): Promise<IpcResult<DshEntry>> => {
@@ -175,7 +175,7 @@ export function registerDshIpc(): void {
     // —— 此刻允许脱管（仍不删文件），让用户能清理失效条目。
     const stale = entry !== undefined && !existsExecutable(entry.execPath)
     if (entry !== undefined && !stale && !isDeletableDsh(entry, entry.versionDir ?? dshVersionDir())) {
-      return fail('dsh.protected')
+      return fail(E.dshProtected)
     }
     logger.info(`dsh removed: ${entry?.name ?? id}${opts?.deleteFiles === true ? ' (delete files)' : ''}`)
     // 先从列表移除（脱管 — 始终执行）。
@@ -272,7 +272,7 @@ export function registerDshIpc(): void {
         if (options?.force === true) {
           await rm(target, { recursive: true, force: true }).catch(() => {})
         } else {
-          return fail('dsh.versionExists', { name })
+          return fail(E.dshVersionExists, { name })
         }
       }
       const info = await installOfficialDsh(versionDir, name, options?.version,

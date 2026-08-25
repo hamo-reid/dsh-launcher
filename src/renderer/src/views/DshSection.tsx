@@ -13,6 +13,7 @@ import ConfigRow from '../components/ConfigRow.tsx'
 import Panel from '../components/Panel.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
 import { AddDshModal, DataMirrorModal, DshRemoveModal, OfficialInstallModal, RenameDshModal, UpdateDshModal } from './DshModals.tsx'
+import { majorOfVersion } from '../../../shared/version.ts'
 import type { DshEntry } from '../../../shared/types.ts'
 
 /** DSH 页：安装(官方安装) + 管理(列表)；弹窗在 `DshModals`。套统一 AppShell。 */
@@ -141,11 +142,6 @@ export default function DshSection() {
 
   const active = dshes.find(d => d.id === activeId)
 
-  const majorOf = (v: string): number | null => {
-    const m = /^(\d+)/.exec(v.trim())
-    return m === null ? null : Number(m[1])
-  }
-
   const exportData = async (): Promise<void> => {
     if (activeId === undefined) return
     const r = await window.api.data.export(activeId)
@@ -163,9 +159,9 @@ export default function DshSection() {
     if (r.value.file === '') return
     const from = r.value.manifest?.dshVersion
     const to = entry.version
-    const ma = from !== undefined && from !== '' ? majorOf(from) : null
-    const mb = to !== '' ? majorOf(to) : null
-    const cross = ma !== null && mb !== null && ma !== mb
+    const ma = from !== undefined && from !== '' ? majorOfVersion(from) : -1
+    const mb = to !== '' ? majorOfVersion(to) : -1
+    const cross = ma > 0 && mb > 0 && ma !== mb
     const doImport = async (forceDsh: boolean): Promise<void> => {
       const res = await window.api.data.import(entry!.id, r.value.file, forceDsh)
       if (!res.ok) { void message.error(apiErrorText(res)); return }

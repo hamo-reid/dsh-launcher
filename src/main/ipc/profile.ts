@@ -68,10 +68,21 @@ function assertPatchDocValid(next: string): void {
   }
 }
 
+/** Resolve a profile's `cordis.patch.yml` path (single source of the filename). */
+function patchPathOf(name: string): string {
+  return join(profileDir(name), 'cordis.patch.yml')
+}
+
+/** Read a profile's patch layer, defaulting to an empty document. */
+function readUserPatch(name: string): string {
+  const path = patchPathOf(name)
+  return existsSync(path) ? readFileSync(path, 'utf8') : '[]'
+}
+
 const writeUserPatch = (name: string, next: string): void => {
   // Guard against a bad assembly ever reaching disk.
   assertPatchDocValid(next)
-  const path = join(profileDir(name), 'cordis.patch.yml')
+  const path = patchPathOf(name)
   writeFileSync(path, next)
   if (readFileSync(path, 'utf8') !== next) throw new Error('write verify failed')
 }
@@ -79,8 +90,8 @@ const writeUserPatch = (name: string, next: string): void => {
 /** Read a profile's detail (manifest + user-patch rows). */
 function loadProfileDetail(name: string): ProfileDetail {
   const { bundles, dependencies } = readManifest(name)
-  const patchPath = join(profileDir(name), 'cordis.patch.yml')
-  const patchText = existsSync(patchPath) ? readFileSync(patchPath, 'utf8') : ''
+  // The raw view keeps `''` (not `[]`) for a missing layer, unlike the write path.
+  const patchText = existsSync(patchPathOf(name)) ? readFileSync(patchPathOf(name), 'utf8') : ''
   return { bundles, dependencies, rows: parsePatchRows(patchText), patchText }
 }
 
@@ -96,14 +107,14 @@ export function registerProfileIpc(): void {
   handle(
     'profile:setDisabled',
     (_event, name: string, id: string, disabled: boolean): IpcResult<boolean> => {
-      const patchPath = join(profileDir(name), 'cordis.patch.yml')
-      const current = existsSync(patchPath) ? readFileSync(patchPath, 'utf8') : '[]'
-      writeFileSync(patchPath, setRowDisabled(current, id, disabled))
+      // Go through writeUserPatch so every write path shares the document-level
+      // assertPatchDocValid guard, then keep the row-specific verify below.
+      writeUserPatch(name, setRowDisabled(readUserPatch(name), id, disabled))
       // Write-then-read verify: the patch must parse and the row must hold the
       // requested state. Never report success on a silently wrong file.
-      const after = readFileSync(patchPath, 'utf8')
+      const after = readUserPatch(name)
       if (verifyDisabledState(after, id, disabled)) return { ok: true, value: true }
-      return fail('patch.writeVerify', { id })
+      return fail(E.patchWriteVerify, { id })
     },
   )
 
@@ -243,17 +254,14 @@ export function registerProfileIpc(): void {
     if (id === '') return fail(E.nameInvalid)
     if (row.config !== undefined && row.config.trim() !== '') assertConfigValid(row.config)
     if (row.insert !== undefined && row.insert.length > 0) assertInsertValid(row.insert)
-    const path = join(profileDir(name), 'cordis.patch.yml')
-    const current = existsSync(path) ? readFileSync(path, 'utf8') : '[]'
-    writeUserPatch(name, upsertRow(current, { ...row, id }))
+    writeUserPatch(name, upsertRow(readUserPatch(name), { ...row, id }))
     return { ok: true, value: true }
   })
 
   // Remove a row's override from the profile layer (restores the bundle default).
   handle('profile:removeRow', (_event, name: string, id: string): IpcResult<boolean> => {
-    const path = join(profileDir(name), 'cordis.patch.yml')
-    if (!existsSync(path)) return fail('patch.nothingToRemove')
-    writeUserPatch(name, removeRow(readFileSync(path, 'utf8'), id))
+    if (!existsSync(patchPathOf(name))) return fail(E.patchNothingToRemove)
+    writeUserPatch(name, removeRow(readUserPatch(name), id))
     return { ok: true, value: true }
   })
 
@@ -263,20 +271,16 @@ export function registerProfileIpc(): void {
     const src = resolveBundlePatch(bundle, name)
     if (src === undefined) return fail(E.bundleNotFound, { bundle })
     const block = extractRowBlock(readFileSync(src, 'utf8'), id)
-    if (block === undefined) return fail('bundle.noRow', { bundle, id })
-    const path = join(profileDir(name), 'cordis.patch.yml')
-    const current = existsSync(path) ? readFileSync(path, 'utf8') : '[]'
+    if (block === undefined) return fail(E.bundleNoRow, { bundle, id })
     // The source row may sit nested under a group (extra leading indent);
     // re-base it to the top level so the copy stands as a valid top-level row.
-    writeUserPatch(name, appendRowBlock(current, dedentRowBlock(block)))
+    writeUserPatch(name, appendRowBlock(readUserPatch(name), dedentRowBlock(block)))
     return { ok: true, value: true }
   })
 
   // Edit an existing row's config block in the profile layer.
   handle('profile:setRowConfig', (_event, name: string, id: string, configText: string): IpcResult<boolean> => {
-    const path = join(profileDir(name), 'cordis.patch.yml')
-    const current = existsSync(path) ? readFileSync(path, 'utf8') : '[]'
-    writeUserPatch(name, setRowConfig(current, id, configText))
+    writeUserPatch(name, setRowConfig(readUserPatch(name), id, configText))
     return { ok: true, value: true }
   })
 
@@ -287,7 +291,7 @@ export function registerProfileIpc(): void {
 
   // Move one bundle layer to `toIndex` within `dsh.profile.bundles`.
   handle('profile:reorderBundle', (_event, name: string, bundle: string, toIndex: number): IpcResult<boolean> => {
-    if (!Number.isInteger(toIndex)) return fail('name.invalid', [], 'toIndex 必须是整数')
+    if (!Number.isInteger(toIndex)) return fail(E.nameInvalid, [], 'toIndex 必须是整数')
     reorderBundle(name, bundle, toIndex)
     return { ok: true, value: true }
   })
@@ -301,8 +305,8 @@ export function registerProfileIpc(): void {
   // two-pane diff editor.
   handle('profile:configInfo', (_event, name: string, id: string): IpcResult<{ default: string; current: string }> => {
     const def = defaultConfigText(name, id)
-    const patchPath = join(profileDir(name), 'cordis.patch.yml')
     let current = ''
+    const patchPath = patchPathOf(name)
     if (existsSync(patchPath)) {
       const v = extractKeyValue(readFileSync(patchPath, 'utf8'), id, 'config')
       if (v !== undefined) current = v
@@ -313,9 +317,9 @@ export function registerProfileIpc(): void {
   // Open the profile's `cordis.patch.yml` in the OS default editor, so the user
   // can hand-edit / repair it. Creates an empty overlay if it is missing.
   handle('profile:openPatchSource', async (_event, name: string): Promise<IpcResult<boolean>> => {
-    const path = join(profileDir(name), 'cordis.patch.yml')
+    const path = patchPathOf(name)
     if (!existsSync(path)) writeFileSync(path, '[]\n')
     const error = await shell.openPath(path)
-    return error === '' ? { ok: true, value: true } : fail('shell.openPath', { detail: error })
+    return error === '' ? { ok: true, value: true } : fail(E.shellOpenPath, { detail: error })
   })
 }

@@ -120,10 +120,10 @@ function launchShellWindow(exe: string, argv: string[], env: NodeJS.ProcessEnv, 
 
 export function registerRunIpc(): void {
   ipcMain.handle('run:start', (_event, profile: string, mode: 'app' | 'shell' = 'app'): IpcResult<boolean> => {
-    if (running !== null) return fail('run.alreadyRunning', { profile: running.profile })
+    if (running !== null) return fail(E.runAlreadyRunning, { profile: running.profile })
     const entry = activeDshEntry()
     if (entry === undefined) return fail(E.needActiveDsh)
-    if (!existsExecutable(entry.execPath)) return fail('run.execMissing', { path: entry.execPath })
+    if (!existsExecutable(entry.execPath)) return fail(E.runExecMissing, { path: entry.execPath })
     try {
       // Launch the dsh entry directly with array args (no cmd/powershell command
       // string — the output pipe stays UTF-8). Prefer a system `node` when one
@@ -132,7 +132,7 @@ export function registerRunIpc(): void {
       try {
         launch = resolveLaunchEntry(entry.execPath)
       } catch (error) {
-        return fail('run.execLaunchResolve', { path: entry.execPath }, error instanceof Error ? error.message : String(error))
+        return fail(E.runExecLaunchResolve, { path: entry.execPath }, error instanceof Error ? error.message : String(error))
       }
       const { script, tsx, cwd } = launch
       // dsh's HMR service (cordis-plugin-hmr) requires the Node `--expose-internals`
@@ -207,7 +207,7 @@ export function registerRunIpc(): void {
   })
 
   ipcMain.handle('run:stop', (): IpcResult<boolean> => {
-    if (running === null) return fail('run.notRunning')
+    if (running === null) return fail(E.runNotRunning)
     logger.info(`run stopped: ${running.profile}`)
     intentionalStop = true
     terminateAndClear(running.child)
@@ -227,7 +227,7 @@ export function registerRunIpc(): void {
   })
 
   ipcMain.handle('run:input', (_event, line: string): IpcResult<boolean> => {
-    if (running === null) return fail('run.notRunning')
+    if (running === null) return fail(E.runNotRunning)
     try {
       running.child.stdin?.write(`${line}\n`)
       return { ok: true, value: true }
@@ -241,7 +241,7 @@ export function registerRunIpc(): void {
   // local paths or protocols.
   ipcMain.handle('openExternal', (_event, url: string): IpcResult<boolean> => {
     try {
-      if (!/^https?:\/\/\S+$/.test(url)) return fail('run.openHttpOnly')
+      if (!/^https?:\/\/\S+$/.test(url)) return fail(E.runOpenHttpOnly)
       void shell.openExternal(url)
       return { ok: true, value: true }
     } catch (error) {

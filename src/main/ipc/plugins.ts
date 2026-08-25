@@ -42,14 +42,14 @@ export function setPluginStoreDir(dir: string): IpcResult<boolean> {
     if (existsSync(manifestPath)) {
       const parsed = JSON.parse(readFileSync(manifestPath, 'utf8')) as unknown
       if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        return fail('store.badManifest', { path: manifestPath })
+        return fail(E.storeBadManifest, { path: manifestPath })
       }
     }
     initStore(target)
     saveSettings({ ...loadSettings(), pluginDir: target })
     return { ok: true, value: true }
   } catch (error) {
-    return fail('store.unusable', { detail: String(error) })
+    return fail(E.storeUnusable, { detail: String(error) })
   }
 }
 
@@ -76,7 +76,7 @@ export function registerPluginsIpc(): void {
   ipcMain.handle('plugins:add', async (_event, source: string, name?: string): Promise<IpcResult<string>> => {
     try {
       const result = await addPlugin(pluginDir(), source, name)
-      return result.ok ? { ok: true, value: '已下载到本地存储：' + result.text } : fail('store.installFailed', { detail: result.text })
+      return result.ok ? { ok: true, value: '已下载到本地存储：' + result.text } : fail(E.storeInstallFailed, { detail: result.text })
     } catch (error) {
       return failFromError(error)
     }
@@ -95,9 +95,9 @@ export function registerPluginsIpc(): void {
         properties: isZip ? ['openFile'] : ['openDirectory'],
         filters: isZip ? [{ name: '插件包', extensions: ['zip'] }] : undefined,
       })
-      if (picked.canceled || picked.filePaths.length === 0) return fail('common.cancelled')
+      if (picked.canceled || picked.filePaths.length === 0) return fail(E.commonCancelled)
       const result = await addLocalPlugin(store, picked.filePaths[0])
-      return result.ok ? { ok: true, value: '已从本地加入本地存储：' + result.text } : fail('store.installFailed', { detail: result.text })
+      return result.ok ? { ok: true, value: '已从本地加入本地存储：' + result.text } : fail(E.storeInstallFailed, { detail: result.text })
     } catch (error) {
       return failFromError(error)
     }
@@ -120,7 +120,7 @@ export function registerPluginsIpc(): void {
         ? entry.profilesDir
         : entry !== undefined ? join(entry.home, 'profiles') : undefined
       const result = await installIntoProfile(profile, pkg, pluginDir(), base, { version })
-      return result.ok ? { ok: true, value: result.text } : fail('store.operationFailed', { detail: result.text })
+      return result.ok ? { ok: true, value: result.text } : fail(E.storeOperationFailed, { detail: result.text })
     } catch (error) {
       return failFromError(error)
     }
@@ -129,7 +129,7 @@ export function registerPluginsIpc(): void {
   ipcMain.handle('plugins:remove', async (_event, name: string, version?: string): Promise<IpcResult<string>> => {
     try {
       const result = await removePlugin(pluginDir(), name, version)
-      return result.ok ? { ok: true, value: result.text } : fail('store.operationFailed', { detail: result.text })
+      return result.ok ? { ok: true, value: result.text } : fail(E.storeOperationFailed, { detail: result.text })
     } catch (error) {
       return failFromError(error)
     }
@@ -143,7 +143,7 @@ export function registerPluginsIpc(): void {
     try {
       const removed = await removePluginFromProfiles(dshScopes(), name)
       const res = removePlugin(pluginDir(), name)
-      if (!res.ok) return fail('store.operationFailed', { detail: res.text })
+      if (!res.ok) return fail(E.storeOperationFailed, { detail: res.text })
       return { ok: true, value: { removed } }
     } catch (error) {
       return failFromError(error)
@@ -202,7 +202,7 @@ export function registerPluginsIpc(): void {
     try {
       const scopes = dshScopes()
       const dir = findInstalledDir(scopes, pluginDir(), name)
-      if (dir === undefined) return fail('plugin.notInstalled', { name })
+      if (dir === undefined) return fail(E.pluginNotInstalled, { name })
       shell.showItemInFolder(dir)
       return { ok: true, value: true }
     } catch (error) {
