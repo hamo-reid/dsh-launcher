@@ -1,5 +1,5 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
-import { Alert, Button, ConfigProvider, Layout, message, Modal, Space, Tabs, theme, Typography } from 'antd'
+import { lazy, Suspense, useEffect, useState, type CSSProperties, type ReactNode } from 'react'
+import { Alert, Button, ConfigProvider, Layout, message, Modal, Space, Spin, Tabs, theme, Typography } from 'antd'
 import {
   AppstoreOutlined, CloseOutlined, FullscreenExitOutlined, FullscreenOutlined,
   InfoOutlined, MinusOutlined, ProfileOutlined, RobotOutlined, SettingOutlined,
@@ -10,12 +10,15 @@ import { LAYOUT } from './theme.ts'
 import OnboardingModal from './components/OnboardingModal.tsx'
 import CloseConfirmModal from './components/CloseConfirmModal.tsx'
 import DownloadPanel from './components/DownloadPanel.tsx'
-import ProfileSection from './views/ProfileSection.tsx'
-import PluginsSection from './views/PluginsSection.tsx'
-import SettingsSection from './views/SettingsSection.tsx'
-import DshSection from './views/DshSection.tsx'
-import AboutView from './views/AboutView.tsx'
 import type { HealthIssue } from '../../shared/types.ts'
+
+// Views are lazy so a tab's heavy deps (markdown renderer, dnd-kit) only parse
+// when that section is first opened, keeping the initial bundle + startup lean.
+const ProfileSection = lazy(() => import('./views/ProfileSection.tsx'))
+const PluginsSection = lazy(() => import('./views/PluginsSection.tsx'))
+const SettingsSection = lazy(() => import('./views/SettingsSection.tsx'))
+const DshSection = lazy(() => import('./views/DshSection.tsx'))
+const AboutView = lazy(() => import('./views/AboutView.tsx'))
 
 type Tab = 'profile' | 'plugins' | 'settings' | 'dsh' | 'about'
 
@@ -193,11 +196,17 @@ export default function App() {
       )}
 
       <Content style={{ flex: 1, overflow: 'hidden', background: token.colorBgLayout }}>
-        {tab === 'profile' && <ProfileSection />}
-        {tab === 'plugins' && <PluginsSection key={pluginsEpoch} />}
-        {tab === 'settings' && <SettingsSection />}
-        {tab === 'dsh' && <DshSection />}
-        {tab === 'about' && <AboutView />}
+        <Suspense fallback={(
+          <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Spin />
+          </div>
+        )}>
+          {tab === 'profile' && <ProfileSection />}
+          {tab === 'plugins' && <PluginsSection key={pluginsEpoch} />}
+          {tab === 'settings' && <SettingsSection />}
+          {tab === 'dsh' && <DshSection />}
+          {tab === 'about' && <AboutView />}
+        </Suspense>
       </Content>
     </Layout>
     {onboarding === 'open' && (

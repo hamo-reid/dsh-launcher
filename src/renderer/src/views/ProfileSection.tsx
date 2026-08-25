@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { lazy, useCallback, useEffect, useState } from 'react'
 import {
   Alert, Button, Checkbox, Modal, Segmented, Select, Space, Typography, theme, message,
 } from 'antd'
@@ -9,7 +9,9 @@ import AppShell from '../components/AppShell.tsx'
 import EmptyState from '../components/EmptyState.tsx'
 import NavList from '../components/NavList.tsx'
 import ConfirmMenu, { type MenuAction } from '../components/ConfirmMenu.tsx'
-import ProfileDetailView from './ProfileDetail.tsx'
+// Profile detail is heavy (dnd-kit drag/drop) — lazy so it isn't in the first
+// profile-screen parse. The App-level Suspense provides its loading fallback.
+const ProfileDetailView = lazy(() => import('./ProfileDetail.tsx'))
 import RunConsole from '../components/RunConsole.tsx'
 import { useRunRuntime } from './useRunRuntime.tsx'
 import { useTrash } from './useTrash.ts'
