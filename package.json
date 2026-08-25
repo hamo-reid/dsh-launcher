@@ -28,7 +28,8 @@
     ],
     "asar": true,
     "asarUnpack": [
-      "**/sql.js/**"
+      "**/sql.js/**",
+      "**/pnpm/**"
     ],
     "win": {
       "target": [

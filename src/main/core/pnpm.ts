@@ -7,6 +7,7 @@
  * locked to the app's dependency. */
 
 import { spawn } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { logger } from './logger.ts'
@@ -27,10 +28,16 @@ export interface PnpmResult {
  * runtime). Cached. Throws if pnpm is not installed. */
 let pnpmEntry: string | null = null
 function resolvePnpmEntry(): string {
-  // pnpm's "exports" only maps "." → "./package.json", so resolving the bin via a
-  // package subpath throws ERR_PACKAGE_PATH_NOT_EXPORTED. Resolve the package root
-  // through ".", then load bin/pnpm.cjs by its absolute file path — no exports check.
-  pnpmEntry ??= join(dirname(require.resolve('pnpm')), 'bin', 'pnpm.cjs')
+  if (pnpmEntry === null) {
+    // Packaged, pnpm (with its native `fastlist` executable) is relocated to
+    // `app.asar.unpacked` — Electron can't `require` it from inside `app.asar`, so
+    // resolve it there by `process.resourcesPath`. In dev there is no unpacked
+    // pnpm, so fall back to a normal `require.resolve`.
+    const unpacked = join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'pnpm', 'bin', 'pnpm.cjs')
+    pnpmEntry = existsSync(unpacked)
+      ? unpacked
+      : join(dirname(require.resolve('pnpm')), 'bin', 'pnpm.cjs')
+  }
   return pnpmEntry
 }
 
