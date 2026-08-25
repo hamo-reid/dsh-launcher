@@ -6,7 +6,10 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
-import { installSucceeded, runPnpm } from './pnpm.ts'
+import { existsSync, mkdirSync, mkdtempSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { ensurePnpmStore, installSucceeded, pnpmStoreDir, runPnpm } from './pnpm.ts'
 
 const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }))
 vi.mock('node:child_process', () => ({ spawn: spawnMock }))
@@ -103,5 +106,35 @@ describe('runPnpm (spawn mocked)', () => {
     ac.abort() // triggers onAbort → killProcessTree (taskkill spawn, ignored)
     child.emit('close', 1)
     await expect(p).resolves.toMatchObject({ ok: false, aborted: true })
+  })
+})
+
+describe('ensurePnpmStore (library-scoped store seeding)', () => {
+  beforeEach(() => { delete process.env.APPDATA })
+
+  it('hard-links the same-volume default store content into .pnpm-store', () => {
+    // A fake "default pnpm store" under APPDATA, same volume as storeDir (both tmp).
+    const appData = mkdtempSync(join(tmpdir(), 'pm-appdata-'))
+    process.env.APPDATA = appData
+    const v10 = join(appData, 'pnpm', 'store', 'v10')
+    mkdirSync(v10, { recursive: true })
+    writeFileSync(join(v10, 'packages.json'), '{"a":1}')
+
+    const storeDir = mkdtempSync(join(tmpdir(), 'pm-lib-'))
+    ensurePnpmStore(storeDir)
+
+    const seeded = join(pnpmStoreDir(storeDir), 'v10', 'packages.json')
+    expect(existsSync(seeded)).toBe(true)
+    // Same on-disk file (hard-linked), not a copy.
+    expect(statSync(seeded).ino).toBe(statSync(join(v10, 'packages.json')).ino)
+  })
+
+  it('is a no-op once the library store already exists', () => {
+    const storeDir = mkdtempSync(join(tmpdir(), 'pm-lib2-'))
+    mkdirSync(pnpmStoreDir(storeDir), { recursive: true })
+    writeFileSync(join(pnpmStoreDir(storeDir), 'probe'), 'x')
+    // Nonexistent default store: without the existing guard this would try to seed.
+    ensurePnpmStore(storeDir)
+    expect(existsSync(join(pnpmStoreDir(storeDir), 'probe'))).toBe(true)
   })
 })

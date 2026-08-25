@@ -114,7 +114,7 @@ describe('store basics', () => {
     })
     await addPlugin(store(), 'foo@^1')
     const staging = join(store(), 'archive', 'foo', '.staging')
-    expect(runPnpm).toHaveBeenCalledWith(staging, ['add', 'foo@^1', '--fetch-retries=3', '--fetch-retry-maxtimeout=60000'], undefined)
+    expect(runPnpm).toHaveBeenCalledWith(staging, ['add', 'foo@^1', '--fetch-retries=3', '--fetch-retry-maxtimeout=60000'], undefined, { storeDir: store() })
     expect(listPlugins(store())).toContainEqual({ name: 'foo', version: '1.2.3' })
     await removePlugin(store(), 'foo')
     expect(existsSync(join(store(), 'archive', 'foo'))).toBe(false)
@@ -145,7 +145,7 @@ describe('local installs', () => {
     const r = await addLocalPlugin(store(), src)
     expect(r.ok).toBe(true)
     const staging = join(store(), 'archive', 'src-plugin', '.staging')
-    expect(runPnpm).toHaveBeenCalledWith(staging, ['add', `file:${src}`, '--fetch-retries=3', '--fetch-retry-maxtimeout=60000'], undefined)
+    expect(runPnpm).toHaveBeenCalledWith(staging, ['add', `file:${src}`, '--fetch-retries=3', '--fetch-retry-maxtimeout=60000'], undefined, { storeDir: store() })
     expect(listPlugins(store())).toContainEqual({ name: 'src-plugin', version: '1.0.0' })
   })
 
@@ -341,6 +341,27 @@ describe('removePluginFromProfiles', () => {
     expect(p1.dependencies?.plug).toBe('^1.0.0')
     expect(runPnpm).not.toHaveBeenCalled()
   })
+
+  it('drops an aggregate bundle\'s sub-dep links when uninstalling', async () => {
+    const homeD = join(root, 'home-aggr-uninst')
+    const base = join(homeD, 'profiles')
+    const bundleDir = join(store(), 'archive', 'aggr-un', '1.0.0', 'node_modules', 'aggr-un')
+    mkPkg(bundleDir, '1.0.0', { dsh: { bundle: { patch: 'cordis.patch.yml' } } })
+    writeFileSync(join(bundleDir, 'cordis.patch.yml'), "- insert:\n    - id: a\n      name: 'sub-a'\n")
+    const subDir = join(store(), 'archive', 'aggr-un', '1.0.0', 'node_modules', 'sub-a')
+    mkPkg(subDir, '1.0.0')
+    mkProfile(base, 'p1', {
+      dependencies: { 'aggr-un': `link:${bundleDir}`, 'sub-a': `link:${subDir}` },
+      dsh: { profile: { bundles: ['aggr-un'] } },
+    })
+
+    await removePluginFromProfiles([scope('c', homeD)], 'aggr-un')
+
+    const p1 = JSON.parse(readFileSync(join(base, 'p1', 'package.json'), 'utf8'))
+    expect(p1.dependencies?.['aggr-un']).toBeUndefined()
+    expect(p1.dependencies?.['sub-a']).toBeUndefined()
+    expect(p1.dsh?.profile?.bundles).toEqual([])
+  })
 })
 
 describe('installSource (cancellation)', () => {
@@ -364,7 +385,7 @@ describe('installIntoProfile', () => {
     expect(r2.ok).toBe(false)
   })
 
-  it('adds a link dependency and reports a failed pnpm install', async () => {
+  it('adds a file dependency and reports a failed pnpm install', async () => {
     const base = join(root, 'profs-1')
     seedVersion('pkg-a', '1.0.0')
     mkProfile(base, 'prof', {})
@@ -373,7 +394,7 @@ describe('installIntoProfile', () => {
     expect(r.ok).toBe(false)
     expect(r.text).toContain('pnpm install 失败')
     const m = JSON.parse(readFileSync(join(base, 'prof', 'package.json'), 'utf8'))
-    expect(m.dependencies['pkg-a']).toBe(`link:${join(store(), 'archive', 'pkg-a', '1.0.0', 'node_modules', 'pkg-a')}`)
+    expect(m.dependencies['pkg-a']).toBe(`file:${join(store(), 'archive', 'pkg-a', '1.0.0', 'node_modules', 'pkg-a')}`)
   })
 
   it('reports link-only install when the store package stays absent', async () => {
@@ -383,7 +404,7 @@ describe('installIntoProfile', () => {
     const r = await installIntoProfile('prof', 'orphan', store(), base)
     expect(r.ok).toBe(true)
     expect(r.activated).toBe(false)
-    expect(r.text).toContain('link 依赖安装')
+    expect(r.text).toContain('file 依赖安装')
   })
 
   it('activates a declaring bundle by appending it to the layer', async () => {
@@ -404,6 +425,57 @@ describe('installIntoProfile', () => {
     const r = await installIntoProfile('prof', 'pkg-c', store(), base)
     expect(r.text).toContain('已在 bundle 层')
     expect(r.activated).toBe(true)
+  })
+
+  /** Seed an aggregate bundle:真身 (with a name-bearing patch) + sibling sub-packages. */
+  const aggrDir = (): string => join(store(), 'archive', 'aggr', '1.0.0', 'node_modules', 'aggr')
+  const aggrProj = (): string => join(store(), 'archive', 'aggr', '1.0.0')
+  const aggrSub = (name: string): string => join(aggrProj(), 'node_modules', name)
+  function seedAggr(patch: string, subs: string[]): void {
+    const dir = aggrDir()
+    mkPkg(dir, '1.0.0', { dsh: { bundle: { patch: 'cordis.patch.yml' } } })
+    writeFileSync(join(dir, 'cordis.patch.yml'), patch)
+    for (const s of subs) mkPkg(aggrSub(s), '1.0.0')
+  }
+
+  it('real-installs an aggregate bundle via file:, not as a store link', async () => {
+    const base = join(root, 'profs-aggr')
+    mkProfile(base, 'prof', { dsh: { profile: { bundles: [] } } })
+    seedAggr('- insert:\n    - id: a\n      name: \'sub-a\'\n- insert:\n    - id: b\n      name: \'sub-b\'\n', ['sub-a', 'sub-b'])
+    const r = await installIntoProfile('prof', 'aggr', store(), base)
+    expect(r.ok).toBe(true)
+    expect(r.activated).toBe(true)
+    const m = JSON.parse(readFileSync(join(base, 'prof', 'package.json'), 'utf8'))
+    // Aggregate real-installed via file: (pnpm brings sub-bundles in itself); the
+    // layer keeps only the aggregate as the bundle entry.
+    expect(m.dsh.profile.bundles).toEqual(['aggr'])
+    expect(m.dependencies['aggr']).toBe(`file:${aggrDir()}`)
+    expect(m.dependencies['sub-a']).toBeUndefined()
+    expect(m.dependencies['sub-b']).toBeUndefined()
+  })
+
+  it('drops stale sub-dep links and rewrites to file: on re-install', async () => {
+    const base = join(root, 'profs-aggr2')
+    seedAggr('- insert:\n    - id: x\n      name: \'sub-x\'\n', ['sub-x'])
+    mkProfile(base, 'prof', {
+      dependencies: { aggr: 'link:/old/store/aggr', 'sub-x': 'link:/old/store/sub-x' }, // simulated link-based install
+      dsh: { profile: { bundles: ['aggr'] } },
+    })
+    const r = await installIntoProfile('prof', 'aggr', store(), base)
+    expect(r.text).toContain('已在 bundle 层')
+    const m = JSON.parse(readFileSync(join(base, 'prof', 'package.json'), 'utf8'))
+    expect(m.dependencies['aggr']).toBe(`file:${aggrDir()}`)
+    expect(m.dependencies['sub-x']).toBeUndefined()
+  })
+
+  it('leaves an ordinary (non-aggregate) bundle untouched', async () => {
+    const base = join(root, 'profs-plain')
+    mkProfile(base, 'prof', { dsh: { profile: { bundles: [] } } })
+    seedVersion('pkg-d', '1.0.0', { dsh: { bundle: { patch: 'x' } } })
+    const r = await installIntoProfile('prof', 'pkg-d', store(), base)
+    expect(r.activated).toBe(true)
+    const m = JSON.parse(readFileSync(join(base, 'prof', 'package.json'), 'utf8'))
+    expect(Object.keys(m.dependencies)).toEqual(['pkg-d']) // no sub-deps added
   })
 })
 

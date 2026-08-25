@@ -82,10 +82,11 @@ export async function migrateLegacyStore(storeDir: string): Promise<void> {
       // back fast instead of re-downloading and re-copying node_modules. Only
       // fall back to the network when the offline cache misses.
       logger.info(`store migration: reinstalling ${name}@${version} via pnpm (offline)`)
-      const offline = await runPnpm(verDir, ['add', `file:${srcDir}`, '--offline', '--prefer-offline'])
+      const storeOpts = { storeDir }
+      const offline = await runPnpm(verDir, ['add', `file:${srcDir}`, '--offline', '--prefer-offline'], undefined, storeOpts)
       if (!offline.ok || !existsSync(join(archivedTarget, 'package.json'))) {
         logger.warn(`store migration: offline reinstall failed for ${name}, retrying online: ${offline.text}`)
-        const online = await runPnpm(verDir, ['add', `file:${srcDir}`, '--fetch-retries=3', '--fetch-retry-maxtimeout=60000'])
+        const online = await runPnpm(verDir, ['add', `file:${srcDir}`, '--fetch-retries=3', '--fetch-retry-maxtimeout=60000'], undefined, storeOpts)
         if (!online.ok) {
           logger.warn(`store migration: pnpm reinstall failed for ${name}: ${online.text}`)
           continue
@@ -161,7 +162,7 @@ async function rewriteProfileLinks(storeDir: string, moves: { old: string; next:
   }
   logger.info(`store migration: rewriteProfileLinks found ${affected.length} affected profile(s)`)
   for (const pdir of affected) {
-    const r = await runPnpm(pdir, ['install'])
+    const r = await runPnpm(pdir, ['install', '--config.confirmModulesPurge=false'])
     if (!r.ok) logger.warn(`store migration: profile reinstall failed ${pdir}: ${r.text}`)
   }
   logger.info('store migration: rewriteProfileLinks done')

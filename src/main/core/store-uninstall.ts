@@ -8,6 +8,7 @@ import { basename, dirname, join } from 'node:path'
 import { runPnpm } from './pnpm.ts'
 import { logger } from './logger.ts'
 import { pluginVersionDir, versionsRoot, type ProfileManifestShape } from './store-layout.ts'
+import { listBundleSubdepNames } from './bundle-subdeps.ts'
 import type { DshScope } from './appState.ts'
 import type { PluginUsagePoint } from '../../shared/types.ts'
 
@@ -120,6 +121,15 @@ export async function removePluginFromProfiles(dshes: DshScope[], pkg: string): 
       // stale junction must be detached so the archive can actually be removed.
       if (!isLinked && !inBundles && !nmHasIt) continue
       if (manifest.dependencies?.[pkg] !== undefined) delete manifest.dependencies[pkg]
+      // Also drop the sub-bundle `link:` deps this aggregate bundle pulled into the
+      // profile, so removing it leaves no orphaned links (the `pnpm install` below
+      // prunes the leftover junctions).
+      if (isLinked && typeof spec === 'string') {
+        const pkgDir = spec.startsWith('file:') ? spec.slice('file:'.length) : spec.slice('link:'.length)
+        for (const sub of listBundleSubdepNames(pkgDir)) {
+          if (manifest.dependencies?.[sub] !== undefined) delete manifest.dependencies[sub]
+        }
+      }
       if (inBundles) {
         manifest.dsh = { ...manifest.dsh, profile: { ...manifest.dsh?.profile, bundles: bundles.filter(b => b !== pkg) } }
       }
@@ -134,7 +144,7 @@ export async function removePluginFromProfiles(dshes: DshScope[], pkg: string): 
         if (nmSt.isSymbolicLink()) unlinkSync(nmPkg)
         else deleteTreePhysical(nmPkg)
       }
-      await runPnpm(profileDirPath, ['install'])
+      await runPnpm(profileDirPath, ['install', '--config.confirmModulesPurge=false'])
       affected.push({ dsh: dsh.name, dshVersion: dsh.version, profile: entry.name })
     }
   }

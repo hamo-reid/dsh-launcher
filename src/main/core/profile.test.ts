@@ -126,7 +126,7 @@ describe('removeBundle / reorderBundle', () => {
     const m = JSON.parse(readFileSync(mp, 'utf8'))
     expect(m.dsh.profile.bundles).toEqual(['b'])
     expect(m.dependencies).toEqual({})
-    expect(runPnpm).toHaveBeenCalledWith(join(profiles(), 'p'), ['install'])
+    expect(runPnpm).toHaveBeenCalledWith(join(profiles(), 'p'), ['install', '--config.confirmModulesPurge=false'])
   })
 
   it('removeBundle throws when the bundle is absent', async () => {
@@ -219,7 +219,7 @@ describe('importProfile', () => {
     const r = await importProfile(payload, { name: 'baseonly' })
     expect(r.ok).toBe(true)
     expect('installed' in r && r.installed).toEqual([])
-    expect(runPnpm).toHaveBeenCalledWith(join(profiles(), 'baseonly'), ['install'])
+    expect(runPnpm).toHaveBeenCalledWith(join(profiles(), 'baseonly'), ['install', '--config.confirmModulesPurge=false'])
   })
 
   it('reuses an existing store version when it satisfies the range', async () => {

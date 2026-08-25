@@ -17,6 +17,41 @@ import {
 import { recordPluginSource, sourceKindOf } from './store-sources.ts'
 import { migrateLegacyStore } from './store-migration.ts'
 import { isLegacyPkg } from './store-uninstall.ts'
+import { listBundleSubdepNames } from './bundle-subdeps.ts'
+
+/**
+ * pnpm settings an archived aggregate version needs to expose its sub-packages
+ * at the top-level node_modules. Archives default to pnpm's `isolated` linker,
+ * which stows every dependency behind `.pnpm/` and leaves only the top package
+ * visible — so an aggregate bundle's sub-bundles are invisible to a profile link.
+ * Hoisting matches dsh's own profile workspace, making `node_modules/<sub>` real.
+ */
+const ARCHIVE_PNPM_WORKSPACE = `packages:
+  - .
+
+nodeLinker: hoisted
+autoInstallPeers: false
+`
+
+/** Whether an installed package's manifest declares a `dsh.bundle` patch. */
+function declaresBundlePatch(pkgDir: string): boolean {
+  try {
+    const manifest = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8')) as {
+      dsh?: { bundle?: { patch?: string } }
+    }
+    return manifest.dsh?.bundle?.patch !== undefined
+  } catch {
+    return false
+  }
+}
+
+/** Write the hoisted pnpm workspace into an archive's own project, unless present. */
+function writeHoistedWorkspace(verDir: string): boolean {
+  const p = join(verDir, 'pnpm-workspace.yaml')
+  if (existsSync(p)) return false
+  writeFileSync(p, ARCHIVE_PNPM_WORKSPACE)
+  return true
+}
 
 /** Derive a package-name hint from a download source (`name@ver`, `name`, or a
  * `github:owner/repo` spec — brand guess for the repo tail). */
@@ -56,7 +91,7 @@ export async function installSource(storeDir: string, name: string, source: stri
   rmSync(staging, { recursive: true, force: true })
   mkdirSync(staging, { recursive: true })
   initStore(staging) // a minimal project for `pnpm add` to resolve into
-  const result = await runPnpm(staging, ['add', source, '--fetch-retries=3', '--fetch-retry-maxtimeout=60000'], signal)
+  const result = await runPnpm(staging, ['add', source, '--fetch-retries=3', '--fetch-retry-maxtimeout=60000'], signal, { storeDir })
   // A user cancel: drop the half-downloaded staging dir and surface it as a
   // cancel, not a failure — the download task manager treats it as cancelled.
   if (result.aborted === true) {
@@ -76,6 +111,11 @@ export async function installSource(storeDir: string, name: string, source: stri
     rmSync(staging, { recursive: true, force: true })
     return { ok: false, text: `未在 node_modules 中找到 ${name}（包名不匹配，或依赖解析失败）${tail !== '' ? `\n${tail}` : ''}` }
   }
+  // Detect an aggregate bundle HERE, while the staging `node_modules/<name>` link is
+  // still valid. After the rename its absolute link dangles (naming the gone
+  // `.staging`), so inspecting it post-rename would read a broken package and miss
+  // the bundle — leaving an aggregate version isolated (invisible sub-packages).
+  const isAggregate = declaresBundlePatch(join(staging, 'node_modules', name))
   const dest = pluginVersionDir(storeDir, name, version)
   if (existsSync(dest)) {
     rmSync(staging, { recursive: true, force: true })
@@ -87,9 +127,13 @@ export async function installSource(storeDir: string, name: string, source: stri
   } catch (error) {
     return { ok: false, text: `归档失败：${error instanceof Error ? error.message : String(error)}` }
   }
+  // An aggregate bundle version must be hoisted so its sub-packages surface at the
+  // top-level node_modules. Write the workspace before the rewire below so the
+  // `pnpm install` materialises those links against this version's own goods.
+  if (isAggregate) writeHoistedWorkspace(dest)
   // Moving `.staging` → version dir dangles pnpm's absolute top-level links (they
   // name the now-gone `.staging`); let pnpm rewire them to this version's goods.
-  await reinstallVersion(dest)
+  await reinstallVersion(dest, join(dest, 'node_modules', name), storeDir)
   recordPluginSource(storeDir, name, version, sourceKindOf(source))
   logger.info(`plugin store add: ${name}@${version} (${source})`)
   return { ok: true, text: `已下载 ${name}@${version}` }
@@ -100,13 +144,23 @@ export async function installSource(storeDir: string, name: string, source: stri
  * absolute targets naming `.staging`, so the rename invalidates them; a reinstall
  * rebuilds them against this version's own `.pnpm` goods. Needs
  * `confirmModulesPurge=false`: pnpm sees a moved project as needing a full
- * rebuild, and would otherwise wait on an interactive prompt in a non-CI child. */
-async function reinstallVersion(verDir: string): Promise<boolean> {
-  const offline = await runPnpm(verDir, ['install', '--offline', '--prefer-offline', '--config.confirmModulesPurge=false'])
-  if (offline.ok) return true
-  const online = await runPnpm(verDir, ['install', '--config.confirmModulesPurge=false', '--fetch-retries=3', '--fetch-retry-maxtimeout=60000'])
-  if (online.ok) return true
-  logger.warn(`plugin store: failed to rewire links in ${verDir}: ${offline.text || online.text}`)
+ * rebuild, and would otherwise wait on an interactive prompt in a non-CI child.
+ *
+ * When `pkgDir` is given (`node_modules/<name>`), a stale pnpm lock can mark the
+ * install "up to date" while a dangling top-level link stays broken — pnpm trusts
+ * `.modules.yaml` and never re-checks the junction target. So if the package body
+ * is still unreadable after the normal offline/online installs, a `--force` relink
+ * rebuilds it. */
+async function reinstallVersion(verDir: string, pkgDir?: string, storeDir?: string): Promise<boolean> {
+  const storeOpts = storeDir === undefined ? undefined : { storeDir }
+  const bodyOk = (): boolean => pkgDir === undefined || existsSync(join(pkgDir, 'package.json'))
+  const offline = await runPnpm(verDir, ['install', '--offline', '--prefer-offline', '--config.confirmModulesPurge=false'], undefined, storeOpts)
+  if (offline.ok && bodyOk()) return true
+  const online = await runPnpm(verDir, ['install', '--config.confirmModulesPurge=false', '--fetch-retries=3', '--fetch-retry-maxtimeout=60000'], undefined, storeOpts)
+  if (online.ok && bodyOk()) return true
+  const forced = await runPnpm(verDir, ['install', '--force', '--config.confirmModulesPurge=false', '--fetch-retries=3', '--fetch-retry-maxtimeout=60000'], undefined, storeOpts)
+  if (forced.ok && bodyOk()) return true
+  logger.warn(`plugin store: failed to rewire links in ${verDir}: ${offline.text || online.text || forced.text}`)
   return false
 }
 
@@ -123,9 +177,18 @@ export async function repairArchiveLinks(storeDir: string): Promise<void> {
     for (const v of readdirSync(root, { withFileTypes: true })) {
       if (!v.isDirectory() || v.name === '.staging') continue
       const verDir = join(root, v.name)
-      if (existsSync(join(verDir, 'node_modules', name, 'package.json'))) continue
+      const pkgDir = join(verDir, 'node_modules', name)
+      // Migrate aggregate versions (whose sub-packages the re-link would otherwise
+      // leave invisible behind pnpm's isolated linker) to a hoisted layout.
+      if (declaresBundlePatch(pkgDir) && !existsSync(join(verDir, 'pnpm-workspace.yaml'))) {
+        writeHoistedWorkspace(verDir)
+        logger.info(`plugin store: hoisting aggregate archive ${name}@${v.name}`)
+        await reinstallVersion(verDir, pkgDir, storeDir)
+        continue
+      }
+      if (existsSync(join(pkgDir, 'package.json'))) continue
       logger.info(`plugin store: rewiring broken archive ${name}@${v.name}`)
-      await reinstallVersion(verDir)
+      await reinstallVersion(verDir, pkgDir, storeDir)
     }
   }
 }
@@ -185,9 +248,13 @@ function targetVersionedPkgDir(storeDir: string, pkg: string, opts: { version?: 
 }
 
 /**
- * Point a profile at one archived version of a plugin via a `link:` dependency,
- * run the profile's pnpm install, and reconcile bundles. `version` selects the
- * specific archived copy; when omitted, the highest archived version is used.
+ * Point a profile at one archived version of a plugin via a `file:` dependency,
+ * so pnpm real-installs it (plus any sub-bundles) into the profile node_modules,
+ * then runs pnpm install and reconciles bundles. `version` selects the specific
+ * archived copy; when omitted, the highest archived version is used. Real
+ * install (not a store `link:`) matters because dsh plugins import `@deepseek-ai/*`
+ * services that dsh's heal fallback provides from the profile — a store link
+ * would resolve those peers up the store tree and fail.
  */
 export async function installIntoProfile(
   profile: string, pkg: string, storeDir: string, baseProfilesDir?: string,
@@ -209,26 +276,40 @@ export async function installIntoProfile(
 
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as ProfileManifestShape
   manifest.dependencies = manifest.dependencies ?? {}
-  const spec = `link:${pkgDir}`
-  if (manifest.dependencies[pkg] !== spec) {
-    manifest.dependencies[pkg] = spec
-    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
+  // Depend on the archived copy via `file:` so pnpm INSTALLS it into the profile's
+  // node_modules (real package bodies, not a junction to the store). dsh loads
+  // plugins from the profile dir, and they import @deepseek-ai/dsh-* services that
+  // dsh's heal fallback ($HOME/profiles/node_modules) provides; a `link:` to the
+  // store resolves those peers up the STORE tree and fails. file: real-installs the
+  // package (and its sub-bundles) into the profile, so peers resolve through the
+  // profile → heal-fallback chain.
+  const spec = `file:${pkgDir}`
+  let manifestChanged = manifest.dependencies[pkg] !== spec
+  if (manifestChanged) manifest.dependencies[pkg] = spec
+  // Drop any stale sub-bundle deps injected by the earlier link-based install —
+  // pnpm now real-installs them itself as deps of the file: package.
+  for (const sub of listBundleSubdepNames(pkgDir)) {
+    if (manifest.dependencies[sub] !== undefined) {
+      delete manifest.dependencies[sub]
+      manifestChanged = true
+    }
   }
+  if (manifestChanged) writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
 
-  const install = await runPnpm(dir, ['install'])
+  const install = await runPnpm(dir, ['install', '--config.confirmModulesPurge=false'], undefined, { storeDir })
   if (!install.ok) return { ok: false, text: `pnpm install 失败：${install.text}`, activated: false }
 
   // Bundle reconcile: a dependency that declares `dsh.bundle` joins the layer.
   const storeManifestPath = join(pkgDir, 'package.json')
-  if (!existsSync(storeManifestPath)) return { ok: true, text: `已作为 link 依赖安装（${pkg}）`, activated: false }
+  if (!existsSync(storeManifestPath)) return { ok: true, text: `已作为 file 依赖安装（${pkg}）`, activated: false }
   let installed: ProfileManifestShape
   try {
     installed = JSON.parse(readFileSync(storeManifestPath, 'utf8')) as ProfileManifestShape
   } catch {
-    return { ok: true, text: `已作为 link 依赖安装（${pkg}）`, activated: false }
+    return { ok: true, text: `已作为 file 依赖安装（${pkg}）`, activated: false }
   }
   if (installed.dsh?.bundle?.patch === undefined) {
-    return { ok: true, text: `已作为普通 link 依赖安装（${pkg}，声明无 dsh.bundle）`, activated: false }
+    return { ok: true, text: `已作为普通 file 依赖安装（${pkg}，声明无 dsh.bundle）`, activated: false }
   }
   const bundles = manifest.dsh?.profile?.bundles ?? []
   if (!bundles.includes(pkg)) {

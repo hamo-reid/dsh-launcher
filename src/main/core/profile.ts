@@ -15,6 +15,7 @@ import { loadSettings } from './settings.ts'
 import { addLocalPlugin, addPlugin, installIntoProfile, installedStoreVersion } from './plugins.ts'
 import { satisfiesRange } from './version.ts'
 import { uniqueTrashName } from './trash.ts'
+import { listBundleSubdepNames } from './bundle-subdeps.ts'
 import type { ImportBundleSource, ImportProfileResult, ImportStep, ProfileSummary } from '../../shared/types.ts'
 import { logger } from './logger.ts'
 
@@ -123,7 +124,17 @@ export async function removeBundle(profile: string, bundle: string): Promise<voi
   }
   const bundles = manifest.dsh?.profile?.bundles ?? []
   if (!bundles.includes(bundle)) throw new Error(`profile 中没有 bundle 层「${bundle}」`)
+  // Capture + drop any sub-bundle `link:` deps this aggregate bundle pulled in
+  // (resolved from its link spec before the dependency entry is removed), so
+  // removing the layer leaves no orphaned sub-deps.
+  const depSpec = manifest.dependencies?.[bundle]
+  const subdeps = typeof depSpec === 'string' && (depSpec.startsWith('link:') || depSpec.startsWith('file:'))
+    ? listBundleSubdepNames(depSpec.startsWith('file:') ? depSpec.slice('file:'.length) : depSpec.slice('link:'.length))
+    : []
   if (manifest.dependencies !== undefined) delete manifest.dependencies[bundle]
+  for (const sub of subdeps) {
+    if (manifest.dependencies?.[sub] !== undefined) delete manifest.dependencies[sub]
+  }
   manifest.dsh = {
     ...manifest.dsh,
     profile: { ...manifest.dsh?.profile, bundles: bundles.filter(b => b !== bundle) },
@@ -133,7 +144,7 @@ export async function removeBundle(profile: string, bundle: string): Promise<voi
     throw new Error('write verify failed: bundle still present')
   }
   // Prune the now-orphaned link from node_modules.
-  await runPnpm(profileDir(profile), ['install'])
+  await runPnpm(profileDir(profile), ['install', '--config.confirmModulesPurge=false'])
   logger.info(`profile bundle removed: ${profile} · ${bundle}`)
 }
 
@@ -456,7 +467,7 @@ export async function importProfile(
   }
 
   emit({ kind: 'install', state: 'running' })
-  await runPnpm(dir, ['install'])
+  await runPnpm(dir, ['install', '--config.confirmModulesPurge=false'])
   emit({ kind: 'install', state: 'ok' })
 
   const text = installed.length > 0 ? `已导入「${target}」，已入库插件 ${installed.length} 个` : `已导入「${target}」`

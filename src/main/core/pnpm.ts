@@ -7,9 +7,10 @@
  * locked to the app's dependency. */
 
 import { spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, linkSync, mkdirSync, readdirSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { dirname, join } from 'node:path'
+import os from 'node:os'
+import { dirname, join, parse } from 'node:path'
 import { logger } from './logger.ts'
 import { nodeEnvironment } from './node-env.ts'
 import { nodePreferenceValue } from './settings.ts'
@@ -75,15 +76,84 @@ function resolvePnpmNode(): string {
   return nodeEnvironment(nodePreferenceValue()).prefer === 'system' ? 'node' : process.execPath
 }
 
+/** The shared, content-addressed pnpm store for the plugin library. Lives INSIDE
+ * the plugin dir (`<pluginDir>/.pnpm-store`) so it is always on the same volume as
+ * the archived node_modules — that is what lets multiple stack versions hard-link
+ * the same dependency to one on-disk copy instead of copying it per version. Keep
+ * it with the plugin dir so moving the library moves the cache with it. */
+export function pnpmStoreDir(storeDir: string): string {
+  return join(storeDir, '.pnpm-store')
+}
+
+/** The pnpm's default per-user store, if any (mirrored on first use to seed the
+ * library-scoped store without a re-download when both are on the same volume). */
+function defaultPnpmStoreRoot(): string {
+  // `APPDATA` is honoured on every platform (not just win32) so tests and Cit can
+  // point a fake default store at it. win32 defaults to APPDATA too.
+  const appData = process.env.APPDATA
+    ?? (process.platform === 'win32' ? join(os.homedir(), 'AppData', 'Roaming') : '')
+  const candidates = [
+    appData !== '' ? join(appData, 'pnpm', 'store') : '',
+    join(os.homedir(), '.local', 'share', 'pnpm', 'store'),
+    join(os.homedir(), '.pnpm-store'),
+  ].filter(Boolean)
+  return candidates.find(path => existsSync(path)) ?? ''
+}
+
+/** Whether two paths resolve to the same drive/volume (hard-links can't cross it). */
+const sameVolume = (a: string, b: string): boolean => parse(a).root === parse(b).root
+
+/** Recursively hard-link every regular file under `src` into `dst` (same layout).
+ * Hard-links reference the same on-disk content: no extra disk, and any archived
+ * node_modules pointing at those inodes stay valid across the mirror. */
+function mirrorStoreLinks(src: string, dst: string): void {
+  for (const entry of readdirSync(src, { withFileTypes: true })) {
+    const s = join(src, entry.name)
+    const d = join(dst, entry.name)
+    if (entry.isDirectory()) {
+      mkdirSync(d, { recursive: true })
+      mirrorStoreLinks(s, d)
+    } else if (entry.isFile()) {
+      try { linkSync(s, d) } catch { /* ignore transient/locked entries */ }
+    }
+  }
+}
+
+/** Ensure the library-scoped store dir exists and (when the store is empty and the
+ * default pnpm store is on the SAME volume) seed it by hard-linking the default
+ * store's content. Same-drive → zero re-download and the default store stays
+ * untouched for other projects. Cross-drive → skipped, letting pnpm create an empty
+ * store and fetch from the network once. Idempotent via `existsSync`. */
+export function ensurePnpmStore(storeDir: string | undefined): void {
+  if (storeDir === undefined || storeDir === '') return
+  const dest = pnpmStoreDir(storeDir)
+  if (existsSync(dest)) return
+  const src = defaultPnpmStoreRoot()
+  if (src === '' || !sameVolume(dest, src)) return
+  try {
+    mkdirSync(dest, { recursive: true })
+    mirrorStoreLinks(src, dest)
+    logger.info(`plugin store: seeded .pnpm-store from default store at ${src}`)
+  } catch (error) {
+    logger.warn(`plugin store: could not seed store: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
 /** Run `pnpm <args>` with cwd, resolving on process exit. When `signal` is given
  * and the caller aborts it, the pnpm child (and its sub-process tree) is killed
- * and the promise resolves with `{ ok: false, aborted: true }`. */
-export function runPnpm(cwd: string, args: readonly string[], signal?: AbortSignal): Promise<PnpmResult> {
+ * and the promise resolves with `{ ok: false, aborted: true }`. When `storeDir` is
+ * given, a `--store-dir <pluginDir>/.pnpm-store` is injected so installs share the
+ * plugin-library store regardless of cwd (keeps hard-link dedup on the same volume). */
+export function runPnpm(cwd: string, args: readonly string[], signal?: AbortSignal, opts?: { storeDir?: string }): Promise<PnpmResult> {
   return new Promise((resolve) => {
-    logger.debug(`pnpm ${args.join(' ')} @ ${cwd}`)
+    if (opts?.storeDir !== undefined && opts.storeDir !== '') ensurePnpmStore(opts.storeDir)
+    const fullArgs = opts?.storeDir !== undefined && opts.storeDir !== ''
+      ? ['--store-dir', pnpmStoreDir(opts.storeDir), ...args]
+      : args
+    logger.debug(`pnpm ${fullArgs.join(' ')} @ ${cwd}`)
     let child: ReturnType<typeof spawn>
     try {
-      child = spawn(resolvePnpmNode(), [resolvePnpmEntry(), ...args], {
+      child = spawn(resolvePnpmNode(), [resolvePnpmEntry(), ...fullArgs], {
         cwd,
         // Absolute execPath + array args: no shell, so a spacey packaged exe name
         // or a spacey pnpm-entry path is passed correctly (no quoting hazards).
