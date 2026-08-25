@@ -59,4 +59,6 @@ git push origin release:main
 
 ## 待清理
 
-- 历史遗留分支 `test/coverage-gate`、`feature/logging` 已并入但未删；`main`/`release` 已对齐到 v0.1.3。发版后用 `git push origin --delete <branch>` 清理已并入的 feature 分支，保持远程干净。
+- 已并入但未删的本地遗留分支（合并到 dev 后用 `git branch -d <branch>` 删除；若已推远程，用 `git push origin --delete <branch>`）：
+  `feature/logging`、`test/coverage-gate`、`feat/community-market`、`feat/dsh-version-ops`
+- 下次发版时对齐三分支（`git push origin release:main`），使 `main` 追平最后发版提交（见 BRANCHING.md「硬性约定」）。

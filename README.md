@@ -20,6 +20,11 @@ Built with Electron, React and Ant Design.
   plus your own *patch layer*.
 - **Plugin store** — Browse and search plugins on the npm registry, pick a
   version, and install into a profile. Local-folder plugins are supported too.
+- **Multi-version store & download center** — Every downloaded plugin version is
+  archived in its own versioned directory, so one plugin can keep many versions
+  at once; an in-app download center tracks running/cancelled installs.
+- **Community market** — A curated catalog of dsh plugins with search / category
+  / sort, plus one-click GitHub-source and npm-source installs.
 - **Runtimes & updates** — Auto-discover installed dsh versions, pick one as
   active, and update an app-managed dsh in place (home auto-backed up;
   cross-major upgrades require confirmation).
@@ -89,5 +94,4 @@ pnpm run pack:dir       # unpacked directory only
 ```
 
 > Packaging requires `asarUnpack: ["**/sql.js/**"]` so the SQLite WASM binary
-> stays readable at runtime. No app icon is set yet — drop `build/icon.ico`
-> to replace the Electron default.
+> stays readable at runtime. The app icon ships at `build/icon.ico`.

@@ -65,4 +65,4 @@ pnpm run pack:portable  # 单文件便携版 .exe
 pnpm run pack:dir       # 仅未打包目录
 ```
 
-> 打包需要 `asarUnpack: ["**/sql.js/**"]`，以确保 SQLite 的 WASM 二进制在运行时仍可读取。尚未设置应用图标——放入 `build/icon.ico` 即可替换 Electron 默认图标。
+> 打包需要 `asarUnpack: ["**/sql.js/**"]`，以确保 SQLite 的 WASM 二进制在运行时仍可读取。应用图标随包发布在 `build/icon.ico`。
