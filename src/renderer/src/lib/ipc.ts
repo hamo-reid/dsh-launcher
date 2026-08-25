@@ -1,6 +1,5 @@
 /** Small helpers for talking to the preload `window.api` from the renderer. */
 
-import { message } from 'antd'
 import i18n from 'i18next'
 import type { IpcResult } from '../../../shared/types.ts'
 
@@ -15,14 +14,4 @@ export function apiErrorText(result: { ok: false; code: string; params?: Params;
   // Fallback to raw detail / message for codes we haven't localized yet.
   if (typeof params.detail === 'string' && params.detail !== '') return params.detail
   return result.error
-}
-
-/**
- * Collapse an `IpcResult`: on success returns the value; on failure surfaces the
- * localized error via antd `message` and returns `null`.
- */
-export function unwrap<T>(result: IpcResult<T>): T | null {
-  if (result.ok) return result.value
-  void message.error(apiErrorText(result))
-  return null
 }

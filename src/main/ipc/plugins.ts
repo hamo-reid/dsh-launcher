@@ -17,6 +17,7 @@ import { loadSettings, saveSettings } from '../core/settings.ts'
 import { inlineRelativeImages } from '../core/app-util.ts'
 import { fetchPackageVersions, npmSearch } from '../core/npm.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
+import { pathIdentifierInvalid, versionInvalid } from './validate.ts'
 import type { ComboPlugin, DownloadSessionInfo, InstalledOverviewRow, IpcResult, NpmSearchHit, PackageVersionInfo, PluginUsagePoint } from '../../shared/types.ts'
 
 /** Validate + persist the plugin-store location (shared by `plugins:setDir`
@@ -75,6 +76,7 @@ export function registerPluginsIpc(): void {
 
   ipcMain.handle('plugins:add', async (_event, source: string, name?: string): Promise<IpcResult<string>> => {
     try {
+      if (name !== undefined && pathIdentifierInvalid(name)) return fail(E.nameInvalid)
       const result = await addPlugin(pluginDir(), source, name)
       return result.ok ? { ok: true, value: '已下载到本地存储：' + result.text } : fail(E.storeInstallFailed, { detail: result.text })
     } catch (error) {
@@ -115,6 +117,8 @@ export function registerPluginsIpc(): void {
   // Point a profile (under a chosen dsh) at a locally-downloaded plugin.
   ipcMain.handle('plugins:installToProfile', async (_event, profile: string, pkg: string, version?: string, dshId?: string): Promise<IpcResult<string>> => {
     try {
+      if (pathIdentifierInvalid(profile) || pathIdentifierInvalid(pkg)) return fail(E.nameInvalid)
+      if (version !== undefined && versionInvalid(version)) return fail(E.nameInvalid)
       const entry = dshId !== undefined ? readDshState().dshes.find(d => d.id === dshId) : undefined
       const base = entry !== undefined && entry.profilesDir !== undefined
         ? entry.profilesDir
@@ -128,6 +132,8 @@ export function registerPluginsIpc(): void {
 
   ipcMain.handle('plugins:remove', async (_event, name: string, version?: string): Promise<IpcResult<string>> => {
     try {
+      if (pathIdentifierInvalid(name)) return fail(E.nameInvalid)
+      if (version !== undefined && versionInvalid(version)) return fail(E.nameInvalid)
       const result = await removePlugin(pluginDir(), name, version)
       return result.ok ? { ok: true, value: result.text } : fail(E.storeOperationFailed, { detail: result.text })
     } catch (error) {
@@ -141,6 +147,7 @@ export function registerPluginsIpc(): void {
   // Returns which profiles were detached so the renderer can surface them.
   ipcMain.handle('plugins:uninstall', async (_event, name: string): Promise<IpcResult<{ removed: PluginUsagePoint[] }>> => {
     try {
+      if (pathIdentifierInvalid(name)) return fail(E.nameInvalid)
       const removed = await removePluginFromProfiles(dshScopes(), name)
       const res = removePlugin(pluginDir(), name)
       if (!res.ok) return fail(E.storeOperationFailed, { detail: res.text })
@@ -160,6 +167,7 @@ export function registerPluginsIpc(): void {
 
   ipcMain.handle('plugins:pkgVersions', async (_event, name: string): Promise<IpcResult<PackageVersionInfo>> => {
     try {
+      if (pathIdentifierInvalid(name)) return fail(E.nameInvalid)
       return { ok: true, value: await fetchPackageVersions(name) }
     } catch (error) {
       return failFromError(error)

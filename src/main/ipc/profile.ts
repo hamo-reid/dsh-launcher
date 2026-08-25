@@ -22,6 +22,7 @@ import { contextForEntry, pluginDir, readDshState } from '../core/appState.ts'
 import { addDirToZip, dedentRowBlock, verifyDisabledState } from '../core/app-util.ts'
 import { fail, E } from '../core/errors.ts'
 import { handle } from './handle.ts'
+import { rowIdInvalid } from './validate.ts'
 import type {
   ImportProfileResult, IpcResult, ProfileDetail, ProfileLayer, RowCreateInput,
 } from '../../shared/types.ts'
@@ -107,6 +108,9 @@ export function registerProfileIpc(): void {
   handle(
     'profile:setDisabled',
     (_event, name: string, id: string, disabled: boolean): IpcResult<boolean> => {
+      // A row id that could break/extend the `- id: <value>` line must never be
+      // written into the patch doc.
+      if (rowIdInvalid(id)) return fail(E.nameInvalid)
       // Go through writeUserPatch so every write path shares the document-level
       // assertPatchDocValid guard, then keep the row-specific verify below.
       writeUserPatch(name, setRowDisabled(readUserPatch(name), id, disabled))
@@ -251,7 +255,7 @@ export function registerProfileIpc(): void {
   // profile's own patch layer. Content is YAML-validated before writing.
   handle('profile:addRow', (_event, name: string, row: RowCreateInput): IpcResult<boolean> => {
     const id = row.id.trim()
-    if (id === '') return fail(E.nameInvalid)
+    if (rowIdInvalid(id)) return fail(E.nameInvalid)
     if (row.config !== undefined && row.config.trim() !== '') assertConfigValid(row.config)
     if (row.insert !== undefined && row.insert.length > 0) assertInsertValid(row.insert)
     writeUserPatch(name, upsertRow(readUserPatch(name), { ...row, id }))

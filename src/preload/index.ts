@@ -15,6 +15,7 @@ import type {
   DownloadSessionInfo,
   HealthIssue,
   ImportProfileResult,
+  InstalledPlugin,
   ImportStep,
   InstalledOverviewRow,
   IpcResult,
@@ -121,7 +122,7 @@ const api = {
       ipcRenderer.invoke('plugins:getDir'),
     setDir: (dir: string): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('plugins:setDir', dir),
-    list: (): Promise<IpcResult<{ name: string; version: string }[]>> =>
+    list: (): Promise<IpcResult<InstalledPlugin[]>> =>
       ipcRenderer.invoke('plugins:list'),
     add: (source: string, name?: string): Promise<IpcResult<string>> =>
       ipcRenderer.invoke('plugins:add', source, name),
@@ -225,7 +226,7 @@ const api = {
       ipcRenderer.invoke('dsh:setHome', id, home),
     setProfileDir: (id: string, dir: string): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('dsh:setProfileDir', id, dir),
-    installOfficial: (options?: { versionDir?: string; name?: string; version?: string }): Promise<IpcResult<DshInstallResult>> =>
+    installOfficial: (options?: { versionDir?: string; name?: string; version?: string; force?: boolean }): Promise<IpcResult<DshInstallResult>> =>
       ipcRenderer.invoke('dsh:installOfficial', options),
     onInstallEvent: (callback: (step: DshInstallStep) => void): (() => void) => {
       const handler = (_: unknown, step: DshInstallStep): void => callback(step)

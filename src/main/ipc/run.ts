@@ -114,7 +114,11 @@ function launchShellWindow(exe: string, argv: string[], env: NodeJS.ProcessEnv, 
     '[Console]::OutputEncoding=[Console]::InputEncoding=[Text.UTF8Encoding]::new()',
     `& ${psQuote(exe)} ${argv.map(psQuote).join(' ')}`,
   ].join('\n')
-  writeFileSync(scriptPath, script)
+  // Prepend a UTF-8 BOM: Windows PowerShell 5.1 reads a BOM-less UTF-8 script as
+  // the system ANSI codepage (GBK on zh-CN), which would garble the embedded
+  // paths/args when the app or user dir sits under a non-ASCII path.
+  const bom = Buffer.from([0xEF, 0xBB, 0xBF])
+  writeFileSync(scriptPath, Buffer.concat([bom, Buffer.from(script, 'utf8')]))
   return spawn('cmd.exe', ['/c', 'start', '', '/wait', 'powershell.exe', '-NoExit', '-ExecutionPolicy', 'Bypass', '-File', scriptPath], { windowsHide: false, env, cwd })
 }
 

@@ -45,6 +45,10 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // Explicit (Electron ≥20 defaults true anyway): the preload only uses
+      // contextBridge + ipcRenderer, so sandboxing is safe and keeps any future
+      // fs/node usage in the renderer from silently enabling an unsandboxed web.
+      sandbox: true,
     },
   })
   hookWindowMaximize(win)
