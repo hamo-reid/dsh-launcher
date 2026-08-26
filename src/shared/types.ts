@@ -110,6 +110,9 @@ export interface InstalledOverviewRow {
   /** True for a dsh-bundled template (used by a profile but not in the store):
    * shown as built-in, not a manageable plugin. */
   builtin?: boolean
+  /** Real on-disk bytes of this plugin's own files (inode-dedup across its archive
+   * versions / profile copy). Absent when nothing resolved on disk. */
+  sizeBytes?: number
 }
 
 /** What `profile:load` returns for one profile. */
@@ -201,6 +204,27 @@ export interface NodeEnvironment {
   preference: 'system' | 'bundled'
   /** The node actually used to run dsh (after fallback if the choice is unusable). */
   prefer: 'system' | 'bundled'
+}
+
+// ── launcher self-update (GitHub releases) ───────────────────────────────────
+
+/** One launcher GitHub release (normalised; leading `v` stripped). */
+export interface AppRelease {
+  /** Tag without the leading `v` (e.g. `0.2.0-beta2`). */
+  tag: string
+  /** Alias of `tag` kept explicit for display. */
+  version: string
+  /** The release page URL to open when a newer one exists. */
+  url: string
+  /** ISO publish timestamp, when the API provides one. */
+  publishedAt?: string
+}
+
+/** Result of `app:checkUpdate`: the installed version and a newer release, if any. */
+export interface AppUpdateInfo {
+  current: string
+  /** The highest newer release, or `null` when already up to date. */
+  latest: AppRelease | null
 }
 
 // ── dsh official install ─────────────────────────────────────────────────────

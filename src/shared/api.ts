@@ -6,6 +6,7 @@
  * `Window.api` declared in `src/preload/index.d.ts`.
  */
 import type {
+  AppUpdateInfo,
   ComboPlugin,
   DshDataImportResult,
   DshDataManifest,
@@ -99,6 +100,8 @@ export interface WindowApi {
     uninstall: (name: string) => Promise<IpcResult<{ removed: PluginUsagePoint[] }>>
     listCombo: (profile: string) => Promise<IpcResult<ComboPlugin[]>>
     overview: () => Promise<IpcResult<InstalledOverviewRow[]>>
+    /** Size of each plugin (inode-dedup) — manual, triggered by the calc button. */
+    calcSizes: () => Promise<IpcResult<Record<string, number>>>
     reveal: (name: string) => Promise<IpcResult<boolean>>
     readme: (name: string) => Promise<IpcResult<{ content: string; dir: string }>>
     search: (query: string, opts?: { from?: number; size?: number }) => Promise<IpcResult<{ hits: NpmSearchHit[]; total: number }>>
@@ -225,5 +228,7 @@ export interface WindowApi {
   app: {
     /** The packaged app version (for the About page). */
     version: () => Promise<IpcResult<string>>
+    /** Whether a newer launcher release exists on GitHub. */
+    checkUpdate: () => Promise<IpcResult<AppUpdateInfo>>
   }
 }

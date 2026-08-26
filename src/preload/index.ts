@@ -16,6 +16,7 @@ import type {
   ImportStep,
   InstalledOverviewRow,
   IpcResult,
+  AppUpdateInfo,
   PluginUsagePoint,
   MarketListOpts,
   MarketPage,
@@ -137,6 +138,8 @@ const api = {
       ipcRenderer.invoke('plugins:listCombo', profile),
     overview: (): Promise<IpcResult<InstalledOverviewRow[]>> =>
       ipcRenderer.invoke('plugins:overview'),
+    calcSizes: (): Promise<IpcResult<Record<string, number>>> =>
+      ipcRenderer.invoke('plugins:calcSizes'),
     reveal: (name: string): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('plugins:reveal', name),
     readme: (name: string): Promise<IpcResult<{ content: string; dir: string }>> =>
@@ -286,6 +289,7 @@ const api = {
 
   app: {
     version: (): Promise<IpcResult<string>> => ipcRenderer.invoke('app:version'),
+    checkUpdate: (): Promise<IpcResult<AppUpdateInfo>> => ipcRenderer.invoke('app:checkUpdate'),
   },
 } satisfies WindowApi
 
