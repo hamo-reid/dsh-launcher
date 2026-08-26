@@ -5,7 +5,7 @@
  * (via `store:migrate`) after the user consents, and a hindsight migration
  * marker lets the probe retire later. Read side keeps working on legacy stores.
  */
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, realpathSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, normalize } from 'node:path'
 import { runPnpm } from './pnpm.ts'
 import { dshScopes } from './appState.ts'
@@ -71,7 +71,12 @@ export async function migrateLegacyStore(storeDir: string): Promise<void> {
       logger.info(`store migration: staging source of ${name}@${version} into archive/`)
       try {
         mkdirSync(verDir, { recursive: true })
-        cpSync(src, srcDir, { recursive: true, filter: p => basename(p) !== 'node_modules' })
+        // The top-level node_modules/<name> is a pnpm SYMLINK into .pnpm (its only
+        // real entry, everything else is the shared store). Copying the link as-is
+        // (cpSync's default dereference:false) yields a link whose target is then
+        // removed — a dangling, useless archive — and throws EPERM on Windows
+        // without Developer Mode. Resolve the package body first, then copy it.
+        cpSync(realpathSync(src), srcDir, { recursive: true, filter: p => basename(p) !== 'node_modules' })
       } catch (error) {
         logger.warn(`store migration: could not stage ${name}: ${error instanceof Error ? error.message : String(error)}`)
         continue
@@ -113,9 +118,10 @@ export async function migrateLegacyStore(storeDir: string): Promise<void> {
 
 /**
  * Rewrite every profile dependency whose `link:` target was a moved top-level
- * package dir, then re-run pnpm install on the affected profiles so their
- * node_modules link resolves to the new versioned copy. Safe no-op when there
- * are no profiles (or no app-state yet).
+ * package dir so it points at the new archived copy as a `file:` dependency
+ * (the same form installIntoProfile writes today), then re-run pnpm install on
+ * the affected profiles so their node_modules real-installs the package. Safe
+ * no-op when there are no profiles (or no app-state yet).
  */
 async function rewriteProfileLinks(storeDir: string, moves: { old: string; next: string }[]): Promise<void> {
   const redirect = new Map(moves.map(m => [normalize(m.old), normalize(m.next)]))
@@ -149,7 +155,12 @@ async function rewriteProfileLinks(storeDir: string, moves: { old: string; next:
         const target = normalize(spec.slice(5))
         const next = redirect.get(target)
         if (next !== undefined) {
-          deps[key] = `link:${next}`
+          // Retarget to the archived copy via `file:`, matching what installIntoProfile
+          // writes today — NOT `link:`. A `link:` into the store leaves dsh's peers
+          // (@deepseek-ai/*) resolving up the store tree and failing; `file:` real-
+          // installs the package into the profile so those resolve through the profile
+          // → heal-fallback chain, exactly like a freshly-installed plugin.
+          deps[key] = `file:${next}`
           changed = true
         }
       }

@@ -4,7 +4,7 @@
  * profile install-into. `runPnpm` is mocked so network/FS side effects stay out.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import AdmZip from 'adm-zip'
@@ -513,7 +513,9 @@ describe('legacy migration', () => {
       spy.mockRestore()
     }
     const profileManifest = JSON.parse(readFileSync(join(profDir, 'prof', 'package.json'), 'utf8'))
-    expect(profileManifest.dependencies.app).toBe(`link:${join(store(), 'archive', 'app', '1.0.0', 'node_modules', 'app')}`)
+    // Retargeted to the archived copy via `file:`, matching today's installIntoProfile
+    // (a `link:` back to the store would keep dsh peers resolving up the store tree).
+    expect(profileManifest.dependencies.app).toBe(`file:${join(store(), 'archive', 'app', '1.0.0', 'node_modules', 'app')}`)
     expect(listPlugins(store())).toContainEqual({ name: 'app', version: '1.0.0' })
   })
 
@@ -551,6 +553,26 @@ describe('legacy migration', () => {
     await migrateStore(store())
     expect(needsStoreMigration(store())).toBe(false)
     expect(listPlugins(store())).toHaveLength(2)
+  })
+
+  it('migrateStore copies a symlinked pnpm package BODY, not the link', async () => {
+    // A real v0.1.4 flat package sits at node_modules/<name> as a pnpm SYMLINK
+    // into .pnpm, not a real directory. The migration must copy the resolved
+    // body, not the link — copying the link (cpSync default) throws EPERM on
+    // Windows (or leaves a dangling archive → the package never migrates).
+    const realBody = join(root, 'realbody', 'legacy-link')
+    mkPkg(realBody, '1.0.0', { name: 'legacy-link' })
+    mkdirSync(join(store(), 'node_modules'), { recursive: true })
+    symlinkSync(realBody, join(store(), 'node_modules', 'legacy-link'), 'junction')
+    writeFileSync(join(store(), 'package.json'), JSON.stringify({ name: 'plugin-store', private: true, dependencies: { 'legacy-link': '^1.0.0' } }))
+    mockSourceInstall()
+    await migrateStore(store())
+    // The archived package body (copied by cpSync) is real content with the right
+    // version — a copied-symlink archive would carry no resolvable package.json here.
+    const copiedSrc = join(store(), 'archive', 'legacy-link', '1.0.0', '.src')
+    expect(JSON.parse(readFileSync(join(copiedSrc, 'package.json'), 'utf8')).version).toBe('1.0.0')
+    expect(listPlugins(store())).toContainEqual({ name: 'legacy-link', version: '1.0.0' })
+    expect(needsStoreMigration(store())).toBe(false)
   })
 
   it('falls back to an online reinstall when the offline cache misses', async () => {
