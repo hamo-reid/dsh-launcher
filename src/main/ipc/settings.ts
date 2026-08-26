@@ -6,11 +6,12 @@ import { askOnCloseEnabled, closeToTrayEnabled, loadSettings, saveSettings } fro
 import { dshVersionDir, pluginDir, readDshState, shouldRunOnboarding } from '../core/appState.ts'
 import { failFromError } from '../core/errors.ts'
 import { checkHealth } from '../core/health.ts'
+import { checkAppUpdate } from '../core/github-updates.ts'
 import { nodeEnvironment } from '../core/node-env.ts'
 import { nodePreferenceValue } from '../core/settings.ts'
 import { setPluginStoreDir } from './plugins.ts'
 import { setVersionDirValue } from './dsh.ts'
-import type { HealthIssue, IpcResult, NodeEnvironment, OnboardingPayload, OnboardingState } from '../../shared/types.ts'
+import type { AppUpdateInfo, HealthIssue, IpcResult, NodeEnvironment, OnboardingPayload, OnboardingState } from '../../shared/types.ts'
 
 export function registerSettingsIpc(): void {
   ipcMain.handle('settings:getUiLanguage', (): IpcResult<string | null> => {
@@ -156,6 +157,16 @@ export function registerSettingsIpc(): void {
   ipcMain.handle('app:version', (): IpcResult<string> => {
     try {
       return { ok: true, value: app.getVersion() }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Whether a newer launcher release exists on GitHub (About page). Network/API
+  // failures surface as a retryable error, not a wrong "up to date".
+  ipcMain.handle('app:checkUpdate', async (): Promise<IpcResult<AppUpdateInfo>> => {
+    try {
+      return { ok: true, value: await checkAppUpdate(app.getVersion()) }
     } catch (error) {
       return failFromError(error)
     }
