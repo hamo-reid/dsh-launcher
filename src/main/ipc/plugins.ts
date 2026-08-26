@@ -16,6 +16,7 @@ import { dshScopes, pluginDir, readDshState } from '../core/appState.ts'
 import { loadSettings, saveSettings } from '../core/settings.ts'
 import { inlineRelativeImages } from '../core/app-util.ts'
 import { fetchPackageVersions, npmSearch } from '../core/npm.ts'
+import { attachPluginSizes } from '../core/store-overview.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
 import { pathIdentifierInvalid, versionInvalid } from './validate.ts'
 import type { ComboPlugin, DownloadSessionInfo, InstalledOverviewRow, IpcResult, NpmSearchHit, PackageVersionInfo, PluginUsagePoint } from '../../shared/types.ts'
@@ -186,6 +187,20 @@ export function registerPluginsIpc(): void {
   ipcMain.handle('plugins:overview', (): IpcResult<InstalledOverviewRow[]> => {
     try {
       return { ok: true, value: buildInstalledOverview(dshScopes(), pluginDir()) }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Size statistics are MANUAL (triggered by the "calculate sizes" button), not
+  // computed on every overview load: walking each archived node_modules is costly.
+  ipcMain.handle('plugins:calcSizes', (): IpcResult<Record<string, number>> => {
+    try {
+      const rows = buildInstalledOverview(dshScopes(), pluginDir())
+      attachPluginSizes(rows, dshScopes(), pluginDir())
+      const sizes: Record<string, number> = {}
+      for (const row of rows) if (row.sizeBytes !== undefined) sizes[row.name] = row.sizeBytes
+      return { ok: true, value: sizes }
     } catch (error) {
       return failFromError(error)
     }

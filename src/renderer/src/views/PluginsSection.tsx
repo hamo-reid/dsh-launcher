@@ -30,6 +30,15 @@ function fmtDate(iso: string): string {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString()
 }
 
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let v = n
+  let i = -1
+  do { v /= 1024; i++ } while (v >= 1024 && i < units.length - 1)
+  return `${v.toFixed(v >= 100 ? 0 : 1)} ${units[i]}`
+}
+
 /** 插件管理页：总览、下载中心、安装；详情 / 安装到 profile / 下载版本弹窗在 `PluginsModals`。
  * 下载中心：实时搜索（防抖）+ 分页加载更多 + 在库标记 + 可选版本下载。 */
 export default function PluginsSection() {
@@ -45,6 +54,9 @@ export default function PluginsSection() {
   const [overview, setOverview] = useState<InstalledOverviewRow[]>([])
   const [target, setTarget] = useState<InstalledOverviewRow | null>(null)
   const [overviewLoading, setOverviewLoading] = useState(false)
+  // On-disk sizes, filled only when the user triggers the manual "calculate sizes".
+  const [sizeMap, setSizeMap] = useState<Record<string, number>>({})
+  const [sizeLoading, setSizeLoading] = useState(false)
   // Store plugin names whose node_modules dir is missing on disk (stale).
   const [staleStoreNames, setStaleStoreNames] = useState<Set<string>>(new Set())
 
@@ -194,6 +206,16 @@ export default function PluginsSection() {
     if (!r.ok) void message.error(apiErrorText(r))
   }
 
+  // Sizes are an explicit user action (walking each archived node_modules is costly),
+  // so they are NOT recomputed on every overview load.
+  const calcSizes = async (): Promise<void> => {
+    setSizeLoading(true)
+    const r = await window.api.plugins.calcSizes()
+    setSizeLoading(false)
+    if (!r.ok) { void message.error(apiErrorText(r)); return }
+    setSizeMap(r.value)
+  }
+
   const install = (): void => {
     const s = source.trim()
     if (s === '') return
@@ -222,6 +244,8 @@ export default function PluginsSection() {
 
   const overviewQ = search.trim().toLowerCase()
   const filteredOverview = overviewQ === '' ? overview : overview.filter(x => x.name.toLowerCase().includes(overviewQ))
+  // Sizes start unsorted (none computed); after a manual calc, default sort desc.
+  const sizeLoaded = Object.keys(sizeMap).length > 0
 
   return (
     <>
@@ -241,13 +265,18 @@ export default function PluginsSection() {
           <SectionHeading title={t('plugin.overview.title', { count: filteredOverview.length })} />
           {dirMissing && <Alert type="warning" showIcon message={t('plugin.dirMissing')} />}
           <Panel>
-          <Input
-            allowClear
-            placeholder={t('plugin.overview.searchPlaceholder')}
-            value={search}
-            onChange={event => setSearch(event.target.value)}
-            style={{ maxWidth: 280, marginBottom: token.paddingSM }}
-          />
+          <Space style={{ marginBottom: token.paddingSM }} wrap>
+            <Input
+              allowClear
+              placeholder={t('plugin.overview.searchPlaceholder')}
+              value={search}
+              onChange={event => setSearch(event.target.value)}
+              style={{ maxWidth: 280 }}
+            />
+            <Button loading={sizeLoading} onClick={() => void calcSizes()}>
+              {t('plugin.overview.calcSize')}
+            </Button>
+          </Space>
           <Table
             size="small"
             rowKey="name"
@@ -278,6 +307,17 @@ export default function PluginsSection() {
                 width: 140,
                 ellipsis: { showTitle: false },
                 render: (versions: string[]) => <span title={versions.join('、')}>{versionCell(versions)}</span>,
+              },
+              {
+                title: t('plugin.overview.colSize'),
+                key: 'size',
+                width: 110,
+                defaultSortOrder: sizeLoaded ? ('descend' as const) : undefined,
+                sorter: (a: InstalledOverviewRow, b: InstalledOverviewRow) => (sizeMap[a.name] ?? 0) - (sizeMap[b.name] ?? 0),
+                render: (_: unknown, r: InstalledOverviewRow) => {
+                  const bytes = sizeMap[r.name]
+                  return <span>{bytes !== undefined ? fmtBytes(bytes) : '-'}</span>
+                },
               },
               {
                 title: t('plugin.overview.colSource'),
@@ -435,6 +475,7 @@ export default function PluginsSection() {
       target={target}
       busy={busy}
       storeVersions={target !== null ? storeMap.get(target.name) ?? [] : []}
+      sizeBytes={target !== null ? sizeMap[target.name] : undefined}
       onClose={() => setTarget(null)}
       onUninstall={name => void uninstall(name)}
       onUninstallVersion={(name, version) => void uninstallVersion(name, version)}

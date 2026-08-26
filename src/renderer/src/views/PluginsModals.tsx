@@ -35,6 +35,24 @@ function PluginReadme({ text, dir }: { text: string; dir: string }): JSX.Element
   )
 }
 
+/** Semantically-coloured source tags — mirrors PluginsSection. */
+const SOURCE_COLORS: Record<string, string> = {
+  github: 'green',
+  npm: 'blue',
+  local: 'cyan',
+  dsh: 'purple',
+  store: 'default',
+}
+
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let v = n
+  let i = -1
+  do { v /= 1024; i++ } while (v >= 1024 && i < units.length - 1)
+  return `${v.toFixed(v >= 100 ? 0 : 1)} ${units[i]}`
+}
+
 // ── Plugin detail: usage + README ──────────────────────────────────────────
 
 interface PluginDetailModalProps {
@@ -43,6 +61,8 @@ interface PluginDetailModalProps {
   /** Archived versions of the plugin in the store — the ones a single-version
    * delete operates on. */
   storeVersions: string[]
+  /** Real on-disk size from the overview's manual size calc, when computed. */
+  sizeBytes?: number
   onClose: () => void
   onUninstall: (name: string) => void
   onUninstallVersion: (name: string, version: string) => void
@@ -104,9 +124,12 @@ export function PluginDetailModal(p: PluginDetailModalProps): JSX.Element {
           children: (
             <Space direction="vertical" style={{ width: '100%' }} size="middle">
               <Space wrap>
-                {target?.inStore === true && <Tag color="blue">{t('plugin.detail.storeTag')}</Tag>}
-                {target?.builtin === true && <Tag color="purple">{t('plugin.detail.builtin')}</Tag>}
+                {(target?.sources ?? []).map(s => (
+                  <Tag key={s} color={SOURCE_COLORS[s] ?? 'default'}>{t(`plugin.source.${s}`)}</Tag>
+                ))}
+                {(target?.sources.length ?? 0) === 0 && <span style={{ color: token.colorTextTertiary }}>-</span>}
                 <Tag>{t('plugin.detail.usageCount', { count: target?.usage.length ?? 0 })}</Tag>
+                {p.sizeBytes !== undefined && <Tag>{t('plugin.detail.size')}: {fmtBytes(p.sizeBytes)}</Tag>}
               </Space>
               <div>
                 <FieldLabel>{t('plugin.detail.versionsLabel')}</FieldLabel>
