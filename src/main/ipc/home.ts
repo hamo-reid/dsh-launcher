@@ -1,6 +1,6 @@
 /** IPC for the machine-level home patch layer (`home:*`). */
 
-import { ipcMain } from 'electron'
+import { handle } from './handle.ts'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { homePatchPath } from '../core/home.ts'
 import { setRowDisabled } from '../core/patch.ts'
@@ -11,7 +11,7 @@ import type { IpcResult } from '../../shared/types.ts'
 
 export function registerHomeIpc(): void {
   // Machine-level, shared by every profile; composes after each profile patch.
-  ipcMain.handle('home:setDisabled', (_event, id: string, disabled: boolean): IpcResult<boolean> => {
+  handle('home:setDisabled', (_event, id: string, disabled: boolean): IpcResult<boolean> => {
     try {
       if (rowIdInvalid(id)) return fail(E.nameInvalid)
       const path = homePatchPath()

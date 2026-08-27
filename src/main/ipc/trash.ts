@@ -1,13 +1,13 @@
 /** IPC for the profile trash (`trash:*`): list, restore, delete, empty. */
 
-import { ipcMain } from 'electron'
+import { handle } from './handle.ts'
 import { deleteTrashItem, emptyTrash, listTrashItems, restoreTrashItem } from '../core/trash.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
 import { pathIdentifierInvalid } from './validate.ts'
 import type { IpcResult, TrashItem } from '../../shared/types.ts'
 
 export function registerTrashIpc(): void {
-  ipcMain.handle('trash:list', (): IpcResult<TrashItem[]> => {
+  handle('trash:list', (): IpcResult<TrashItem[]> => {
     try {
       return { ok: true, value: listTrashItems() }
     } catch (error) {
@@ -15,7 +15,7 @@ export function registerTrashIpc(): void {
     }
   })
 
-  ipcMain.handle('trash:restore', (_event, name: string): IpcResult<boolean> => {
+  handle('trash:restore', (_event, name: string): IpcResult<boolean> => {
     try {
       // A path-identifer that could escape `<trashDir>` (../, \, absolute) must
       // never reach a join + rename under the trash root.
@@ -27,7 +27,7 @@ export function registerTrashIpc(): void {
     }
   })
 
-  ipcMain.handle('trash:delete', (_event, name: string): IpcResult<boolean> => {
+  handle('trash:delete', (_event, name: string): IpcResult<boolean> => {
     try {
       if (pathIdentifierInvalid(name)) return fail(E.nameInvalid)
       deleteTrashItem(name)
@@ -37,7 +37,7 @@ export function registerTrashIpc(): void {
     }
   })
 
-  ipcMain.handle('trash:empty', (): IpcResult<number> => {
+  handle('trash:empty', (): IpcResult<number> => {
     try {
       return { ok: true, value: emptyTrash() }
     } catch (error) {

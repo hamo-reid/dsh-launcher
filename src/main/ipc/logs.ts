@@ -1,12 +1,13 @@
 /** IPC for the log system (`logs:*`) — reveal the log directory in the OS
  * file explorer. */
 
-import { ipcMain, shell } from 'electron'
+import { shell } from 'electron'
+import { handle } from './handle.ts'
 import { logsDirectory } from '../core/logger.ts'
 import type { IpcResult } from '../../shared/types.ts'
 
 export function registerLogsIpc(): void {
-  ipcMain.handle('logs:reveal', async (): Promise<IpcResult<boolean>> => {
+  handle('logs:reveal', async (): Promise<IpcResult<boolean>> => {
     try {
       const dir = logsDirectory()
       if (dir === '') return { ok: false, code: 'logs.notInitialized', error: 'logs dir not initialized' }

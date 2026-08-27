@@ -2,7 +2,7 @@
  * picker, and install-target resolution. Business logic lives in market.ts;
  * this file only wires the channels and reports failures the launcher way. */
 
-import { ipcMain } from 'electron'
+import { handle } from './handle.ts'
 import { installSpecFor, marketSourceState, pageCatalog, resolveMarket, setMarketSourceState } from '../core/market.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
 import type { IpcResult, MarketCatalog, MarketListOpts, MarketPage, MarketSourceState } from '../../shared/types.ts'
@@ -17,7 +17,7 @@ import type { IpcResult, MarketCatalog, MarketListOpts, MarketPage, MarketSource
 let catalog: MarketCatalog | null = null
 
 export function registerMarketIpc(): void {
-  ipcMain.handle('market:list', async (_event, opts: MarketListOpts = {}): Promise<IpcResult<MarketPage>> => {
+  handle('market:list', async (_event, opts: MarketListOpts = {}): Promise<IpcResult<MarketPage>> => {
     try {
       const state = opts.source !== undefined
         ? opts.source
@@ -33,7 +33,7 @@ export function registerMarketIpc(): void {
     }
   })
 
-  ipcMain.handle('market:source', (): IpcResult<MarketSourceState> => {
+  handle('market:source', (): IpcResult<MarketSourceState> => {
     try {
       return { ok: true, value: marketSourceState() }
     } catch (error) {
@@ -41,7 +41,7 @@ export function registerMarketIpc(): void {
     }
   })
 
-  ipcMain.handle('market:setSource', (_event, next: MarketSourceState): IpcResult<boolean> => {
+  handle('market:setSource', (_event, next: MarketSourceState): IpcResult<boolean> => {
     try {
       const ok = setMarketSourceState(next)
       // A persisted route change invalidates whatever catalog we held.
@@ -52,7 +52,7 @@ export function registerMarketIpc(): void {
     }
   })
 
-  ipcMain.handle('market:resolve', async (_event, url: string) => {
+  handle('market:resolve', async (_event, url: string) => {
     try {
       if (typeof url !== 'string' || url === '') return fail(E.marketEntryNotFound)
       const plugin = catalog?.plugins.find(p => p.url === url) ?? null

@@ -2,7 +2,8 @@
  * Owns the single running child-process state that the window lifecycle also
  * consults before closing. */
 
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, shell } from 'electron'
+import { handle } from './handle.ts'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -11,7 +12,7 @@ import { nodeEnvironment } from '../core/node-env.ts'
 import { nodePreferenceValue } from '../core/settings.ts'
 import { activeDshEntry } from '../core/appState.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
-import { logger } from '../core/logger.ts'
+import { child, logger } from '../core/logger.ts'
 import type { IpcResult, RunEvent } from '../../shared/types.ts'
 
 /** The currently running embedded profile runtime (single instance). */
@@ -34,6 +35,19 @@ let intentionalStop = false
  * the console without losing what the process already printed. */
 let runLog = ''
 const RUN_LOG_CAP = 512 * 1024
+
+/** Domain-tagged logger for the running dsh's live output (`{domain:"dsh-run"}`). */
+const dshRunLog = child('dsh-run')
+
+/** Mirror the dsh child's live stdout/stderr into the main log (Debug). On with
+ * `DSH_RUN_TRACE=1`, or when any level env pins a sink to `debug` — so a crash or
+ * a confusing console transcript stays recoverable from the archive. Off by
+ * default to keep a normal run's footprint small. */
+function dshRunTrace(): boolean {
+  if (process.env.DSH_RUN_TRACE === '1') return true
+  return [process.env.DSH_LOG_CONSOLE_LEVEL, process.env.DSH_LOG_LEVEL, process.env.DSH_LOG_FILE_LEVEL]
+    .some(level => level === 'debug')
+}
 
 /** The currently running child, for the window-close guard. */
 export function currentRun(): RuntimeState | null {
@@ -123,7 +137,7 @@ function launchShellWindow(exe: string, argv: string[], env: NodeJS.ProcessEnv, 
 }
 
 export function registerRunIpc(): void {
-  ipcMain.handle('run:start', (_event, profile: string, mode: 'app' | 'shell' = 'app'): IpcResult<boolean> => {
+  handle('run:start', (_event, profile: string, mode: 'app' | 'shell' = 'app'): IpcResult<boolean> => {
     if (running !== null) return fail(E.runAlreadyRunning, { profile: running.profile })
     const entry = activeDshEntry()
     if (entry === undefined) return fail(E.needActiveDsh)
@@ -158,7 +172,7 @@ export function registerRunIpc(): void {
         // A user-initiated abort is a normal stop, not a failure.
         if (intentionalStop) { code = 0; signal = null }
         intentionalStop = false
-        logger.info(`run exited: ${running?.profile ?? '?'} (code ${String(code)}${signal ? `, sig ${signal}` : ''})`)
+        logger.info(`run exited: ${profile} (code ${String(code)}${signal ? `, sig ${signal}` : ''})`)
         broadcastRun({ type: 'exited', code, signal, command: runCommand })
         running = null
         notifyRunState()
@@ -190,8 +204,13 @@ export function registerRunIpc(): void {
         const homeBanner = `\n[\x1b[36mhome\x1b[0m] DSH_HOME = ${entry.home}\n`
         runLog = homeBanner
         broadcastRun({ type: 'output', line: homeBanner })
+        const mirrorRun = dshRunTrace()
         const onOutput = (data: Buffer): void => {
           const line = data.toString('utf8')
+          if (mirrorRun) {
+            const trimmed = line.trimEnd()
+            if (trimmed !== '') dshRunLog.debug(trimmed)
+          }
           runLog += line
           if (runLog.length > RUN_LOG_CAP) runLog = runLog.slice(-RUN_LOG_CAP)
           broadcastRun({ type: 'output', line })
@@ -210,7 +229,7 @@ export function registerRunIpc(): void {
     }
   })
 
-  ipcMain.handle('run:stop', (): IpcResult<boolean> => {
+  handle('run:stop', (): IpcResult<boolean> => {
     if (running === null) return fail(E.runNotRunning)
     logger.info(`run stopped: ${running.profile}`)
     intentionalStop = true
@@ -218,19 +237,19 @@ export function registerRunIpc(): void {
     return { ok: true, value: true }
   })
 
-  ipcMain.handle('run:state', (): IpcResult<{ running: boolean; profile?: string }> => {
+  handle('run:state', (): IpcResult<{ running: boolean; profile?: string }> => {
     return { ok: true, value: running ? { running: true, profile: running.profile } : { running: false } }
   })
 
-  ipcMain.handle('run:command', (): IpcResult<string> => {
+  handle('run:command', (): IpcResult<string> => {
     return { ok: true, value: runCommand }
   })
 
-  ipcMain.handle('run:logs', (): IpcResult<string> => {
+  handle('run:logs', (): IpcResult<string> => {
     return { ok: true, value: runLog }
   })
 
-  ipcMain.handle('run:input', (_event, line: string): IpcResult<boolean> => {
+  handle('run:input', (_event, line: string): IpcResult<boolean> => {
     if (running === null) return fail(E.runNotRunning)
     try {
       running.child.stdin?.write(`${line}\n`)
@@ -243,7 +262,7 @@ export function registerRunIpc(): void {
   // Open a surfaced URL with the system default handler (never a bare anchor).
   // Only http(s) is allowed — a console line must not be able to open arbitrary
   // local paths or protocols.
-  ipcMain.handle('openExternal', (_event, url: string): IpcResult<boolean> => {
+  handle('openExternal', (_event, url: string): IpcResult<boolean> => {
     try {
       if (!/^https?:\/\/\S+$/.test(url)) return fail(E.runOpenHttpOnly)
       void shell.openExternal(url)

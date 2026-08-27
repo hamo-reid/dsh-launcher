@@ -1,10 +1,11 @@
 /** IPC for app-level UI preferences + the first-run onboarding wizard
  * (`settings:*`). */
 
-import { app, ipcMain, dialog } from 'electron'
+import { app, dialog } from 'electron'
 import { askOnCloseEnabled, closeToTrayEnabled, loadSettings, saveSettings } from '../core/settings.ts'
 import { dshVersionDir, pluginDir, readDshState, shouldRunOnboarding } from '../core/appState.ts'
 import { failFromError } from '../core/errors.ts'
+import { handle } from './handle.ts'
 import { checkHealth } from '../core/health.ts'
 import { checkAppUpdate } from '../core/github-updates.ts'
 import { nodeEnvironment } from '../core/node-env.ts'
@@ -14,7 +15,7 @@ import { setVersionDirValue } from './dsh.ts'
 import type { AppUpdateInfo, HealthIssue, IpcResult, NodeEnvironment, OnboardingPayload, OnboardingState } from '../../shared/types.ts'
 
 export function registerSettingsIpc(): void {
-  ipcMain.handle('settings:getUiLanguage', (): IpcResult<string | null> => {
+  handle('settings:getUiLanguage', (): IpcResult<string | null> => {
     try {
       return { ok: true, value: loadSettings().uiLanguage ?? null }
     } catch (error) {
@@ -22,7 +23,7 @@ export function registerSettingsIpc(): void {
     }
   })
 
-  ipcMain.handle('settings:setUiLanguage', (_event, lng: string): IpcResult<boolean> => {
+  handle('settings:setUiLanguage', (_event, lng: string): IpcResult<boolean> => {
     try {
       saveSettings({ ...loadSettings(), uiLanguage: lng })
       return { ok: true, value: true }
@@ -31,7 +32,7 @@ export function registerSettingsIpc(): void {
     }
   })
 
-  ipcMain.handle('settings:getCloseToTray', (): IpcResult<boolean> => {
+  handle('settings:getCloseToTray', (): IpcResult<boolean> => {
     try {
       return { ok: true, value: closeToTrayEnabled() }
     } catch (error) {
@@ -39,7 +40,7 @@ export function registerSettingsIpc(): void {
     }
   })
 
-  ipcMain.handle('settings:setCloseToTray', (_event, enabled: boolean): IpcResult<boolean> => {
+  handle('settings:setCloseToTray', (_event, enabled: boolean): IpcResult<boolean> => {
     try {
       saveSettings({ ...loadSettings(), closeToTray: enabled })
       return { ok: true, value: true }
@@ -48,7 +49,7 @@ export function registerSettingsIpc(): void {
     }
   })
 
-  ipcMain.handle('settings:getAskOnClose', (): IpcResult<boolean> => {
+  handle('settings:getAskOnClose', (): IpcResult<boolean> => {
     try {
       return { ok: true, value: askOnCloseEnabled() }
     } catch (error) {
@@ -56,7 +57,7 @@ export function registerSettingsIpc(): void {
     }
   })
 
-  ipcMain.handle('settings:setAskOnClose', (_event, enabled: boolean): IpcResult<boolean> => {
+  handle('settings:setAskOnClose', (_event, enabled: boolean): IpcResult<boolean> => {
     try {
       saveSettings({ ...loadSettings(), askOnClose: enabled })
       return { ok: true, value: true }
@@ -66,7 +67,7 @@ export function registerSettingsIpc(): void {
   })
 
   /** Bundled / system Node detection + which one dsh launches with. */
-  ipcMain.handle('settings:getNodeEnvironment', (): IpcResult<NodeEnvironment> => {
+  handle('settings:getNodeEnvironment', (): IpcResult<NodeEnvironment> => {
     try {
       return { ok: true, value: nodeEnvironment(nodePreferenceValue()) }
     } catch (error) {
@@ -75,7 +76,7 @@ export function registerSettingsIpc(): void {
   })
 
   /** Persist the preferred node for launching dsh (`'system'` | `'bundled'`). */
-  ipcMain.handle('settings:setNodePreference', (_event, preference: 'system' | 'bundled'): IpcResult<boolean> => {
+  handle('settings:setNodePreference', (_event, preference: 'system' | 'bundled'): IpcResult<boolean> => {
     try {
       const value = preference === 'bundled' ? 'bundled' : 'system'
       saveSettings({ ...loadSettings(), nodePreference: value })
@@ -85,7 +86,7 @@ export function registerSettingsIpc(): void {
     }
   })
 
-  ipcMain.handle('settings:getOnboardingState', (): IpcResult<OnboardingState> => {
+  handle('settings:getOnboardingState', (): IpcResult<OnboardingState> => {
     try {
       return {
         ok: true,
@@ -101,7 +102,7 @@ export function registerSettingsIpc(): void {
 
   /** Let the renderer ask for a folder via the native picker (create-allowed).
    * Returns the chosen path, or `''` when cancelled. */
-  ipcMain.handle('settings:pickDir', async (_event, opts: { title?: string; defaultPath?: string } = {}): Promise<IpcResult<string>> => {
+  handle('settings:pickDir', async (_event, opts: { title?: string; defaultPath?: string } = {}): Promise<IpcResult<string>> => {
     try {
       const picked = await dialog.showOpenDialog({
         title: opts.title,
@@ -116,7 +117,7 @@ export function registerSettingsIpc(): void {
 
   /** Persist the wizard's choices and mark onboarding complete. Reuses the same
    * directory-save rules as the settings page (`plugins:setDir` / `dsh:setVersionDir`). */
-  ipcMain.handle('settings:completeOnboarding', (_event, payload: OnboardingPayload): IpcResult<boolean> => {
+  handle('settings:completeOnboarding', (_event, payload: OnboardingPayload): IpcResult<boolean> => {
     try {
       const { uiLanguage, pluginDir, dshVersionDir } = payload ?? {}
       if (typeof pluginDir === 'string' && pluginDir.trim() !== '') {
@@ -145,7 +146,7 @@ export function registerSettingsIpc(): void {
 
   /** Path health: does what the app recorded still exist on disk (dsh executables,
    * store dir, store plugins)? Drives the top "disk vs. app" sync banner. */
-  ipcMain.handle('settings:checkHealth', (): IpcResult<HealthIssue[]> => {
+  handle('settings:checkHealth', (): IpcResult<HealthIssue[]> => {
     try {
       return { ok: true, value: checkHealth(readDshState().dshes, pluginDir()) }
     } catch (error) {
@@ -154,7 +155,7 @@ export function registerSettingsIpc(): void {
   })
 
   // The packaged app version, for the About page.
-  ipcMain.handle('app:version', (): IpcResult<string> => {
+  handle('app:version', (): IpcResult<string> => {
     try {
       return { ok: true, value: app.getVersion() }
     } catch (error) {
@@ -164,7 +165,7 @@ export function registerSettingsIpc(): void {
 
   // Whether a newer launcher release exists on GitHub (About page). Network/API
   // failures surface as a retryable error, not a wrong "up to date".
-  ipcMain.handle('app:checkUpdate', async (): Promise<IpcResult<AppUpdateInfo>> => {
+  handle('app:checkUpdate', async (): Promise<IpcResult<AppUpdateInfo>> => {
     try {
       return { ok: true, value: await checkAppUpdate(app.getVersion()) }
     } catch (error) {

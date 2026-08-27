@@ -2,7 +2,8 @@
  * Thin wrapper over `core/home-data`: pick a file with the native dialog, then
  * archive / restore / mirror the dsh's migratable home data + profiles. */
 
-import { dialog, ipcMain } from 'electron'
+import { dialog } from 'electron'
+import { handle } from './handle.ts'
 import AdmZip from 'adm-zip'
 import { contextForEntry, readDshState, type DshContext } from '../core/appState.ts'
 import { exportDshData, importDshData, mirrorDshData } from '../core/home-data.ts'
@@ -18,7 +19,7 @@ function entryFor(id: string): { entry: DshEntry; ctx: DshContext } | undefined 
 
 export function registerHomeDataIpc(): void {
   // Export a dsh's migratable data to a user-chosen zip. `''` when cancelled.
-  ipcMain.handle('data:export', async (_event, id: string): Promise<IpcResult<string>> => {
+  handle('data:export', async (_event, id: string): Promise<IpcResult<string>> => {
     try {
       const s = entryFor(id)
       if (s === undefined) return fail(E.dshNotFound)
@@ -37,7 +38,7 @@ export function registerHomeDataIpc(): void {
 
   // Let the user pick an archive and read its manifest (for the cross-version
   // gate before import). `file` is `''` when cancelled.
-  ipcMain.handle('data:inspectImport', async (): Promise<IpcResult<{ file: string; manifest: DshDataManifest | null }>> => {
+  handle('data:inspectImport', async (): Promise<IpcResult<{ file: string; manifest: DshDataManifest | null }>> => {
     try {
       const picked = await dialog.showOpenDialog({
         title: '选择要导入的 DSH 数据包',
@@ -60,7 +61,7 @@ export function registerHomeDataIpc(): void {
   })
 
   // Import an archive into a dsh's home. Cross-major requires `forceDsh`.
-  ipcMain.handle('data:import', (_event, id: string, file: string, forceDsh?: boolean): IpcResult<DshDataImportResult> => {
+  handle('data:import', (_event, id: string, file: string, forceDsh?: boolean): IpcResult<DshDataImportResult> => {
     try {
       const s = entryFor(id)
       if (s === undefined) return fail(E.dshNotFound)
@@ -72,7 +73,7 @@ export function registerHomeDataIpc(): void {
 
   // Directly mirror one dsh's data into another dsh's home (no zip). The UI
   // gates the cross-major confirmation against both versions beforehand.
-  ipcMain.handle('data:mirror', (_event, sourceId: string, targetId: string): IpcResult<DshDataImportResult> => {
+  handle('data:mirror', (_event, sourceId: string, targetId: string): IpcResult<DshDataImportResult> => {
     try {
       const src = entryFor(sourceId)
       const tgt = entryFor(targetId)
