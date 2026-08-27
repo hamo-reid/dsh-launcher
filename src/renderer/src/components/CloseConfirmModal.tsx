@@ -35,20 +35,20 @@ export default function CloseConfirmModal(p: CloseConfirmModalProps): JSX.Elemen
       onCancel={p.onClose}
       footer={null}
       width={MODAL.narrow}
-      destroyOnClose
+      destroyOnHidden
       // No mount/close animation: resolving must collapse the modal instantly
       // even when the window is about to be hidden (rAF/transition are throttled
       // for a hidden window and would otherwise leave the prompt hanging).
       transitionName=""
       maskTransitionName=""
-      maskClosable={false}
+      mask={{ closable: false }}
     >
-      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
         {p.running !== undefined && (
-          <Alert type="warning" showIcon message={t('window.close.runningWarn', { profile: p.running })} />
+          <Alert type="warning" showIcon title={t('window.close.runningWarn', { profile: p.running })} />
         )}
 
-        <Space direction="vertical" style={{ width: '100%' }}>
+        <Space orientation="vertical" style={{ width: '100%' }}>
           <button
             type="button"
             onClick={() => resolve('tray')}

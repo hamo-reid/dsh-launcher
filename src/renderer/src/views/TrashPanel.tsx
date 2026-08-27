@@ -26,7 +26,7 @@ export default function TrashPanel({ item, onRestore, onRemove }: TrashPanelProp
   const { token } = theme.useToken()
   const date = item.deletedAt !== '' ? new Date(item.deletedAt).toLocaleString() : t('common.unknown')
   return (
-    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+    <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
       <SectionHeading title={item.name} description={t('trash.deletedAtAtSize', { date, size: fmtBytes(item.sizeBytes) })} />
 
       <div>

@@ -122,7 +122,7 @@ export function PluginDetailModal(p: PluginDetailModalProps): JSX.Element {
           key: 'usage',
           label: t('plugin.detail.usageTab'),
           children: (
-            <Space direction="vertical" style={{ width: '100%' }} size="middle">
+            <Space orientation="vertical" style={{ width: '100%' }} size="middle">
               <Space wrap>
                 {(target?.sources ?? []).map(s => (
                   <Tag key={s} color={SOURCE_COLORS[s] ?? 'default'}>{t(`plugin.source.${s}`)}</Tag>
@@ -263,7 +263,7 @@ export function InstallToProfileModal(p: InstallToProfileModalProps): JSX.Elemen
   return (
     <Modal title={t('plugin.install.title', { name: p.installPkg ?? '' })} open={p.installPkg !== null} okText={t('plugin.install.install')} onOk={() => void doInstall()}
       okButtonProps={{ disabled: installProfile === undefined }} onCancel={() => { p.onClose(); setInstallDsh(undefined); setInstallProfile(undefined) }}
-      confirmLoading={installing} destroyOnClose width={MODAL.narrow}>
+      confirmLoading={installing} destroyOnHidden width={MODAL.narrow}>
       <div style={{ marginBottom: 10, color: 'inherit' }}>
         {t('plugin.install.prompt', { name: p.installPkg ?? '' })}
       </div>
@@ -336,10 +336,10 @@ export function DownloadVersionModal(p: DownloadVersionModalProps): JSX.Element 
       okText={t('plugin.version.download')} onOk={() => void doDownload()} confirmLoading={installing}
       okButtonProps={{ disabled: version === undefined || loading || info === null }}
       width={MODAL.narrow}>
-      <Space direction="vertical" style={{ width: '100%' }} size="small">
+      <Space orientation="vertical" style={{ width: '100%' }} size="small">
         {loading && <div style={{ color: 'inherit' }}><Spin size="small" />　{t('plugin.version.loading')}</div>}
 
-        {error !== '' && <Alert type="error" showIcon message={error} />}
+        {error !== '' && <Alert type="error" showIcon title={error} />}
 
         {info !== null && !loading && (
           <>

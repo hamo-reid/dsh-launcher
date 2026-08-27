@@ -172,7 +172,7 @@ export default function App() {
       {issues.length > 0 && (
         <div style={{ padding: '8px 16px', borderBottom: `1px solid ${token.colorSplit}` }}>
           <Alert type="warning" showIcon closable onClose={() => setIssues([])}
-            message={(
+            title={(
               <Space style={{ width: '100%', justifyContent: 'space-between' }}>
                 <span>{t('health.summary', { count: issues.length })}</span>
                 <Space>
@@ -219,7 +219,7 @@ export default function App() {
       <Modal
         open
         closable={false}
-        maskClosable={false}
+        mask={{ closable: false }}
         keyboard={false}
         title={t('store.migration.title')}
         okText={t('store.migration.ok')}

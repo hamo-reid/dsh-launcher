@@ -16,7 +16,7 @@ interface ScrollModalProps {
   onOk?: () => void | Promise<void>
   okDisabled?: boolean
   confirmLoading?: boolean
-  destroyOnClose?: boolean
+  destroyOnHidden?: boolean
   /** Scroll-body max height: 'md' (420px) | 'lg' (60vh) | explicit px number. */
   bodyMax?: BodyHeight
 }
@@ -27,7 +27,7 @@ interface ScrollModalProps {
  */
 export default function ScrollModal({
   title, open, onCancel, children, width, footer, okText, onOk,
-  okDisabled, confirmLoading, destroyOnClose, bodyMax = 'md',
+  okDisabled, confirmLoading, destroyOnHidden, bodyMax = 'md',
 }: ScrollModalProps) {
   const height = typeof bodyMax === 'number' ? `${bodyMax}px` : BODY_HS[bodyMax]
   return (
@@ -37,14 +37,14 @@ export default function ScrollModal({
       onCancel={onCancel}
       // These scroll-body dialogs hold long interactive lists (e.g. dnd-kit bundle
       // reorder); a click on the mask that escapes the content must not close one.
-      maskClosable={false}
+      mask={{ closable: false }}
       width={width}
       footer={footer}
       okText={okText}
       onOk={onOk}
       okButtonProps={okDisabled !== undefined ? { disabled: okDisabled } : undefined}
       confirmLoading={confirmLoading}
-      destroyOnClose={destroyOnClose}
+      destroyOnHidden={destroyOnHidden}
     >
       <div style={{ maxHeight: height, overflowY: 'auto', overflowX: 'hidden' }}>{children}</div>
     </Modal>

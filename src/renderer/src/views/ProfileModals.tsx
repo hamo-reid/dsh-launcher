@@ -29,7 +29,7 @@ export function CreateProfileModal(p: CreateProfileModalProps): JSX.Element {
   return (
     <Modal title={t('profile.create.title')} open={p.open} okText={t('profile.create.create')} onOk={() => void p.onOk()}
       okButtonProps={{ disabled: p.name.trim() === '' }} onCancel={p.onCancel} width={MODAL.narrow}>
-      <Space direction="vertical" style={{ width: '100%' }}>
+      <Space orientation="vertical" style={{ width: '100%' }}>
         <Input value={p.name} onChange={e => p.setName(e.target.value)} placeholder={t('profile.create.namePlaceholder')} onPressEnter={() => void p.onOk()} />
         <div>
           <div style={{ marginBottom: 6, color: token.colorTextSecondary }}>{t('profile.create.basedOn')}</div>
@@ -51,7 +51,7 @@ export function CloneProfileModal(p: CloneProfileModalProps): JSX.Element {
   const { t } = useTranslation()
   return (
     <Modal title={t('profile.clone.title', { name: p.target ?? '' })} open={p.target !== null} okText={t('profile.clone.clone')}
-      onOk={() => void p.onOk()} onCancel={p.onCancel} destroyOnClose width={MODAL.narrow}>
+      onOk={() => void p.onOk()} onCancel={p.onCancel} destroyOnHidden width={MODAL.narrow}>
       <Input value={p.name} onChange={e => p.setName(e.target.value)} placeholder={t('profile.clone.namePlaceholder')} onPressEnter={() => void p.onOk()} />
     </Modal>
   )
@@ -188,7 +188,7 @@ export function ImportProfileModal(p: ImportProfileModalProps): JSX.Element {
   return (
     <>
     <Modal title={t('profile.import.title')} open={p.open} onCancel={running ? undefined : p.onClose}
-      closable={!running} maskClosable={!running} width={MODAL.wide}
+      closable={!running} mask={{ closable: !running }} width={MODAL.wide}
       footer={running
         ? <Button loading>{t('profile.import.importing')}</Button>
         : done
@@ -200,14 +200,14 @@ export function ImportProfileModal(p: ImportProfileModalProps): JSX.Element {
               </Space>
             )}
     >
-      <Space direction="vertical" style={{ width: '100%' }} size="small">
+      <Space orientation="vertical" style={{ width: '100%' }} size="small">
         <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>
           {t('profile.import.hint')}
         </div>
 
         {!running && !done && mismatch && (
           <Alert type="warning" showIcon
-            message={t('profile.import.dshMismatch', { from: p.importDshVersion, cur: p.activeDshVersion || t('common.unknown') })}
+            title={t('profile.import.dshMismatch', { from: p.importDshVersion, cur: p.activeDshVersion || t('common.unknown') })}
             description={t('profile.import.dshMismatchDesc')} />
         )}
 
@@ -255,16 +255,16 @@ export function ImportProfileModal(p: ImportProfileModalProps): JSX.Element {
         })()}
 
         {done && error !== '' && (
-          <Alert type="error" showIcon message={t('profile.import.failed')} description={error} />
+          <Alert type="error" showIcon title={t('profile.import.failed')} description={error} />
         )}
 
         {done && result !== null && result.ok && !result.dshMismatch && (
-          <Alert type="success" showIcon message={result.text} />
+          <Alert type="success" showIcon title={result.text} />
         )}
 
         {done && missing.length > 0 && (
           <Alert type="warning" showIcon
-            message={t('profile.import.missingTitle')}
+            title={t('profile.import.missingTitle')}
             description={`${missing.join('、')}　${t('profile.import.missingDesc')}`}
           />
         )}
@@ -362,9 +362,9 @@ export function MirrorProfileModal(p: MirrorProfileModalProps): JSX.Element {
 
   return (
     <Modal title={t('profile.migrate.title', { name: p.profileName })} open={p.open}
-      onCancel={running ? undefined : p.onClose} closable={!running} maskClosable={!running}
+      onCancel={running ? undefined : p.onClose} closable={!running} mask={{ closable: !running }}
       width={MODAL.wide} footer={footer}>
-      <Space direction="vertical" size="small" style={{ width: '100%' }}>
+      <Space orientation="vertical" size="small" style={{ width: '100%' }}>
         {!running && !done && (
           <>
             <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>
@@ -395,10 +395,10 @@ export function MirrorProfileModal(p: MirrorProfileModalProps): JSX.Element {
           </div>
         )}
 
-        {done && error !== '' && <Alert type="error" showIcon message={error} />}
+        {done && error !== '' && <Alert type="error" showIcon title={error} />}
         {done && result !== null && (
           <Alert type={result.missing.length > 0 ? 'warning' : 'success'} showIcon
-            message={t('profile.migrate.done')}
+            title={t('profile.migrate.done')}
             description={result.missing.length > 0
               ? t('profile.migrate.missing', { missing: result.missing.join('、') })
               : undefined} />
@@ -417,7 +417,7 @@ export function MissingPluginsModal(p: MissingPluginsModalProps): JSX.Element {
   const { token } = theme.useToken()
   return (
     <Modal title={t('profile.import.missingModalTitle')} open onOk={p.onClose} onCancel={p.onClose} okText={t('profile.import.gotIt')} width={MODAL.narrow}>
-      <Alert type="warning" showIcon style={{ marginBottom: 10 }} message={t('profile.import.missingModalHint')} />
+      <Alert type="warning" showIcon style={{ marginBottom: 10 }} title={t('profile.import.missingModalHint')} />
       {p.list.map(m => <div key={m} style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', padding: '2px 0' }}>• {m}</div>)}
       <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, marginTop: 8 }}>
         {t('profile.import.missingDesc')}
@@ -438,11 +438,11 @@ export function RunFailModal(p: RunFailModalProps): JSX.Element {
   const signalSuffix = p.failInfo?.signal != null ? `, ${p.failInfo.signal}` : ''
   return (
     <Modal title={t('run.failTitle')} open={p.failInfo !== null} okText={t('common.ok')} onOk={p.onClose} onCancel={p.onClose} width={MODAL.wide}>
-      <Space direction="vertical" style={{ width: '100%' }} size="middle">
-        <Alert type="error" showIcon message={t('run.exited', { code: p.failInfo?.code ?? '?', signalSuffix })} />
+      <Space orientation="vertical" style={{ width: '100%' }} size="middle">
+        <Alert type="error" showIcon title={t('run.exited', { code: p.failInfo?.code ?? '?', signalSuffix })} />
         {p.eaddrinuse !== null && (
           <Alert type="warning" showIcon
-            message={t('run.portInUse', { port: p.eaddrinuse[2], addr: p.eaddrinuse[1] })}
+            title={t('run.portInUse', { port: p.eaddrinuse[2], addr: p.eaddrinuse[1] })}
             description={t('run.portInUseDesc')} />
         )}
         {p.failInfo?.command !== undefined && (

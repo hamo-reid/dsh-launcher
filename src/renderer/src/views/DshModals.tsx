@@ -108,7 +108,7 @@ export function AddDshModal(p: AddDshModalProps): JSX.Element {
 
   return (
     <Modal title={t('dsh.add.title')} open={p.open} footer={null} onCancel={p.onClose} width={MODAL.narrow}>
-      <Space direction="vertical" style={{ width: '100%' }} size="middle">
+      <Space orientation="vertical" style={{ width: '100%' }} size="middle">
         <FieldLabel>{t('dsh.add.aliasLabel')}</FieldLabel>
         <Input value={aliasInput} onChange={e => setAliasInput(e.target.value)} placeholder={t('dsh.add.aliasPlaceholder')} />
 
@@ -120,7 +120,7 @@ export function AddDshModal(p: AddDshModalProps): JSX.Element {
 
         <Button onClick={() => void detectCandidates()} loading={detecting} block>{t('dsh.add.detect')}</Button>
 
-        {addError !== '' && <Alert type="error" showIcon message={addError} />}
+        {addError !== '' && <Alert type="error" showIcon title={addError} />}
 
         {candidates.length > 0 && (
           <>
@@ -229,14 +229,14 @@ export function OfficialInstallModal(p: OfficialInstallModalProps): JSX.Element 
   return (
     <>
     <Modal title={p.preset?.force === true ? t('dsh.official.repairTitle') : t('dsh.official.title')} open={p.open}
-      onCancel={p.onClose} closable maskClosable width={MODAL.wide}
+      onCancel={p.onClose} closable mask={{ closable: true }} width={MODAL.wide}
       footer={(
         <Space>
           <Button onClick={p.onClose}>{t('common.cancel')}</Button>
           <Button type="primary" onClick={() => void doInstallOfficial()}>{t('dsh.official.start')}</Button>
         </Space>
       )}>
-      <Space direction="vertical" size="small" style={{ width: '100%' }}>
+      <Space orientation="vertical" size="small" style={{ width: '100%' }}>
         <>
             <FieldLabel>{t('dsh.official.dirLabel')}</FieldLabel>
             <Input value={versionDir} onChange={e => setVersionDir(e.target.value)} placeholder={t('dsh.official.dirPlaceholder')} />
@@ -276,7 +276,7 @@ export function OfficialInstallModal(p: OfficialInstallModalProps): JSX.Element 
                   />
                 </div>
               )}
-            <Alert type="info" showIcon message={t('dsh.official.stepsIntro')} />
+            <Alert type="info" showIcon title={t('dsh.official.stepsIntro')} />
             <ol style={{ paddingLeft: 20, margin: 0 }}>
               <li>{t('dsh.official.step1')}</li>
               <li>{t('dsh.official.step2')}</li>
@@ -344,14 +344,14 @@ export function UpdateDshModal(p: UpdateDshModalProps): JSX.Element {
 
   return (
     <Modal title={t('dsh.update.title', { name: p.dsh?.name ?? '' })} open={p.dsh !== null}
-      onCancel={p.onClose} closable maskClosable
-      width={MODAL.narrow} footer={footer} destroyOnClose>
-      <Space direction="vertical" size="small" style={{ width: '100%' }}>
+      onCancel={p.onClose} closable mask={{ closable: true }}
+      width={MODAL.narrow} footer={footer} destroyOnHidden>
+      <Space orientation="vertical" size="small" style={{ width: '100%' }}>
         {checking && <div><Spin size="small" /> {t('dsh.update.checking')}</div>}
 
-        {!checking && error !== '' && <Alert type="error" showIcon message={error} />}
+        {!checking && error !== '' && <Alert type="error" showIcon title={error} />}
         {!checking && error === '' && info === null && checking === false && (
-          <Alert type="success" showIcon message={t('dsh.update.upToDate')} />
+          <Alert type="success" showIcon title={t('dsh.update.upToDate')} />
         )}
 
         {!checking && error === '' && info !== null && (
@@ -365,7 +365,7 @@ export function UpdateDshModal(p: UpdateDshModalProps): JSX.Element {
                 {t('dsh.update.latestCurrent')}
               </div>
             )}
-            <Space direction="vertical" style={{ width: '100%' }}>
+            <Space orientation="vertical" style={{ width: '100%' }}>
               {tracks.map(trk => (
                 <div
                   key={trk.key}
@@ -393,7 +393,7 @@ export function UpdateDshModal(p: UpdateDshModalProps): JSX.Element {
             </Space>
             {hasBump && (
               <>
-                <Alert type="warning" showIcon message={t('dsh.update.majorWarn')} />
+                <Alert type="warning" showIcon title={t('dsh.update.majorWarn')} />
                 <Checkbox checked={ackMajor} onChange={e => setAckMajor(e.target.checked)}>
                   {t('dsh.update.ackMajor')}
                 </Checkbox>
@@ -470,9 +470,9 @@ export function DataMirrorModal(p: DataMirrorModalProps): JSX.Element {
 
   return (
     <Modal title={t('data.mirror.title', { name: p.source?.name ?? '' })} open={p.open}
-      onCancel={busy ? undefined : p.onClose} closable={!busy} maskClosable={!busy}
+      onCancel={busy ? undefined : p.onClose} closable={!busy} mask={{ closable: !busy }}
       width={MODAL.narrow} footer={footer}>
-      <Space direction="vertical" size="small" style={{ width: '100%' }}>
+      <Space orientation="vertical" size="small" style={{ width: '100%' }}>
         {result === null && (
           <>
             <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>
@@ -486,7 +486,7 @@ export function DataMirrorModal(p: DataMirrorModalProps): JSX.Element {
             />
             {crossMajor && (
               <>
-                <Alert type="warning" showIcon message={t('data.mirror.crossMajor')} />
+                <Alert type="warning" showIcon title={t('data.mirror.crossMajor')} />
                 <Checkbox checked={ackCross} onChange={e => setAckCross(e.target.checked)}>
                   {t('data.mirror.ack')}
                 </Checkbox>
@@ -495,9 +495,9 @@ export function DataMirrorModal(p: DataMirrorModalProps): JSX.Element {
           </>
         )}
 
-        {error !== '' && <Alert type="error" showIcon message={error} />}
+        {error !== '' && <Alert type="error" showIcon title={error} />}
         {result !== null && (
-          <Alert type="success" showIcon message={t('data.mirror.done')} description={result.text} />
+          <Alert type="success" showIcon title={t('data.mirror.done')} description={result.text} />
         )}
       </Space>
     </Modal>
@@ -527,7 +527,7 @@ export function RenameDshModal(p: RenameDshModalProps): JSX.Element {
 
   return (
     <Modal title={`${t('dsh.rename.title')}${p.target !== null ? ` · ${p.target.name}` : ''}`} open={p.target !== null}
-      okText={t('common.save')} onOk={() => void doRename()} onCancel={p.onClose} destroyOnClose>
+      okText={t('common.save')} onOk={() => void doRename()} onCancel={p.onClose} destroyOnHidden>
       <FieldLabel>{t('dsh.rename.newAlias')}</FieldLabel>
       <Input value={renameName} onChange={e => setRenameName(e.target.value)} placeholder={t('dsh.rename.newAlias')} onPressEnter={() => void doRename()} />
     </Modal>
@@ -576,14 +576,14 @@ export function DshRemoveModal(p: DshRemoveModalProps): JSX.Element {
 
   return (
     <Modal title={t('dsh.remove.title')} open={p.dsh !== null} onCancel={busy ? undefined : p.onClose}
-      closable={!busy} maskClosable={!busy} width={MODAL.narrow}
+      closable={!busy} mask={{ closable: !busy }} width={MODAL.narrow}
       footer={(
         <Space>
           <Button onClick={p.onClose} disabled={busy}>{t('common.cancel')}</Button>
           <Button type="primary" danger loading={busy} onClick={() => void doRemove()}>{t('dsh.remove.remove')}</Button>
         </Space>
       )}>
-      <Space direction="vertical" size="small" style={{ width: '100%' }}>
+      <Space orientation="vertical" size="small" style={{ width: '100%' }}>
         <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>
           {t('dsh.remove.hint')}
         </div>

@@ -161,7 +161,7 @@ export default function MarketSection(): JSX.Element {
   }
 
   return (
-    <Space direction="vertical" style={{ width: '100%' }} size="middle">
+    <Space orientation="vertical" style={{ width: '100%' }} size="middle">
       <SectionHeading
         title={t('plugin.market.title', { count: total })}
         description={t('plugin.market.desc')}
@@ -201,7 +201,7 @@ export default function MarketSection(): JSX.Element {
         <Alert
           type="error"
           showIcon
-          message={t('plugin.market.loadFailed')}
+          title={t('plugin.market.loadFailed')}
           description={error}
           action={<Button size="small" onClick={() => void load(true)}>{t('common.retry')}</Button>}
         />
@@ -312,7 +312,7 @@ export default function MarketSection(): JSX.Element {
         width={MODAL.wide}
       >
         {detail !== null && (
-          <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          <Space orientation="vertical" style={{ width: '100%' }} size="middle">
             <div style={{ wordBreak: 'break-word', color: token.colorText }}>
               {descOf(detail) || t('plugin.market.noDesc')}
             </div>
@@ -330,7 +330,7 @@ export default function MarketSection(): JSX.Element {
               )}
             </div>
             {detail.deprecated === true && detail.replacement !== undefined && detail.replacement !== '' && (
-              <Alert type="warning" showIcon message={t('plugin.market.replacedBy', { name: detail.replacement })} />
+              <Alert type="warning" showIcon title={t('plugin.market.replacedBy', { name: detail.replacement })} />
             )}
             <div>
               <FieldLabel>{t('plugin.market.field.source')}</FieldLabel>

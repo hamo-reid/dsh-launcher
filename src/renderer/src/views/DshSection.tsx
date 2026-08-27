@@ -239,7 +239,7 @@ export default function DshSection() {
     >
       {active !== undefined
         ? (
-          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
             <SectionHeading title={active.name} />
             <Panel title={t('dsh.basicInfo')}>
               <Descriptions size="small" column={1} bordered>

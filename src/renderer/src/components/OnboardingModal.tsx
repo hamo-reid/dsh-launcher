@@ -103,7 +103,7 @@ export default function OnboardingModal({ defaults, onComplete }: Props) {
       title={t('onboarding.title')}
       width={MODAL.wide}
       closable={false}
-      maskClosable={false}
+      mask={{ closable: false }}
       keyboard={false}
       okText={t('onboarding.submit')}
       onOk={() => void save()}

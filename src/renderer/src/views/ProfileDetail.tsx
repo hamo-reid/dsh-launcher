@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { cloneElement, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert, Button, Input, List, Modal, Select, Space, Tag, theme, message,
 } from 'antd'
@@ -329,12 +329,15 @@ const loadSeq = useRef(0)
 
       <div style={{ fontSize: token.fontSizeLG, fontWeight: 600, color: token.colorText, marginBottom: token.paddingSM }}>{t('profile.detail.stack')}</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: token.paddingSM }}>
-        {(layers ?? []).map((layer, i) => (
+        {(layers ?? []).map((layer, i) => cloneElement(
           blockButton(
             `${i + 1}. ${layerLabel(layer)}`,
             layer.source === 'profile' ? t('profile.detail.layerMetaEditable', { count: layer.rows.length }) : t('profile.detail.layerMeta', { count: layer.rows.length }),
             () => setOpenLayer(i),
-          )
+          ),
+          // Stable key derived from the layer's identity, so a bundle reorder
+          // doesn't remount the cards (index would shuffle the keys).
+          { key: layer.source === 'bundle' ? `bundle:${layer.bundle}` : layer.source === 'profile' ? `profile:${layer.label}` : 'home' },
         ))}
       </div>
 
@@ -363,10 +366,10 @@ const loadSeq = useRef(0)
         {activeLayer !== undefined && renderRows(activeLayer)}
       </ScrollModal>
 
-      <Modal title={editor !== null ? (editor.kind === 'config' ? t('profile.detail.editor.configTitle', { id: editor.id }) : t('profile.detail.editor.insertTitle', { id: editor.id })) : ''} open={editor !== null} okText={t('common.save')} onOk={() => void submit()} onCancel={() => setEditor(null)} confirmLoading={saving} destroyOnClose width={MODAL.wide}>
-        <Space direction="vertical" style={{ width: '100%' }} size="small">
+      <Modal title={editor !== null ? (editor.kind === 'config' ? t('profile.detail.editor.configTitle', { id: editor.id }) : t('profile.detail.editor.insertTitle', { id: editor.id })) : ''} open={editor !== null} okText={t('common.save')} onOk={() => void submit()} onCancel={() => setEditor(null)} confirmLoading={saving} destroyOnHidden width={MODAL.wide}>
+        <Space orientation="vertical" style={{ width: '100%' }} size="small">
           {editor?.overlap !== null && (
-            <Alert type="warning" showIcon message={t('profile.detail.editor.overlap', { owner: editor?.overlap })} description={t('profile.detail.editor.overlapDesc')} />
+            <Alert type="warning" showIcon title={t('profile.detail.editor.overlap', { owner: editor?.overlap })} description={t('profile.detail.editor.overlapDesc')} />
           )}
           {editor?.kind === 'config' ? (
             <>
@@ -396,8 +399,8 @@ const loadSeq = useRef(0)
         </Space>
       </Modal>
 
-      <Modal title={t('profile.detail.newRowModalTitle')} open={newRowOpen} okText={t('profile.create.create')} onOk={() => void submitNew()} onCancel={() => setNewRowOpen(false)} destroyOnClose width={MODAL.wide}>
-        <Space direction="vertical" style={{ width: '100%' }} size="small">
+      <Modal title={t('profile.detail.newRowModalTitle')} open={newRowOpen} okText={t('profile.create.create')} onOk={() => void submitNew()} onCancel={() => setNewRowOpen(false)} destroyOnHidden width={MODAL.wide}>
+        <Space orientation="vertical" style={{ width: '100%' }} size="small">
           <div><FieldLabel>{t('profile.detail.newRow.id')}</FieldLabel><Input value={newRowId} onChange={e => setNewRowId(e.target.value)} placeholder="- id: xxx" /></div>
           <div><FieldLabel>{t('profile.detail.newRow.status')}</FieldLabel><Select value={newRowDisabled} onChange={setNewRowDisabled} style={{ width: '100%' }} options={[{ value: false, label: t('profile.detail.newRow.enabled') }, { value: true, label: t('profile.detail.newRow.disabled') }]} /></div>
           <div><FieldLabel>{t('profile.detail.newRow.config')}</FieldLabel><Input.TextArea rows={4} value={newRowConfig} onChange={e => setNewRowConfig(e.target.value)} placeholder={'key: value\nnested:\n  a: 1'} /></div>

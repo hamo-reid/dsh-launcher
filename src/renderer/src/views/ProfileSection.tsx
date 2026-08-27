@@ -379,7 +379,7 @@ export default function ProfileSection() {
                   type="warning"
                   showIcon
                   style={{ marginBottom: 16 }}
-                  message={t('profile.missingTitle', { list: missing.join('、') })}
+                  title={t('profile.missingTitle', { list: missing.join('、') })}
                   description={t('profile.missingDesc', { profile: selected })}
                 />
               )}

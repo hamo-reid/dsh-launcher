@@ -40,9 +40,9 @@ export default function AboutView() {
   return (
     <div style={{ height: '100%', overflowY: 'auto', padding: token.paddingLG }}>
       <SectionHeading title={t('app.tab.about')} />
-      <Space direction="vertical" size="middle" style={{ width: '100%', maxWidth: 640 }}>
+      <Space orientation="vertical" size="middle" style={{ width: '100%', maxWidth: 640 }}>
         <Panel title="DSH Launcher">
-          <Space direction="vertical" size="small">
+          <Space orientation="vertical" size="small">
             <div>{t('about.about')}</div>
             <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>
               {t('about.version', { version: version || t('common.unknown') })}

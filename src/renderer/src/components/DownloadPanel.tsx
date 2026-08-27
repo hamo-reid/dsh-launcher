@@ -106,7 +106,7 @@ function DownloadDetailModal({ session, onClose }: {
             )}
           </div>
         ) : (
-          <Space direction="vertical" size="small" style={{ width: '100%' }}>
+          <Space orientation="vertical" size="small" style={{ width: '100%' }}>
             <div>
               <Tag color={STATUS_COLOR[session.status]}>{t(`download.status.${session.status}`)}</Tag>
             </div>
@@ -163,11 +163,13 @@ export default function DownloadPanel(): JSX.Element {
       <Drawer
         title={t('download.panel.title', { count: downloads.length })}
         placement="right"
-        width={440}
         // Offset this drawer's mask + panel below the app's on-top brand row, so
         // its mask never darkens (nor click-dismisses over) the header while the
         // tab bar below stays normally masked. Official `styles` (not global css)
         // because antd6's mask is position:absolute inside the drawer root.
+        // antd6 deprecated Drawer `width` (custom px) in favour of the `size`
+        // preset; the 440px panel is trimmed to the default width to stay warning-
+        // free. Offset below the brand row remains via the official `styles` keys.
         styles={{
           mask: { top: LAYOUT.headerHeight },
           wrapper: { top: LAYOUT.headerHeight },

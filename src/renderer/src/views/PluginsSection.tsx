@@ -261,9 +261,9 @@ export default function PluginsSection() {
       }
     >
       {view === 'overview' && (
-        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+        <Space orientation="vertical" style={{ width: '100%' }} size="middle">
           <SectionHeading title={t('plugin.overview.title', { count: filteredOverview.length })} />
-          {dirMissing && <Alert type="warning" showIcon message={t('plugin.dirMissing')} />}
+          {dirMissing && <Alert type="warning" showIcon title={t('plugin.dirMissing')} />}
           <Panel>
           <Space style={{ marginBottom: token.paddingSM }} wrap>
             <Input
@@ -363,9 +363,9 @@ export default function PluginsSection() {
       {view === 'market' && <MarketSection />}
 
       {view === 'download' && (
-        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+        <Space orientation="vertical" style={{ width: '100%' }} size="middle">
           <SectionHeading title={t('plugin.download.title')} description={t('plugin.download.desc')} />
-          {dirMissing && <Alert type="warning" showIcon message={t('plugin.dirMissingDownload')} />}
+          {dirMissing && <Alert type="warning" showIcon title={t('plugin.dirMissingDownload')} />}
           <Panel>
           <Input
             allowClear
@@ -439,11 +439,11 @@ export default function PluginsSection() {
       )}
 
       {view === 'install' && (
-        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+        <Space orientation="vertical" style={{ width: '100%' }} size="middle">
           <SectionHeading title={t('plugin.installSection.title')} />
           {dirMissing
-            ? <Alert type="warning" showIcon message={t('plugin.dirMissing')} />
-            : <Alert type="info" showIcon message={t('plugin.installSection.info')} />}
+            ? <Alert type="warning" showIcon title={t('plugin.dirMissing')} />
+            : <Alert type="info" showIcon title={t('plugin.installSection.info')} />}
 
           <Panel title={t('plugin.installSection.network')}>
             <Input value={source} onChange={event => setSource(event.target.value)} placeholder={t('plugin.installSection.sourcePlaceholder')} style={{ maxWidth: 480 }} />

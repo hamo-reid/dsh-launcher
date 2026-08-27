@@ -74,9 +74,9 @@ export default function SettingsSection() {
     // 否则窗口调小时设置内容会被裁剪而无法滚到。
     <div style={{ height: '100%', overflowY: 'auto', padding: token.paddingLG }}>
       <SectionHeading title={t('app.tab.settings')} description="外观与目录配置。" />
-      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
         <Panel title={t('settings.section.appearance')}>
-          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
             <div style={{ maxWidth: 560 }}>
               <div style={{ fontWeight: 600 }}>{t('settings.language')}</div>
               <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, marginTop: 4, marginBottom: token.paddingSM }}>
