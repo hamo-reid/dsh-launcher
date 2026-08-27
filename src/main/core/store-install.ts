@@ -297,7 +297,10 @@ export async function installIntoProfile(
   if (manifestChanged) writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
 
   const install = await runPnpm(dir, ['install', '--config.confirmModulesPurge=false'], undefined, { storeDir })
-  if (!install.ok) return { ok: false, text: `pnpm install 失败：${install.text}`, activated: false }
+  if (!install.ok) {
+    logger.warn('plugin install into profile failed', { profile, pkg, text: install.text })
+    return { ok: false, text: `pnpm install 失败：${install.text}`, activated: false }
+  }
 
   // Bundle reconcile: a dependency that declares `dsh.bundle` joins the layer.
   const storeManifestPath = join(pkgDir, 'package.json')

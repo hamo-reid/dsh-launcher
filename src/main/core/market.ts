@@ -13,8 +13,11 @@
  */
 
 import { loadSettings, saveSettings } from './settings.ts'
-import { logger } from './logger.ts'
+import { child, logger } from './logger.ts'
 import type { MarketCatalog, MarketPage, MarketPlugin, MarketSort, MarketSource, MarketSourceState } from '../../shared/types.ts'
+
+/** Domain-tagged logger for market-catalog traffic. */
+const mlog = child('market')
 
 /** The canonical catalog address (GitHub Pages behind a CDN). */
 export const MARKET_OFFICIAL_URL = 'https://awesome-dsh-plugin.com/plugins.json'
@@ -146,11 +149,13 @@ export async function loadMarket(state = marketSourceState()): Promise<MarketCat
       const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), headers })
       if (res.status === 304) {
         if (reusable === null) throw new Error('the catalog answered "not modified" with nothing to reuse')
+        mlog.debug('market catalog reused (304)', { label })
         return reusable.data
       }
       if (!res.ok) throw new Error(`HTTP ${String(res.status)}`)
       const data = asCatalog(await res.json() as unknown)
       served = { url, etag: res.headers.get('etag'), modified: res.headers.get('last-modified'), data }
+      mlog.debug('market catalog fetched', { label })
       return data
     } catch (error) {
       last = error

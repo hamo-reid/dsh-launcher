@@ -8,7 +8,11 @@ import { join } from 'node:path'
 import { dshHome, homePatchPath, installAnchor, profileDir, profilesDir } from './home.ts'
 import { readManifest } from './manifest.ts'
 import { extractKeyValue, parseClassifiedRows, parseNamedRows, parsePatchRows } from './patch.ts'
+import { child } from './logger.ts'
 import type { ComboPlugin, ProfileLayer } from '../../shared/types.ts'
+
+/** Domain-tagged logger for profile-composition work. */
+const cplog = child('combo')
 
 /** Re-export the shared composed-plugin shape. */
 export type { ComboPlugin } from '../../shared/types.ts'
@@ -45,7 +49,7 @@ export function listComboPlugins(profile: string): ComboPlugin[] {
   const rows: ComboPlugin[] = []
   for (const bundle of bundles) {
     const path = resolveBundlePatch(bundle, profile)
-    if (path === undefined) continue
+    if (path === undefined) { cplog.debug('combo: bundle patch not found', { bundle, profile }); continue }
     for (const row of parseNamedRows(readFileSync(path, 'utf8'))) {
       rows.push({ id: row.id, name: row.name ?? '', bundle, disabled: row.disabled })
     }

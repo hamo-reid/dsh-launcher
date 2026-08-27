@@ -16,10 +16,13 @@ import { registerSettingsIpc } from './ipc/settings.ts'
 import { registerStoreIpc } from './ipc/store.ts'
 import { hookWindowMaximize, registerWindowIpc } from './ipc/window.ts'
 import { registerLogsIpc } from './ipc/logs.ts'
-import { initLogger, logger } from './core/logger.ts'
+import { child, initLogger, logger, printBanner } from './core/logger.ts'
 import { askOnCloseEnabled, closeToTrayEnabled, loadSettings, openDatabase, saveSettings } from './core/settings.ts'
 import { configureAppState, pluginDir } from './core/appState.ts'
 import { repairArchiveLinks } from './core/plugins.ts'
+
+/** Domain-tagged logger for renderer-sourced messages (`{domain:"renderer"}`). */
+const rlog = child('renderer')
 
 // Process-level breadcrumbs for anything that escapes the IPC try/catch.
 process.on('uncaughtException', (error) => logger.error('uncaughtException', error))
@@ -170,6 +173,20 @@ function createWindow(): void {
   }
   subscribeRunState(updateTrayState)
 
+  // Renderer-side errors/warnings are echoed into the main log under the
+  // `renderer` domain, so a bug that only surfaces in the web layer still lands
+  // in the same daily archive (grep `{domain:"renderer"}`). The message itself
+  // is untrusted renderer text, so it is recorded as data, never as code.
+  // Modern Electron signature: params ride directly on the Event object, with
+  // `level` as a severity string ('verbose'|'info'|'warning'|'error').
+  win.webContents.on('console-message', (event) => {
+    const { level, message, lineNumber, sourceId } = event
+    const meta = { sourceId, line: lineNumber }
+    if (level === 'error') rlog.error(`renderer: ${message}`, meta)
+    else if (level === 'warning') rlog.warn(`renderer: ${message}`, meta)
+    else rlog.debug(`renderer: ${message}`, meta)
+  })
+
   // Every browsing link goes to the system default browser — never open a bare
   // Electron window (window.open / target=_blank) or navigate the app away to an
   // external http(s) page. Mirrors how the run-console opens links.
@@ -283,6 +300,18 @@ app.whenReady().then(async () => {
   // 数据目录确定后立即初始化日志，早于任何业务/数据库工作。
   initLogger(join(app.getPath('userData'), 'logs'))
   logger.info('app starting', { version: app.getVersion() != null ? `v${app.getVersion()}` : '' })
+  // Signature launch logo — the first thing on the console, colour-graded so a
+  // startup is instantly recognisable against the log stream that follows.
+  printBanner([
+    ' ',
+    ' ██████╗ ███████╗██╗  ██╗',
+    ' ██╔══██╗██╔════╝██║  ██║',
+    ' ██║  ██║███████╗███████║',
+    ' ██║  ██║╚════██║██╔══██║',
+    ' ██████╔╝███████║██║  ██║',
+    ' ╚═════╝ ╚══════╝╚═╝  ╚═╝',
+    `         LAUNCHER · v${app.getVersion()}`,
+  ], '96')
 
   // Show the startup splash as early as possible — before the DB open / renderer
   // load that a cold start must wait on.

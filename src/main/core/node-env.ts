@@ -9,7 +9,11 @@
  * the bundled (Electron 40) Node always works, keeping it self-contained.
  */
 import { spawnSync } from 'node:child_process'
+import { child } from './logger.ts'
 import type { NodeEnvironment } from '../../shared/types.ts'
+
+/** Domain-tagged logger for node detection / selection. */
+const nodeLog = child('node')
 
 interface Detection {
   bundled: string
@@ -40,6 +44,7 @@ function detect(): Detection {
     }
   } catch { /* no system node on PATH */ }
   detected = { bundled: bundle, system }
+  nodeLog.info('node environment detected', { bundled: bundle, system })
   return detected
 }
 

@@ -23,6 +23,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import AdmZip from 'adm-zip'
 import { parseVersion } from './version.ts'
+import { logger } from './logger.ts'
 import type { DshContext } from './appState.ts'
 import type { DshDataManifest, DshDataImportResult } from '../../shared/types.ts'
 
@@ -170,6 +171,7 @@ export function exportDshData(ctx: DshContext, destFile: string): DshDataManifes
     }
     arc.addFile('data-manifest.json', Buffer.from(JSON.stringify(manifest, null, 2), 'utf8'))
     writeFileSync(destFile, arc.toBuffer())
+    logger.info('dsh data exported', { dshVersion: ctx.version, destFile })
     return manifest
   } finally {
     rmSync(tmp, { recursive: true, force: true })
@@ -191,6 +193,7 @@ export function importDshData(
       return { ok: false, text: `该数据导出自 dsh ${want}，当前为 ${ctx.version}，major 不匹配。`, dshMismatch: true }
     }
     restoreHome(tmp, ctx.home)
+    logger.info('dsh data imported', { dshVersion: ctx.version, srcFile })
     return { ok: true, text: '已恢复 DSH 数据', dshMismatch: false }
   } finally {
     rmSync(tmp, { recursive: true, force: true })

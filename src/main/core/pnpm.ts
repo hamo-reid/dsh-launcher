@@ -11,9 +11,12 @@ import { existsSync, linkSync, mkdirSync, readdirSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import os from 'node:os'
 import { dirname, join, parse } from 'node:path'
-import { logger } from './logger.ts'
+import { child, logger } from './logger.ts'
 import { nodeEnvironment } from './node-env.ts'
 import { nodePreferenceValue } from './settings.ts'
+
+/** Domain-tagged logger for anything pnpm-related — grep `{domain:"pnpm"}`. */
+const plog = child('pnpm')
 
 const require = createRequire(import.meta.url)
 
@@ -147,10 +150,13 @@ export function ensurePnpmStore(storeDir: string | undefined): void {
 export function runPnpm(cwd: string, args: readonly string[], signal?: AbortSignal, opts?: { storeDir?: string }): Promise<PnpmResult> {
   return new Promise((resolve) => {
     if (opts?.storeDir !== undefined && opts.storeDir !== '') ensurePnpmStore(opts.storeDir)
-    const fullArgs = opts?.storeDir !== undefined && opts.storeDir !== ''
-      ? ['--store-dir', pnpmStoreDir(opts.storeDir), ...args]
-      : args
-    logger.debug(`pnpm ${fullArgs.join(' ')} @ ${cwd}`)
+    const storeDir = opts?.storeDir !== undefined && opts.storeDir !== ''
+      ? pnpmStoreDir(opts.storeDir)
+      : undefined
+    const fullArgs = storeDir !== undefined ? ['--store-dir', storeDir, ...args] : args
+    const started = Date.now()
+    // Stream pnpm's live stdout/stderr when Debug monitoring is requested.
+    const trace = tracePnpm()
     let child: ReturnType<typeof spawn>
     try {
       child = spawn(resolvePnpmNode(), [resolvePnpmEntry(), ...fullArgs], {
@@ -162,31 +168,55 @@ export function runPnpm(cwd: string, args: readonly string[], signal?: AbortSign
         env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
       })
     } catch (error) {
-      logger.error('pnpm failed to start', error)
+      plog.error('pnpm failed to start', error)
       resolve({ ok: false, text: error instanceof Error ? error.message : String(error) })
       return
     }
+    // Structured spawn breadcrumb: confirm which node/entry drives pnpm, where,
+    // with what flags, and the child pid (kill-target for future Debug actions).
+    plog.debug(`pnpm spawn: ${fullArgs.join(' ')} @ ${cwd}`, {
+      cwd, args: fullArgs, node: resolvePnpmNode(), entry: resolvePnpmEntry(), storeDir, pid: child.pid,
+    })
     const onAbort = (): void => { if (child.pid !== undefined) killProcessTree(child.pid) }
     if (signal !== undefined) {
       // Aborted before spawn: kill as soon as the child exists.
       if (signal.aborted) onAbort()
       else signal.addEventListener('abort', onAbort, { once: true })
     }
+    // `out` accumulates the combined dump (feeds installSucceeded + failure tail);
+    // when tracing, stdout/stderr are ALSO streamed line-by-line as they arrive.
     let out = ''
-    child.stdout?.on('data', (data: Buffer) => { out += String(data) })
-    child.stderr?.on('data', (data: Buffer) => { out += String(data) })
+    let partial = ''
+    const stream = (chunk: Buffer, tag: string): void => {
+      if (!trace) return
+      partial += String(chunk)
+      let idx
+      while ((idx = partial.indexOf('\n')) >= 0) {
+        const line = partial.slice(0, idx).trimEnd()
+        partial = partial.slice(idx + 1)
+        if (line !== '') plog.debug(`pnpm[${tag}] ${line}`)
+      }
+    }
+    child.stdout?.on('data', (data: Buffer) => { out += String(data); stream(data, 'out') })
+    child.stderr?.on('data', (data: Buffer) => { out += String(data); stream(data, 'err') })
     child.on('error', (error) => {
       signal?.removeEventListener('abort', onAbort)
-      logger.warn(`pnpm failed to run: ${error.message}`)
+      plog.warn(`pnpm failed to run: ${error.message}`)
       resolve({ ok: false, text: error.message })
     })
     child.on('close', (code) => {
       signal?.removeEventListener('abort', onAbort)
+      const durMs = Date.now() - started
+      const last = partial.trimEnd()
+      if (last !== '') plog.debug(`pnpm[out] ${last}`) // final line lacking a newline
       // A user-cancel is distinct from a genuine failure — the caller may want to
       // clean up its staging dir and surface "cancelled", not an error.
       const aborted = signal !== undefined && signal.aborted
       if (aborted) {
-        logger.warn(`pnpm aborted @ ${cwd}`)
+        // Preserve how far the download/install got before the user cancelled.
+        const tail = summarizePnpmOut(out)
+        plog.warn(`pnpm aborted @ ${cwd}`, { durMs })
+        if (tail !== '') plog.warn(`pnpm partial output:\n${tail}`)
         resolve({ ok: false, text: 'cancelled', aborted: true })
         return
       }
@@ -194,10 +224,10 @@ export function runPnpm(cwd: string, args: readonly string[], signal?: AbortSign
       const ok = code === 0 || installSucceeded(out)
       const tail = summarizePnpmOut(out)
       if (ok) {
-        logger.debug(`pnpm ok @ ${cwd}${tail !== '' ? `\n${tail}` : ''}`)
+        plog.debug(`pnpm ok @ ${cwd}${tail !== '' ? `\n${tail}` : ''}`, { code, durMs })
       } else {
-        logger.warn(`pnpm failed (exit ${String(code)}) @ ${cwd}`)
-        if (tail !== '') logger.warn(`pnpm output:\n${tail}`)
+        plog.warn(`pnpm failed (exit ${String(code)}, ${durMs}ms) @ ${cwd}`)
+        if (tail !== '') plog.warn(`pnpm output:\n${tail}`)
       }
       resolve({ ok, text: out.trim() })
     })
@@ -212,4 +242,13 @@ function killProcessTree(pid: number): void {
   } else {
     try { process.kill(pid, 'SIGTERM') } catch { /* best-effort */ }
   }
+}
+
+/** Whether to stream pnpm's live output line-by-line (Debug). On with
+ * `DSH_PNPM_TRACE=1`, or when any level env pins a sink to `debug`. Off by
+ * default so a normal run keeps a small, summary-only log footprint. */
+function tracePnpm(): boolean {
+  if (process.env.DSH_PNPM_TRACE === '1') return true
+  return [process.env.DSH_LOG_CONSOLE_LEVEL, process.env.DSH_LOG_LEVEL, process.env.DSH_LOG_FILE_LEVEL]
+    .some(level => level === 'debug')
 }
