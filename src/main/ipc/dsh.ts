@@ -2,7 +2,7 @@
  * official installation. */
 
 import { shell } from 'electron'
-import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 import {
@@ -22,9 +22,18 @@ import { logger } from '../core/logger.ts'
 import { handle } from './handle.ts'
 import type { DownloadStep, DshInstallStep, DshUpdateInfo, IpcResult, PackageVersionInfo } from '../../shared/types.ts'
 
-/** A filesystem-safe version name (defaults to `official`). */
+/** A filesystem-safe version name (defaults to `official`). Strips path/shell
+ * metacharacters and whitespace, and refuses leading/trailing dots — so `.`/`..`
+ * (which would resolve to the repo root / its parent) can never be used as an
+ * install dir name, even though `join(versionDir, name)` would otherwise accept
+ * them. */
 function safeVersionName(name: string | undefined): string {
-  const cleaned = (name ?? '').replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, '-').trim()
+  const cleaned = (name ?? '')
+    .replace(/[\\/:*?"<>|]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/^[.\-]+/, '')
+    .replace(/[.\-]+$/, '')
+    .trim()
   return cleaned === '' ? 'official' : cleaned
 }
 
@@ -79,7 +88,18 @@ async function deleteDshFiles(entry: DshEntry): Promise<void> {
  * the onboarding wizard). Empty string resets to the default. */
 export function setVersionDirValue(dir: string): IpcResult<boolean> {
   try {
-    saveSettings({ ...loadSettings(), dshVersionDir: dir.trim() === '' ? undefined : dir.trim() })
+    const trimmed = dir.trim()
+    if (trimmed === '') {
+      saveSettings({ ...loadSettings(), dshVersionDir: undefined })
+      return { ok: true, value: true }
+    }
+    // Normalize to an absolute path; create-allowed (the repo dir is made on
+    // first install), so only an existing non-directory is rejected up front.
+    const target = resolve(trimmed)
+    if (existsSync(target) && !statSync(target).isDirectory()) {
+      return fail(E.storeNotDir, { path: target })
+    }
+    saveSettings({ ...loadSettings(), dshVersionDir: target })
     return { ok: true, value: true }
   } catch (error) {
     return failFromError(error)
@@ -213,8 +233,17 @@ export function registerDshIpc(): void {
   })
 
   handle('dsh:setHome', (_event, id: string, home: string): IpcResult<boolean> => {
+    if (typeof home !== 'string' || home.trim() === '') return fail(E.nameInvalid)
     const { dshes, activeDshId } = readDshState()
-    const next = dshes.map(d => d.id === id ? { ...d, home } : d)
+    if (!dshes.some(d => d.id === id)) return fail(E.dshNotFound)
+    const target = resolve(home.trim())
+    try {
+      if (existsSync(target) && !statSync(target).isDirectory()) return fail(E.storeNotDir, { path: target })
+      mkdirSync(target, { recursive: true })
+    } catch (error) {
+      return fail(E.storeUnusable, { detail: String(error) })
+    }
+    const next = dshes.map(d => d.id === id ? { ...d, home: target } : d)
     writeDshState(next, activeDshId)
     return { ok: true, value: true }
   })
@@ -276,12 +305,25 @@ export function registerDshIpc(): void {
   // Returns the new session id; the caller closes its dialog immediately.
   handle('dsh:installOfficial', (_event, options?: { versionDir?: string; name?: string; version?: string; force?: boolean }): IpcResult<{ id: string }> => {
       const currentRoot = dshVersionDir()
+      let versionDir = currentRoot
       const requested = options?.versionDir?.trim()
-      const versionDir = requested !== undefined && requested !== '' ? requested : currentRoot
-      // 用户在安装对话框把版本库指向了非当前设置的目录：写回设置，让「官方安装到指定目录」
-      // 持久可锚定（删除/清理用 entry.versionDir 而不是之后可能变化的 dshVersionDir()）。
-      if (requested !== undefined && requested !== '' && requested !== currentRoot) {
-        saveSettings({ ...loadSettings(), dshVersionDir: versionDir })
+      if (requested !== undefined && requested !== '') {
+        const repoDir = resolve(requested)
+        // Create-allowed: the repo dir legitimately does not exist on first use,
+        // but an existing non-directory / unwritable path must fail up front.
+        try {
+          if (existsSync(repoDir) && !statSync(repoDir).isDirectory()) return fail(E.storeNotDir, { path: repoDir })
+          mkdirSync(repoDir, { recursive: true })
+          const probe = join(repoDir, '.pm-write-probe')
+          writeFileSync(probe, '')
+          rmSync(probe, { force: true })
+        } catch (error) {
+          return fail(E.storeUnusable, { detail: String(error) })
+        }
+        versionDir = repoDir
+        // 用户在安装对话框把版本库指向了非当前设置的目录：写回设置，让「官方安装到指定目录」
+        // 持久可锚定（删除/清理用 entry.versionDir 而不是之后可能变化的 dshVersionDir()）。
+        if (repoDir !== currentRoot) saveSettings({ ...loadSettings(), dshVersionDir: repoDir })
       }
       const name = safeVersionName(options?.name)
       const target = join(versionDir, name)

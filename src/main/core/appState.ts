@@ -104,9 +104,11 @@ export function defaultVersionDir(): string {
   return join(userData, 'dsh', 'versions')
 }
 
-/** The dsh version repository location from settings (default fallback). */
+/** The dsh version repository location from settings (default fallback). Empty /
+ * whitespace counts as unset, mirroring `pluginDir()`. */
 export function dshVersionDir(): string {
-  return loadSettings().dshVersionDir ?? defaultVersionDir()
+  const dir = loadSettings().dshVersionDir
+  return typeof dir === 'string' && dir.trim() !== '' ? dir : defaultVersionDir()
 }
 
 /** True when a genuinely fresh install should run the onboarding wizard: no
