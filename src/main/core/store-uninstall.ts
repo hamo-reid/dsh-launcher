@@ -155,6 +155,10 @@ export async function removePluginFromProfiles(dshes: DshScope[], pkg: string): 
  * archived version) is removed; with it, only that one archived version goes. */
 export function removePlugin(dir: string, name: string, version?: string): { ok: boolean; text: string } {
   if (dir === '') return { ok: false, text: '未配置插件保存位置 —— 请在「设置」中指定' }
+  // Defense in depth: `.`/`..` pass the (character-class) version validation but
+  // join OUT of the version dir — `..` would resolve to `archive/` itself and
+  // wipe every plugin. Refuse before any path is built.
+  if (version === '.' || version === '..') return { ok: false, text: `非法版本号：${version}` }
   const pRoot = join(versionsRoot(dir), name)
   if (version === undefined) {
     if (!existsSync(pRoot) && !isLegacyPkg(dir, name)) return { ok: false, text: `${name} 未在插件库中` }

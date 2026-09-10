@@ -22,7 +22,7 @@ import { contextForEntry, pluginDir, readDshState } from '../core/appState.ts'
 import { addDirToZip, dedentRowBlock, verifyDisabledState } from '../core/app-util.ts'
 import { fail, E } from '../core/errors.ts'
 import { handle } from './handle.ts'
-import { rowIdInvalid } from './validate.ts'
+import { pathIdentifierInvalid, pathOutsideRoot, rowIdInvalid } from './validate.ts'
 import type {
   ImportProfileResult, IpcResult, ProfileDetail, ProfileLayer, RowCreateInput,
 } from '../../shared/types.ts'
@@ -96,18 +96,33 @@ function loadProfileDetail(name: string): ProfileDetail {
   return { bundles, dependencies, rows: parsePatchRows(patchText), patchText }
 }
 
+/** A profile/bundle name from IPC must be a safe path token: it feeds
+ * `profileDir(name)` / `join(profilesDir(), name, …)`, so an unguarded `..`,
+ * `\`, absolute path or drive prefix could read/write/rename/delete OUTSIDE the
+ * profiles tree. Mirrors the guard `plugins`/`trash` already apply. */
+function invalidName(name: unknown): boolean {
+  return typeof name !== 'string' || pathIdentifierInvalid(name)
+}
+
+/** Where the zip-import flow may leave unpacked data for cleanup. */
+function importTmpRoot(): string {
+  return join(app.getPath('userData'), 'import-tmp')
+}
+
 export function registerProfileIpc(): void {
   handle('profile:list', (): IpcResult<string[]> => ({
     ok: true, value: listProfiles(),
   }))
 
-  handle('profile:load', (_event, name: string): IpcResult<ProfileDetail> => ({
-    ok: true, value: loadProfileDetail(name),
-  }))
+  handle('profile:load', (_event, name: string): IpcResult<ProfileDetail> => {
+    if (invalidName(name)) return fail(E.nameInvalid)
+    return { ok: true, value: loadProfileDetail(name) }
+  })
 
   handle(
     'profile:setDisabled',
     (_event, name: string, id: string, disabled: boolean): IpcResult<boolean> => {
+      if (invalidName(name)) return fail(E.nameInvalid)
       // A row id that could break/extend the `- id: <value>` line must never be
       // written into the patch doc.
       if (rowIdInvalid(id)) return fail(E.nameInvalid)
@@ -128,6 +143,7 @@ export function registerProfileIpc(): void {
   }))
 
   handle('profile:create', (_event, name: string, template?: string): IpcResult<boolean> => {
+    if (invalidName(name)) return fail(E.nameInvalid)
     // `template`: official keys prefixed `template:` (base/web), or an existing
     // profile name to clone. Empty → default base.
     const OFFICIAL_PREFIX = 'template:'
@@ -136,6 +152,7 @@ export function registerProfileIpc(): void {
       if (!(key in PROFILE_TEMPLATES)) throw new Error(`unknown template "${key}"`)
       createProfile(name, PROFILE_TEMPLATES[key])
     } else if (template !== undefined && template !== '') {
+      if (invalidName(template)) return fail(E.nameInvalid)
       cloneProfile(template, name)
     } else {
       createProfile(name)
@@ -144,28 +161,33 @@ export function registerProfileIpc(): void {
   })
 
   handle('profile:clone', (_event, name: string, newName: string): IpcResult<boolean> => {
+    if (invalidName(name) || invalidName(newName)) return fail(E.nameInvalid)
     cloneProfile(name, newName)
     return { ok: true, value: true }
   })
 
   handle('profile:delete', (_event, name: string): IpcResult<boolean> => {
+    if (invalidName(name)) return fail(E.nameInvalid)
     softDeleteProfile(name)
     return { ok: true, value: true }
   })
 
-  handle('profile:export', (_event, name: string): IpcResult<string> => ({
-    ok: true, value: exportProfile(name),
-  }))
+  handle('profile:export', (_event, name: string): IpcResult<string> => {
+    if (invalidName(name)) return fail(E.nameInvalid)
+    return { ok: true, value: exportProfile(name) }
+  })
 
   // The profile's locally-linked bundles — the renderer asks before exporting to
   // decide whether to pack their code into a zip.
-  handle('profile:localBundles', (_event, name: string): IpcResult<string[]> => ({
-    ok: true, value: listLocalBundles(name, pluginDir()).map(b => b.name),
-  }))
+  handle('profile:localBundles', (_event, name: string): IpcResult<string[]> => {
+    if (invalidName(name)) return fail(E.nameInvalid)
+    return { ok: true, value: listLocalBundles(name, pluginDir()).map(b => b.name) }
+  })
 
   // Save a profile's export to a user-chosen file: `.json` (config only), or
   // `.zip` (config + packed local plugin code) when `opts.zip` is set.
   handle('profile:exportToFile', async (_event, name: string, opts?: { zip?: boolean }): Promise<IpcResult<string>> => {
+    if (invalidName(name)) return fail(E.nameInvalid)
     const json = exportProfile(name)
     const zip = opts?.zip === true
     const picked = await dialog.showSaveDialog({
@@ -224,6 +246,12 @@ export function registerProfileIpc(): void {
   // a json) whose `plugins/*` restore local bundles offline; dsh mismatch is
   // refused unless `forceDsh`. Temp unpack dir is cleaned up afterwards.
   handle('profile:import', async (event, json: string, name?: string, forceDsh?: boolean, localSource?: string): Promise<IpcResult<ImportProfileResult>> => {
+    if (name !== undefined && name !== '' && invalidName(name)) return fail(E.nameInvalid)
+    // `localSource` is only ever the unpacked zip dir under `import-tmp`; refuse
+    // any other path so the recursive cleanup below can never touch user data.
+    if (localSource !== undefined && localSource !== '' && pathOutsideRoot(importTmpRoot(), localSource)) {
+      return fail(E.nameInvalid)
+    }
     const result = await importProfile(json, { name, forceDsh, localSource },
       step => event.sender.send('import:event', step))
     if (localSource !== undefined && localSource !== '') rmSync(localSource, { recursive: true, force: true })
@@ -237,23 +265,27 @@ export function registerProfileIpc(): void {
     const src = dshes.find(d => d.id === sourceDshId)
     const tgt = dshes.find(d => d.id === targetDshId)
     if (src === undefined || tgt === undefined) return fail(E.dshNotFound)
+    if (invalidName(profileName)) return fail(E.nameInvalid)
     const result = await mirrorProfile(contextForEntry(src), contextForEntry(tgt), profileName,
       {}, step => event.sender.send('import:event', step))
     return { ok: true, value: result }
   })
 
-  handle('profile:missingBundles', (_event, name: string): IpcResult<string[]> => ({
-    ok: true, value: listUnclaimedBundles(name),
-  }))
+  handle('profile:missingBundles', (_event, name: string): IpcResult<string[]> => {
+    if (invalidName(name)) return fail(E.nameInvalid)
+    return { ok: true, value: listUnclaimedBundles(name) }
+  })
 
   // The composition stack: bundle layers in order, then profile, then home.
-  handle('profile:layers', (_event, name: string): IpcResult<ProfileLayer[]> => ({
-    ok: true, value: composeProfileLayers(name),
-  }))
+  handle('profile:layers', (_event, name: string): IpcResult<ProfileLayer[]> => {
+    if (invalidName(name)) return fail(E.nameInvalid)
+    return { ok: true, value: composeProfileLayers(name) }
+  })
 
   // Create / update a row (pure id, disabled, config override, or insert) on the
   // profile's own patch layer. Content is YAML-validated before writing.
   handle('profile:addRow', (_event, name: string, row: RowCreateInput): IpcResult<boolean> => {
+    if (invalidName(name)) return fail(E.nameInvalid)
     const id = row.id.trim()
     if (rowIdInvalid(id)) return fail(E.nameInvalid)
     if (row.config !== undefined && row.config.trim() !== '') assertConfigValid(row.config)
@@ -264,6 +296,7 @@ export function registerProfileIpc(): void {
 
   // Remove a row's override from the profile layer (restores the bundle default).
   handle('profile:removeRow', (_event, name: string, id: string): IpcResult<boolean> => {
+    if (invalidName(name)) return fail(E.nameInvalid)
     if (!existsSync(patchPathOf(name))) return fail(E.patchNothingToRemove)
     writeUserPatch(name, removeRow(readUserPatch(name), id))
     return { ok: true, value: true }
@@ -272,6 +305,7 @@ export function registerProfileIpc(): void {
   // Copy a bundle row verbatim into the profile layer, so the user can then
   // override it there. The bundle package itself is never modified.
   handle('profile:copyRow', (_event, name: string, bundle: string, id: string): IpcResult<boolean> => {
+    if (invalidName(name) || invalidName(bundle)) return fail(E.nameInvalid)
     const src = resolveBundlePatch(bundle, name)
     if (src === undefined) return fail(E.bundleNotFound, { bundle })
     const block = extractRowBlock(readFileSync(src, 'utf8'), id)
@@ -284,30 +318,35 @@ export function registerProfileIpc(): void {
 
   // Edit an existing row's config block in the profile layer.
   handle('profile:setRowConfig', (_event, name: string, id: string, configText: string): IpcResult<boolean> => {
+    if (invalidName(name)) return fail(E.nameInvalid)
     writeUserPatch(name, setRowConfig(readUserPatch(name), id, configText))
     return { ok: true, value: true }
   })
 
   handle('profile:removeBundle', async (_event, name: string, bundle: string): Promise<IpcResult<boolean>> => {
+    if (invalidName(name) || invalidName(bundle)) return fail(E.nameInvalid)
     await removeBundle(name, bundle)
     return { ok: true, value: true }
   })
 
   // Move one bundle layer to `toIndex` within `dsh.profile.bundles`.
   handle('profile:reorderBundle', (_event, name: string, bundle: string, toIndex: number): IpcResult<boolean> => {
+    if (invalidName(name) || invalidName(bundle)) return fail(E.nameInvalid)
     if (!Number.isInteger(toIndex)) return fail(E.nameInvalid, [], 'toIndex 必须是整数')
     reorderBundle(name, bundle, toIndex)
     return { ok: true, value: true }
   })
 
   // Manually re-reconcile the bundles layer against installed state.
-  handle('profile:reconcile', (_event, name: string): IpcResult<{ added: string[]; removed: string[] }> => ({
-    ok: true, value: reconcileBundles(name),
-  }))
+  handle('profile:reconcile', (_event, name: string): IpcResult<{ added: string[]; removed: string[] }> => {
+    if (invalidName(name)) return fail(E.nameInvalid)
+    return { ok: true, value: reconcileBundles(name) }
+  })
 
   // Default (bundle) vs current (profile layer) config for one row — for the
   // two-pane diff editor.
   handle('profile:configInfo', (_event, name: string, id: string): IpcResult<{ default: string; current: string }> => {
+    if (invalidName(name)) return fail(E.nameInvalid)
     const def = defaultConfigText(name, id)
     let current = ''
     const patchPath = patchPathOf(name)
@@ -321,6 +360,7 @@ export function registerProfileIpc(): void {
   // Open the profile's `cordis.patch.yml` in the OS default editor, so the user
   // can hand-edit / repair it. Creates an empty overlay if it is missing.
   handle('profile:openPatchSource', async (_event, name: string): Promise<IpcResult<boolean>> => {
+    if (invalidName(name)) return fail(E.nameInvalid)
     const path = patchPathOf(name)
     if (!existsSync(path)) writeFileSync(path, '[]\n')
     const error = await shell.openPath(path)

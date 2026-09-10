@@ -40,6 +40,30 @@ describe('installSource guard branches', () => {
     }
   })
 
+  it('refuses a path-escaping plugin name before touching disk or pnpm', async () => {
+    const store = tmpStore()
+    try {
+      for (const name of ['..', '../evil', 'a/b/../c', 'a\\b', 'C:\\x', '/abs']) {
+        const r = await installSource(store, name, 'anything')
+        expect(r.ok).toBe(false)
+      }
+      expect(runPnpmMock).not.toHaveBeenCalled()
+    } finally {
+      rmSync(store, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses a source that pnpm would parse as a flag', async () => {
+    const store = tmpStore()
+    try {
+      const r = await installSource(store, 'foo', '--global')
+      expect(r.ok).toBe(false)
+      expect(runPnpmMock).not.toHaveBeenCalled()
+    } finally {
+      rmSync(store, { recursive: true, force: true })
+    }
+  })
+
   it('propagates a failed pnpm add and drops the staging dir', async () => {
     const store = tmpStore()
     try {
@@ -90,6 +114,23 @@ describe('removePlugin guard branches', () => {
 
   it('deleteTreePhysical tolerates a missing dir (falls back to rm force)', () => {
     expect(() => deleteTreePhysical(join(tmpdir(), 'does-not-exist-xyz'))).not.toThrow()
+  })
+
+  it('refuses a dot-only version instead of deleting the archive', () => {
+    const store = tmpStore()
+    try {
+      const archive = join(store, 'archive')
+      mkdirSync(archive, { recursive: true })
+      const marker = join(archive, 'keep.txt')
+      writeFileSync(marker, 'x')
+
+      expect(removePlugin(store, 'pkg', '..').ok).toBe(false)
+      expect(removePlugin(store, 'pkg', '.').ok).toBe(false)
+      // The archive (and its content) must survive the refused calls.
+      expect(existsSync(marker)).toBe(true)
+    } finally {
+      rmSync(store, { recursive: true, force: true })
+    }
   })
 })
 

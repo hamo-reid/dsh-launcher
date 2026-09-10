@@ -3,7 +3,12 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['src/main/core/**/*.test.ts', 'src/renderer/src/i18n/**/*.test.ts', 'src/renderer/src/lib/**/*.test.ts'],
+    include: [
+      'src/main/core/**/*.test.ts',
+      'src/main/ipc/**/*.test.ts',
+      'src/renderer/src/i18n/**/*.test.ts',
+      'src/renderer/src/lib/**/*.test.ts',
+    ],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json-summary', 'lcov'],

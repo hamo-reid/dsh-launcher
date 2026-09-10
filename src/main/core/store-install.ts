@@ -15,6 +15,7 @@ import {
   versionStagingDir, versionsRoot, type ProfileManifestShape,
 } from './store-layout.ts'
 import { recordPluginSource, sourceKindOf } from './store-sources.ts'
+import { pathIdentifierInvalid } from './name-guard.ts'
 import { migrateLegacyStore } from './store-migration.ts'
 import { isLegacyPkg } from './store-uninstall.ts'
 import { listBundleSubdepNames } from './bundle-subdeps.ts'
@@ -82,6 +83,13 @@ export async function addPlugin(dir: string, source: string, name?: string): Pro
  * version, then hoist the whole project to `archive/<name>/<version>/`. */
 export async function installSource(storeDir: string, name: string, source: string, signal?: AbortSignal): Promise<PnpmResult> {
   if (name.trim() === '') return { ok: false, text: '未能确定插件包名' }
+  // The name becomes an `archive/<name>/` path segment; refuse anything that
+  // could escape the store tree (`..`, `\`, drive/absolute, `//`). Deliberately
+  // looser than npm's name rules so local/legacy package names (uppercase, …)
+  // still install.
+  if (pathIdentifierInvalid(name)) return { ok: false, text: `插件包名不合法：${name}` }
+  // A source starting with `-` would be parsed by pnpm as a flag, not a package.
+  if (source.trim().startsWith('-')) return { ok: false, text: `插件来源不合法：${source}` }
   // Never add a version alongside a legacy flat package for the same plugin —
   // absorb old packages into the versioned layout first (and retarget any
   // profiles that link into a moved package).
