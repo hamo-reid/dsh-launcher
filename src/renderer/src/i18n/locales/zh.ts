@@ -348,6 +348,7 @@ const zh = {
     'errors.run.notRunning': '当前没有运行中的进程',
     'errors.run.openHttpOnly': '仅允许打开 http(s) 链接。',
     'errors.shell.openPath': '无法打开：{{detail}}',
+    'errors.data.notSelected': '请先通过「从文件恢复…」选择数据包。',
     'errors.common.cancelled': '已取消',
 
     'profile.view.profiles': 'Profile',

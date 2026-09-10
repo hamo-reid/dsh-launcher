@@ -10,6 +10,12 @@ import { exportDshData, importDshData, mirrorDshData } from '../core/home-data.t
 import { fail, failFromError, E } from '../core/errors.ts'
 import type { DshDataImportResult, DshDataManifest, DshEntry, IpcResult } from '../../shared/types.ts'
 
+/** The archive the last `data:inspectImport` dialog actually returned. `data:import`
+ * only accepts THIS path — a main-process-issued token — so a compromised
+ * renderer cannot force-import an arbitrary (attacker-controlled) archive into a
+ * dsh home. Replaced on each pick, cleared on cancel and consumed by an import. */
+let inspectedImportFile: string | null = null
+
 /** The registered entry + its context for `id`, or `undefined`. */
 function entryFor(id: string): { entry: DshEntry; ctx: DshContext } | undefined {
   const entry = readDshState().dshes.find(d => d.id === id)
@@ -46,9 +52,11 @@ export function registerHomeDataIpc(): void {
         filters: [{ name: 'DSH 数据', extensions: ['zip'] }],
       })
       if (picked.canceled || picked.filePaths.length === 0) {
+        inspectedImportFile = null
         return { ok: true, value: { file: '', manifest: null } }
       }
       const file = picked.filePaths[0]
+      inspectedImportFile = file
       let manifest: DshDataManifest | null = null
       const entry = new AdmZip(file).getEntry('data-manifest.json')
       if (entry !== undefined && entry !== null) {
@@ -65,6 +73,10 @@ export function registerHomeDataIpc(): void {
     try {
       const s = entryFor(id)
       if (s === undefined) return fail(E.dshNotFound)
+      // Only the archive the native dialog just returned may be imported; the
+      // token is one-shot, so a later direct call can't reuse or forge a path.
+      if (inspectedImportFile === null || file !== inspectedImportFile) return fail(E.dataNotSelected)
+      inspectedImportFile = null
       return { ok: true, value: importDshData(s.ctx, file, { forceDsh }) }
     } catch (error) {
       return failFromError(error)

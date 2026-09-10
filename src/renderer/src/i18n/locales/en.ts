@@ -350,6 +350,7 @@ const en: typeof zh = {
     'errors.run.notRunning': 'No process is currently running',
     'errors.run.openHttpOnly': 'Only http(s) links may be opened.',
     'errors.shell.openPath': 'Cannot open: {{detail}}',
+    'errors.data.notSelected': 'Pick a data archive via “Restore from file…” first.',
     'errors.common.cancelled': 'Cancelled',
 
     'profile.view.profiles': 'Profile',

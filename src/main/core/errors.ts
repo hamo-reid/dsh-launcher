@@ -88,6 +88,8 @@ export const E = {
   pluginNotInstalled: 'plugin.notInstalled',
   // market
   marketEntryNotFound: 'market.entryNotFound',
+  // dsh data import/export
+  dataNotSelected: 'data.notSelected',
   // run
   runAlreadyRunning: 'run.alreadyRunning',
   runExecMissing: 'run.execMissing',
