@@ -6,6 +6,7 @@
  * with no electron dependency.
  */
 import { describe, expect, it } from 'vitest'
+import { spawnSync } from 'node:child_process'
 import type { LaunchEntry } from './dsh.ts'
 import {
   buildDshLaunch, buildNodeScriptLaunch, ELECTRON_NODE_SHIM, type NodeTarget,
@@ -65,5 +66,28 @@ describe('buildNodeScriptLaunch (pnpm)', () => {
     expect(bun.exe).toBe(BUNDLED.exe)
     expect(bun.argv).toEqual(['--import', ELECTRON_NODE_SHIM, 'pnpm.cjs', 'install'])
     expect(bun.env.ELECTRON_RUN_AS_NODE).toBe('1')
+  })
+})
+
+describe('ELECTRON_NODE_SHIM', () => {
+  it('is an inline data: module', () => {
+    expect(ELECTRON_NODE_SHIM.startsWith('data:text/javascript,')).toBe(true)
+  })
+
+  it('clears the variable here but restores it for process.execPath children', () => {
+    // Run the shim in a real node process, then spawn `process.execPath`: the
+    // shim must delete the var from THIS process and re-add it to that child.
+    const inner = 'process.stdout.write(String(process.env.ELECTRON_RUN_AS_NODE))'
+    const probe = [
+      "const cp = require('node:child_process')",
+      `const r = cp.spawnSync(process.execPath, ['-e', ${JSON.stringify(inner)}], { encoding: 'utf8' })`,
+      "process.stdout.write(String(process.env.ELECTRON_RUN_AS_NODE) + '|' + r.stdout)",
+    ].join(';')
+    const res = spawnSync(process.execPath, ['--import', ELECTRON_NODE_SHIM, '-e', probe], {
+      encoding: 'utf8',
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    })
+    expect(res.status).toBe(0)
+    expect(res.stdout).toBe('undefined|1')
   })
 })
