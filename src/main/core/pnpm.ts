@@ -91,6 +91,25 @@ export function pnpmStoreDir(storeDir: string): string {
   return join(storeDir, '.pnpm-store')
 }
 
+/** Provider for the library-scoped store base used by `runPnpm` when the caller
+ * did not pass an explicit `storeDir`. Wired once at startup to `pluginDir`, so
+ * every pnpm invocation shares one cache. Kept injectable so `core` stays free
+ * of the settings layer and tests can run without a configured store. */
+let libraryStoreBase: () => string | undefined = () => undefined
+
+/** Wire the default library store base (the main entry points this at
+ * `pluginDir`). Commands that pass an explicit `storeDir` still win. */
+export function configurePnpmStore(provider: () => string | undefined): void {
+  libraryStoreBase = provider
+}
+
+/** Normalize a store base: trim, treating empty/whitespace as "not configured".
+ * The single decision point for whether a `--store-dir` gets injected. */
+export function resolveStoreBase(libraryDir: string | undefined): string | undefined {
+  const dir = libraryDir?.trim()
+  return dir !== undefined && dir !== '' ? dir : undefined
+}
+
 /** The pnpm's default per-user store, if any (mirrored on first use to seed the
  * library-scoped store without a re-download when both are on the same volume). */
 function defaultPnpmStoreRoot(): string {
@@ -147,15 +166,17 @@ export function ensurePnpmStore(storeDir: string | undefined): void {
 
 /** Run `pnpm <args>` with cwd, resolving on process exit. When `signal` is given
  * and the caller aborts it, the pnpm child (and its sub-process tree) is killed
- * and the promise resolves with `{ ok: false, aborted: true }`. When `storeDir` is
- * given, a `--store-dir <pluginDir>/.pnpm-store` is injected so installs share the
- * plugin-library store regardless of cwd (keeps hard-link dedup on the same volume). */
+ * and the promise resolves with `{ ok: false, aborted: true }`. A
+ * `--store-dir <pluginDir>/.pnpm-store` is always injected — the caller's
+ * explicit `storeDir` when given, else the configured library store — so installs
+ * share one plugin-library store regardless of cwd and pnpm never computes its own
+ * (which, on a volume different from the user's home, would drop an unmanaged
+ * `<drive>\.pnpm-store` at the drive root). */
 export function runPnpm(cwd: string, args: readonly string[], signal?: AbortSignal, opts?: { storeDir?: string }): Promise<PnpmResult> {
   return new Promise((resolve) => {
-    if (opts?.storeDir !== undefined && opts.storeDir !== '') ensurePnpmStore(opts.storeDir)
-    const storeDir = opts?.storeDir !== undefined && opts.storeDir !== ''
-      ? pnpmStoreDir(opts.storeDir)
-      : undefined
+    const storeBase = resolveStoreBase(opts?.storeDir) ?? resolveStoreBase(libraryStoreBase())
+    if (storeBase !== undefined) ensurePnpmStore(storeBase)
+    const storeDir = storeBase !== undefined ? pnpmStoreDir(storeBase) : undefined
     const fullArgs = storeDir !== undefined ? ['--store-dir', storeDir, ...args] : args
     const started = Date.now()
     // Stream pnpm's live stdout/stderr when Debug monitoring is requested.

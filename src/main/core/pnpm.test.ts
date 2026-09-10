@@ -4,12 +4,12 @@
  * genuine failure / spawn error / in-flight abort) is covered without spawning a
  * real child or needing a network install.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
 import { existsSync, mkdirSync, mkdtempSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ensurePnpmStore, installSucceeded, pnpmStoreDir, runPnpm } from './pnpm.ts'
+import { configurePnpmStore, ensurePnpmStore, installSucceeded, pnpmStoreDir, resolveStoreBase, runPnpm } from './pnpm.ts'
 
 const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }))
 vi.mock('node:child_process', () => ({ spawn: spawnMock }))
@@ -136,5 +136,69 @@ describe('ensurePnpmStore (library-scoped store seeding)', () => {
     // Nonexistent default store: without the existing guard this would try to seed.
     ensurePnpmStore(storeDir)
     expect(existsSync(join(pnpmStoreDir(storeDir), 'probe'))).toBe(true)
+  })
+})
+
+describe('resolveStoreBase', () => {
+  it('returns a trimmed, non-empty base', () => {
+    expect(resolveStoreBase('  C:/plugins  ')).toBe('C:/plugins')
+  })
+
+  it('treats undefined / empty / whitespace as unconfigured', () => {
+    expect(resolveStoreBase(undefined)).toBeUndefined()
+    expect(resolveStoreBase('')).toBeUndefined()
+    expect(resolveStoreBase('   ')).toBeUndefined()
+  })
+})
+
+describe('runPnpm store resolution', () => {
+  beforeEach(() => spawnMock.mockReset())
+  afterEach(() => configurePnpmStore(() => undefined))
+
+  /** A store base whose `.pnpm-store` already exists, so `ensurePnpmStore` is a
+   * no-op and never hard-links the machine's real default store into the test. */
+  function configuredStore(prefix: string): string {
+    const store = mkdtempSync(join(tmpdir(), prefix))
+    mkdirSync(pnpmStoreDir(store), { recursive: true })
+    return store
+  }
+
+  /** The `--store-dir` value passed to spawn, if any. */
+  function storeDirArg(): string | undefined {
+    const argv = spawnMock.mock.calls[0]?.[1] as string[] | undefined
+    const at = argv?.indexOf('--store-dir') ?? -1
+    return at >= 0 ? argv?.[at + 1] : undefined
+  }
+
+  it('injects the configured library store when no explicit storeDir is given', async () => {
+    const child = fakeChild()
+    spawnMock.mockReturnValue(child)
+    const store = configuredStore('pm-cfg-')
+    configurePnpmStore(() => store)
+    const p = runPnpm('/dir', ['install'])
+    child.emit('close', 0)
+    await p
+    expect(storeDirArg()).toBe(pnpmStoreDir(store))
+  })
+
+  it('lets an explicit storeDir override the configured library store', async () => {
+    const child = fakeChild()
+    spawnMock.mockReturnValue(child)
+    const configured = configuredStore('pm-cfg2-')
+    const explicit = configuredStore('pm-exp-')
+    configurePnpmStore(() => configured)
+    const p = runPnpm('/dir', ['install'], undefined, { storeDir: explicit })
+    child.emit('close', 0)
+    await p
+    expect(storeDirArg()).toBe(pnpmStoreDir(explicit))
+  })
+
+  it('injects no --store-dir when neither is configured', async () => {
+    const child = fakeChild()
+    spawnMock.mockReturnValue(child)
+    const p = runPnpm('/dir', ['install'])
+    child.emit('close', 0)
+    await p
+    expect(storeDirArg()).toBeUndefined()
   })
 })

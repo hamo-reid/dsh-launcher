@@ -6,7 +6,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { listProfiles, profileDir, profilesDir } from './home.ts'
-import { profilesRootFor, type DshContext } from './appState.ts'
+import { pluginDir, profilesRootFor, type DshContext } from './appState.ts'
 import { readManifest } from './manifest.ts'
 import { listComboPlugins } from './combo.ts'
 import { parsePatchRows } from './patch.ts'
@@ -260,7 +260,7 @@ export function exportProfile(name: string, ctx?: DshContext): string {
     dsh?: { profile?: { bundles?: string[] } }
   }
   const deps = manifest.dependencies ?? {}
-  const storeDeps = readStoreDeps(loadSettings().pluginDir ?? '')
+  const storeDeps = readStoreDeps(pluginDir())
   const bundles: ExportBundle[] = (manifest.dsh?.profile?.bundles ?? []).map(raw => classifyBundle(String(raw), deps, storeDeps))
   const bundleNames = new Set(bundles.map(b => b.name))
   const dependencies: Record<string, string> = {}
@@ -322,7 +322,7 @@ export async function mirrorProfile(
   onProgress?: (step: ImportStep) => void,
 ): Promise<ImportProfileResult> {
   const json = exportProfile(name, source)
-  const storeDir = loadSettings().pluginDir ?? ''
+  const storeDir = pluginDir()
   // Pack the source's locally-linked bundles into a temp dir that importProfile
   // consumes as `localSource/<name>` (mirroring the zip-export unpack layout).
   const locals = listLocalBundles(name, storeDir, source)
@@ -403,7 +403,7 @@ export async function importProfile(
     deps[k] = v
   }
   const userPatch = typeof data.userPatch === 'string' ? data.userPatch : ''
-  const storeDir = loadSettings().pluginDir ?? ''
+  const storeDir = pluginDir()
   const localSource = opts.localSource ?? ''
 
   emit({ kind: 'create' })
