@@ -7,7 +7,7 @@
  * flushed to disk on each {@link saveSettings}. load/save are synchronous
  * against the in-memory database.
  */
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import initSqlJs, { type Database } from 'sql.js'
@@ -124,13 +124,26 @@ export function nodePreferenceValue(): 'system' | 'bundled' {
   return p === 'bundled' ? 'bundled' : 'system'
 }
 
-/** Persist settings (upsert one row) and flush the database file to disk. */
+/** Persist settings (upsert one row) and flush the database file to disk. The
+ * file is replaced atomically (temp + rename) so a crash or a concurrent writer
+ * can never leave a truncated/corrupt app.sqlite. */
 export function saveSettings(settings: AppSettings): void {
   ensureDb().run(
     `INSERT INTO app_settings (key, value) VALUES ('${KEY}', ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
     [JSON.stringify(settings)],
   )
-  writeFileSync(dbFile, Buffer.from(ensureDb().export()))
+  const data = Buffer.from(ensureDb().export())
+  const tmp = `${dbFile}.tmp`
+  try {
+    writeFileSync(tmp, data)
+    renameSync(tmp, dbFile)
+  } catch (error) {
+    // Windows can transiently lock the target (antivirus / indexer). Fall back
+    // to a direct write so a save is never lost; drop the temp file first.
+    try { rmSync(tmp, { force: true }) } catch { /* ignore */ }
+    writeFileSync(dbFile, data)
+    logger.warn(`settings atomic write fell back to direct write: ${error instanceof Error ? error.message : String(error)}`)
+  }
   logger.debug('settings saved')
 }

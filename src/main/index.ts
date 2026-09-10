@@ -29,6 +29,25 @@ const rlog = child('renderer')
 process.on('uncaughtException', (error) => logger.error('uncaughtException', error))
 process.on('unhandledRejection', (reason) => logger.error('unhandledRejection', reason))
 
+// ── Single instance ──────────────────────────────────────────────────────────
+// Only one launcher may run. Besides preventing a user from opening it twice,
+// this is the backstop for a stray `process.execPath` spawn from dsh: such a
+// child boots the Electron app, but must never become a real instance — it
+// fails to get the lock and exits before any window / settings DB work, so it
+// can't clobber app.sqlite or open a duplicate UI.
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+  process.exit(0)
+}
+app.on('second-instance', () => {
+  const [win] = BrowserWindow.getAllWindows()
+  if (win !== undefined) {
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
+  }
+})
+
 /** Owned at module scope so the OS tray icon isn't garbage-collected away. */
 let tray: Tray | null = null
 /** Set once a real quit is requested (via tray 退出 / app.quit), so the window

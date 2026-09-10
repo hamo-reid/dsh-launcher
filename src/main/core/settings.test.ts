@@ -61,6 +61,13 @@ describe('loadSettings / saveSettings', () => {
     await openDatabase(join(dir, 'app.sqlite'))
     expect(loadSettings()).toEqual({ activeDshId: 'd1' })
   })
+
+  it('replaces the db atomically, leaving no temp file behind', () => {
+    saveSettings({ pluginDir: '/store' })
+    const dir = dirs[dirs.length - 1]
+    expect(existsSync(join(dir, 'app.sqlite'))).toBe(true)
+    expect(existsSync(join(dir, 'app.sqlite.tmp'))).toBe(false)
+  })
 })
 
 describe('migrateLegacyJson', () => {
