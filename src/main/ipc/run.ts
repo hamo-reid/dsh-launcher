@@ -8,6 +8,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { existsExecutable, resolveLaunchEntry, type LaunchEntry } from '../core/dsh.ts'
+import { buildDshLaunch } from '../core/launch-spec.ts'
 import { nodeEnvironment } from '../core/node-env.ts'
 import { nodePreferenceValue } from '../core/settings.ts'
 import { activeDshEntry } from '../core/appState.ts'
@@ -152,16 +153,13 @@ export function registerRunIpc(): void {
       } catch (error) {
         return fail(E.runExecLaunchResolve, { path: entry.execPath }, error instanceof Error ? error.message : String(error))
       }
-      const { script, tsx, cwd } = launch
-      // dsh's HMR service (cordis-plugin-hmr) requires the Node `--expose-internals`
-      // flag; harmless for every other profile. Applies to both bundled & system node.
-      const argv = tsx
-        ? ['--expose-internals', '--import', 'tsx/esm', script, '--profile', profile]
-        : ['--expose-internals', script, '--profile', profile]
-      const { exe } = resolveNodeExe()
-      // ELECTRON_RUN_AS_NODE is only meaningful for electron.exe; a system `node`
-      // ignores it, so it can be set unconditionally.
-      const env = { ...process.env, DSH_HOME: entry.home, ELECTRON_RUN_AS_NODE: '1' }
+      const { cwd } = launch
+      // argv/env are assembled in one place (core/launch-spec.ts) so app and shell
+      // modes cannot drift apart: the bundled Electron path sets ELECTRON_RUN_AS_NODE
+      // for the Electron process itself and preloads a shim that clears it before dsh
+      // can spawn children; the system-node path carries neither.
+      const node = resolveNodeExe()
+      const { exe, argv, env } = buildDshLaunch({ launch, home: entry.home, node, profile })
       const shellMode = mode === 'shell'
       runCommand = argv.join(' ')
       let exited = false

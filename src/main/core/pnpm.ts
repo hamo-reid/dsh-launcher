@@ -12,6 +12,7 @@ import { createRequire } from 'node:module'
 import os from 'node:os'
 import { dirname, join, parse } from 'node:path'
 import { child, logger } from './logger.ts'
+import { buildNodeScriptLaunch, type NodeTarget } from './launch-spec.ts'
 import { nodeEnvironment } from './node-env.ts'
 import { nodePreferenceValue } from './settings.ts'
 
@@ -75,8 +76,10 @@ function summarizePnpmOut(out: string): string {
 
 /** Node to drive pnpm with: the setting-preferred one when usable, else the
  * bundled Node (keeps pnpm available offline even without a system node). */
-function resolvePnpmNode(): string {
-  return nodeEnvironment(nodePreferenceValue()).prefer === 'system' ? 'node' : process.execPath
+function resolvePnpmNode(): NodeTarget {
+  return nodeEnvironment(nodePreferenceValue()).prefer === 'system'
+    ? { exe: 'node', bundled: false }
+    : { exe: process.execPath, bundled: true }
 }
 
 /** The shared, content-addressed pnpm store for the plugin library. Lives INSIDE
@@ -157,15 +160,21 @@ export function runPnpm(cwd: string, args: readonly string[], signal?: AbortSign
     const started = Date.now()
     // Stream pnpm's live stdout/stderr when Debug monitoring is requested.
     const trace = tracePnpm()
+    const node = resolvePnpmNode()
+    const pnpmEntry = resolvePnpmEntry()
+    // Same env contract as the dsh launch: the bundled Electron-as-node path sets
+    // ELECTRON_RUN_AS_NODE for itself and preloads the cleanup shim, so pnpm's own
+    // children (lifecycle scripts, editors) never inherit it.
+    const spec = buildNodeScriptLaunch({ node, script: pnpmEntry, args: fullArgs })
     let child: ReturnType<typeof spawn>
     try {
-      child = spawn(resolvePnpmNode(), [resolvePnpmEntry(), ...fullArgs], {
+      child = spawn(spec.exe, spec.argv, {
         cwd,
         // Absolute execPath + array args: no shell, so a spacey packaged exe name
         // or a spacey pnpm-entry path is passed correctly (no quoting hazards).
         shell: false,
         windowsHide: true,
-        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+        env: spec.env,
       })
     } catch (error) {
       plog.error('pnpm failed to start', error)
@@ -175,7 +184,7 @@ export function runPnpm(cwd: string, args: readonly string[], signal?: AbortSign
     // Structured spawn breadcrumb: confirm which node/entry drives pnpm, where,
     // with what flags, and the child pid (kill-target for future Debug actions).
     plog.debug(`pnpm spawn: ${fullArgs.join(' ')} @ ${cwd}`, {
-      cwd, args: fullArgs, node: resolvePnpmNode(), entry: resolvePnpmEntry(), storeDir, pid: child.pid,
+      cwd, args: fullArgs, node: node.exe, entry: pnpmEntry, storeDir, pid: child.pid,
     })
     const onAbort = (): void => { if (child.pid !== undefined) killProcessTree(child.pid) }
     if (signal !== undefined) {
