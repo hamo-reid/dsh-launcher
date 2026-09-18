@@ -4,7 +4,9 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, Tray } from 'electron'
 import { join } from 'node:path'
 import os from 'node:os'
-import { currentRun, formatRunDuration, registerRunIpc, subscribeRunState, terminateAndClear, type RuntimeState } from './ipc/run.ts'
+import { listRuns, registerRunIpc, stopAllRuns, subscribeRunState } from './ipc/run.ts'
+import { formatRunDuration } from './core/run-registry.ts'
+import type { RunInfo } from '../shared/types.ts'
 import { registerProfileIpc } from './ipc/profile.ts'
 import { registerHomeIpc } from './ipc/home.ts'
 import { registerPluginsIpc } from './ipc/plugins.ts'
@@ -156,13 +158,15 @@ function createWindow(): void {
   // Build the tray context menu. On Windows we can NOT rely on `setContextMenu`,
   // which would let the OS auto-show a STALE cached copy and swallow the
   // `right-click` event. Instead the menu is built fresh and popped up on every
-  // right-click, so the status line always reflects `currentRun()` at that moment.
+  // right-click, so the status line always reflects `listRuns()` at that moment.
   const showTrayMenu = (): void => {
-    const running = currentRun()
+    const running = listRuns()
     // 状态监控：右击瞬间取最新状态；运行中追加已运行时长。
-    const status = running === null
+    const status = running.length === 0
       ? '状态：空闲'
-      : `运行中：${running.profile} · ${formatRunDuration(Date.now() - running.startedAt)}`
+      : running.length === 1
+        ? `运行中：${running[0].profile} · ${formatRunDuration(Date.now() - running[0].startedAt)}`
+        : `运行中 ${running.length} 个：${running.map(r => r.profile).join('、')}`
     Menu.buildFromTemplate([
       { label: status, enabled: false },
       { type: 'separator' },
@@ -173,7 +177,7 @@ function createWindow(): void {
         label: '退出 DSH Launcher',
         click: () => {
           quitting = true
-          if (running !== null) terminateAndClear(running.child)
+          stopAllRuns()
           app.quit()
         },
       },
@@ -187,9 +191,13 @@ function createWindow(): void {
   tray.on('right-click', showTrayMenu)
 
   // 实时状态监控（tooltip 通道）：run 启动/停止时立即更新托盘悬浮提示，无需等右击。
-  const updateTrayState = (state: RuntimeState | null): void => {
+  const updateTrayState = (runs: RunInfo[]): void => {
     if (tray === null) return
-    tray.setToolTip(state === null ? 'DSH Launcher' : `运行中：${state.profile}`)
+    tray.setToolTip(runs.length === 0
+      ? 'DSH Launcher'
+      : runs.length === 1
+        ? `运行中：${runs[0].profile}`
+        : `运行中 ${runs.length} 个：${runs.map(r => r.profile).join('、')}`)
   }
   subscribeRunState(updateTrayState)
 
@@ -234,19 +242,20 @@ function createWindow(): void {
   // (so it can carry the "remember" checkbox); the chosen action is executed via
   // `window:chooseClose`. In no-prompt mode the configured `closeToTray`
   // behaviour applies directly, with the profile-run guard below.
-  const confirmTerminate = (active: RuntimeState): void => {
+  const confirmTerminate = (active: RunInfo[]): void => {
+    const names = active.map(r => r.profile).join('、')
     void dialog.showMessageBox(win, {
       type: 'warning',
       title: '进程仍在运行',
-      message: `profile「${active.profile}」的 dsh 仍在运行`,
-      detail: '退出将终止该进程。选择「取消」可保持其运行。',
+      message: active.length === 1 ? `profile「${names}」的 dsh 仍在运行` : `${active.length} 个 profile 的 dsh 仍在运行`,
+      detail: `${names}\n退出将终止这些进程。选择「取消」可保持其运行。`,
       buttons: ['终止并退出', '取消'],
       defaultId: 0,
       cancelId: 1,
       noLink: true,
     }).then(({ response }) => {
       if (response !== 0) return
-      terminateAndClear(active.child)
+      stopAllRuns()
       allowClose = true
       win.close()
     })
@@ -265,8 +274,8 @@ function createWindow(): void {
       if (!win.isDestroyed()) win.hide()
       return
     }
-    const active = currentRun()
-    if (active !== null) terminateAndClear(active.child)
+    const active = listRuns()
+    if (active.length > 0) stopAllRuns()
     allowClose = true
     app.quit()
   })
@@ -276,7 +285,7 @@ function createWindow(): void {
     // Prompt mode → tell the renderer to show the minimize/quit modal.
     if (askOnCloseEnabled()) {
       event.preventDefault()
-      win.webContents.send('window:askClose', { running: currentRun()?.profile })
+      win.webContents.send('window:askClose', { running: listRuns().map(r => r.profile) })
       return
     }
     // "Don't ask" mode: follow the configured close behaviour directly.
@@ -285,8 +294,8 @@ function createWindow(): void {
       win.hide()
       return
     }
-    const active = currentRun()
-    if (active === null) return
+    const active = listRuns()
+    if (active.length === 0) return
     event.preventDefault()
     confirmTerminate(active)
   })

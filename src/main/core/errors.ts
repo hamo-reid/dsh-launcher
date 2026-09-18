@@ -95,6 +95,12 @@ export const E = {
   runExecMissing: 'run.execMissing',
   runExecLaunchResolve: 'run.execLaunchResolve',
   runNotRunning: 'run.notRunning',
+  runNotFound: 'run.notFound',
+  runBadArg: 'run.badArg',
+  runBadPatch: 'run.badPatch',
+  runBadEnv: 'run.badEnv',
+  runReservedEnv: 'run.reservedEnv',
+  runBadPort: 'run.badPort',
   runOpenHttpOnly: 'run.openHttpOnly',
   // misc
   npmNotFound: 'npm.notFound',

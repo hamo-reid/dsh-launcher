@@ -55,6 +55,34 @@ describe('buildDshLaunch', () => {
   })
 })
 
+describe('buildDshLaunch launch parameters', () => {
+  it('places patch overlays after --profile and pass-through args last', () => {
+    const spec = buildDshLaunch({
+      launch: PUBLISHED, home: 'H', node: SYSTEM, profile: 'p',
+      patches: ['a.yml', 'b.yml'], args: ['--resume', 'abc'], env: { DSH_TELEMETRY_DISABLED: '1' },
+    })
+    expect(spec.argv).toEqual([
+      '--expose-internals', PUBLISHED.script,
+      '--profile', 'p',
+      '--patch', 'a.yml', '--patch', 'b.yml',
+      '--resume', 'abc',
+    ])
+    expect(spec.env.DSH_TELEMETRY_DISABLED).toBe('1')
+    expect(spec.env.DSH_HOME).toBe('H')
+  })
+
+  it('is identical to the plain command when no options are supplied', () => {
+    const bare = buildDshLaunch({ launch: PUBLISHED, home: 'H', node: SYSTEM, profile: 'p' })
+    expect(bare.argv).toEqual(['--expose-internals', PUBLISHED.script, '--profile', 'p'])
+  })
+
+  it('merges extra env without disturbing the bundled-node contract', () => {
+    const spec = buildDshLaunch({ launch: PUBLISHED, home: 'H', node: BUNDLED, profile: 'p', env: { FOO: 'bar' } })
+    expect(spec.env.FOO).toBe('bar')
+    expect(spec.env.ELECTRON_RUN_AS_NODE).toBe('1')
+  })
+})
+
 describe('buildNodeScriptLaunch (pnpm)', () => {
   it('preloads the shim only for the bundled Electron', () => {
     const sys = buildNodeScriptLaunch({ node: SYSTEM, script: 'pnpm.cjs', args: ['install'] })

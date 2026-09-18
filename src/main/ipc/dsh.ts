@@ -13,6 +13,7 @@ import {
 import {
   dshVersionDir, effectiveProfileDir, readDshState, writeDshState,
 } from '../core/appState.ts'
+import { listProfileInfosForEntry } from '../core/home.ts'
 import { startDshDownload } from '../core/pluginDownloads.ts'
 import { loadSettings, saveSettings } from '../core/settings.ts'
 import { fetchPackageVersions } from '../core/npm.ts'
@@ -20,7 +21,7 @@ import { majorOfVersion } from '../core/version.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
 import { logger } from '../core/logger.ts'
 import { handle } from './handle.ts'
-import type { DownloadStep, DshInstallStep, DshUpdateInfo, IpcResult, PackageVersionInfo } from '../../shared/types.ts'
+import type { DownloadStep, DshInstallStep, DshProfileInfo, DshUpdateInfo, IpcResult, PackageVersionInfo } from '../../shared/types.ts'
 
 /** A filesystem-safe version name (defaults to `official`). Strips path/shell
  * metacharacters and whitespace, and refuses leading/trailing dots — so `.`/`..`
@@ -138,6 +139,14 @@ export function registerDshIpc(): void {
         activeDshId,
       },
     }
+  })
+
+  // Profiles under a SPECIFIC dsh (for the Run page's launch picker/launcher),
+  // independent of the global active dsh.
+  handle('dsh:profiles', (_event, id: string): IpcResult<DshProfileInfo[]> => {
+    const entry = readDshState().dshes.find(d => d.id === id)
+    if (entry === undefined) return fail(E.dshNotFound)
+    return { ok: true, value: listProfileInfosForEntry(entry) }
   })
 
   // Whether a managed dsh has a newer release available. `value: null` = up to date.

@@ -4,11 +4,12 @@
  * The active dsh is derived from persisted settings (`activeDshId`), never a
  * mutable module global — so there is nothing to keep in sync when dsh changes. */
 
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import os from 'node:os'
 import { resolveInstallAnchor } from './dsh.ts'
 import { activeDshEntry, effectiveProfileDir } from './appState.ts'
+import type { DshEntry, DshProfileInfo } from '../../shared/types.ts'
 
 /** The active Harness home: the current dsh's, else $DSH_HOME, else `~/.dsh`. */
 export function dshHome(): string {
@@ -49,4 +50,33 @@ export function listProfiles(): string[] {
     .filter(entry => entry.isDirectory() && existsSync(join(dir, entry.name, 'package.json')))
     .map(entry => entry.name)
     .sort()
+}
+
+/** List profile names under an EXPLICIT dsh, without touching the active dsh —
+ * lets the Run page pick a launch target independently of the global selection.
+ * Carries only manifest-derived counts, so it never needs the active-dsh-scoped
+ * combo/manifest readers (the Profile page owns the richer summaries). */
+export function listProfileInfosForEntry(entry: DshEntry): DshProfileInfo[] {
+  const dir = effectiveProfileDir(entry)
+  if (!existsSync(dir)) return []
+  const infos: DshProfileInfo[] = []
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    if (!e.isDirectory()) continue
+    const manifestPath = join(dir, e.name, 'package.json')
+    if (!existsSync(manifestPath)) continue
+    let bundles = 0
+    let dependencies = 0
+    try {
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+        dsh?: { profile?: { bundles?: string[] } }
+        dependencies?: Record<string, string>
+      }
+      bundles = manifest.dsh?.profile?.bundles?.length ?? 0
+      dependencies = Object.keys(manifest.dependencies ?? {}).length
+    } catch {
+      // Keep the profile listed with zero counts on a malformed manifest.
+    }
+    infos.push({ name: e.name, bundles, dependencies })
+  }
+  return infos.sort((a, b) => a.name.localeCompare(b.name))
 }

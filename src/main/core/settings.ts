@@ -13,7 +13,7 @@ import { dirname, join } from 'node:path'
 import initSqlJs, { type Database } from 'sql.js'
 import { logger } from './logger.ts'
 import type { DshEntry } from './dsh.ts'
-import type { MarketSource } from '../../shared/types.ts'
+import type { LaunchOptions, MarketSource, RunMode } from '../../shared/types.ts'
 
 export interface AppSettings {
   /** Directory where downloaded/installed plugins are kept. */
@@ -44,6 +44,13 @@ export interface AppSettings {
   marketSource?: MarketSource
   /** Custom market catalog URL, used when `marketSource === 'custom'`. */
   marketUrl?: string
+  /** Saved default launch parameters, keyed `<dshId>::<profile>` (see
+   * `appState.launchOptionsKey`). Kept out of the profile manifest on purpose so
+   * machine-specific patch paths never leak into an exported/imported profile. */
+  launchOptions?: Record<string, LaunchOptions>
+  /** Last run mode per profile, keyed `<dshId>::<profile>`, so relaunching keeps
+   * the user's app/shell choice instead of resetting to `app`. */
+  runModes?: Record<string, RunMode>
 }
 
 const KEY = 'app'

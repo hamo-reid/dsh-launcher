@@ -134,10 +134,58 @@ export type IpcResult<T> =
   | { ok: true; value: T }
   | { ok: false; code: string; params?: Record<string, string> | string[]; error: string }
 
-/** Streamed status of the embedded profile runtime (main → renderer via `run:event`). */
+/** Launch mode for a profile runtime: embedded console (`app`) or a visible OS
+ * terminal window (`shell`). Both are owned/tracked by the main process. */
+export type RunMode = 'app' | 'shell'
+
+/** Per-profile launch parameters, persisted as defaults and overridable per run.
+ * All fields optional; the main process normalizes/validates them. */
+export interface LaunchOptions {
+  /** Extra argv appended AFTER `--profile <name>` — passed through to the booted
+   * app (e.g. `--resume abc`). Launcher flags (`--profile`/`--patch`/…) rejected. */
+  args?: string[]
+  /** Repeatable `--patch <file>` overlays applied after the profile's own layers. */
+  patches?: string[]
+  /** Extra child environment variables. Reserved keys are rejected. */
+  env?: Record<string, string>
+  /** Convenience web server port; compiled to `--port <n>` in the pass-through
+   * args (web profiles only). `0` lets the OS pick a free port. */
+  port?: number
+}
+
+/** Serializable snapshot of one profile runtime. Logs are NOT included (they can
+ * be large) — fetch them on demand with `run.logs(id)`. */
+export interface RunInfo {
+  /** Stable run id (`<profile>#<seq>`); survives renderer reloads. */
+  id: string
+  /** The dsh install that owns this run — runs may span several dsh. */
+  dshId: string
+  dshName: string
+  profile: string
+  mode: RunMode
+  /** Epoch ms the run started — drives the elapsed-time display. */
+  startedAt: number
+  /** Joined launch argv, for diagnostics. */
+  command: string
+  status: 'running' | 'exited'
+  /** Exit code / signal, present once `status === 'exited'`. */
+  code?: number | null
+  signal?: NodeJS.Signals | null
+}
+
+/** Saved per-profile run defaults: the mode to launch with plus its launch
+ * parameters. Stored under `<dshId>::<profile>` in app settings. */
+export interface RunDefaults {
+  mode: RunMode
+  options: LaunchOptions
+}
+
+/** Streamed status of a profile runtime (main → renderer via `run:event`). Every
+ * event carries the run `id` so the renderer can demultiplex concurrent runs. */
 export type RunEvent =
-  | { type: 'output'; line: string }
-  | { type: 'exited'; code: number | null; signal: NodeJS.Signals | null; command?: string }
+  | { type: 'started'; run: RunInfo }
+  | { type: 'output'; id: string; line: string }
+  | { type: 'exited'; run: RunInfo }
 
 // ── dsh installs ────────────────────────────────────────────────────────────
 
@@ -335,6 +383,14 @@ export interface ProfileSummary {
   bundles: number
   plugins: number
   patchRows: number
+}
+
+/** Lightweight profile listing under an explicit dsh (Run page launcher) —
+ * names plus manifest counts, read without touching the globally active dsh. */
+export interface DshProfileInfo {
+  name: string
+  bundles: number
+  dependencies: number
 }
 
 /** Result of a profile import — `ok` only means the profile was created. */

@@ -110,19 +110,31 @@ export interface DshLaunchInput {
   home: string
   node: NodeTarget
   profile: string
+  /** Pass-through app args, appended after the launcher flags. */
+  args?: readonly string[]
+  /** `--patch <file>` overlays, applied after the profile's own layers. */
+  patches?: readonly string[]
+  /** Extra child environment (reserved keys already filtered upstream). */
+  env?: NodeJS.ProcessEnv
 }
 
 /**
  * The exact argv/env to launch dsh: cleanup shim (bundled) → `--expose-internals`
  * (required by the HMR service in web profiles) → the tsx loader for a source
- * checkout → the entry script → the profile selector.
+ * checkout → the entry script → the profile selector → patch overlays →
+ * pass-through app args.
+ *
+ * Order matters: `--patch` is a launcher option and must precede the app's
+ * positional args, or a later `--patch` would be swallowed as an app arg.
  */
-export function buildDshLaunch({ launch, home, node, profile }: DshLaunchInput): LaunchSpec {
+export function buildDshLaunch({
+  launch, home, node, profile, args = [], patches = [], env,
+}: DshLaunchInput): LaunchSpec {
   const head = [...preloadArgs(node.bundled), '--expose-internals']
-  const argv = launch.tsx
-    ? [...head, '--import', 'tsx/esm', launch.script, '--profile', profile]
-    : [...head, launch.script, '--profile', profile]
-  return { exe: node.exe, argv, env: childEnv(node.bundled, { DSH_HOME: home }) }
+  const loader = launch.tsx ? ['--import', 'tsx/esm'] : []
+  const patchArgs = patches.flatMap(file => ['--patch', file])
+  const argv = [...head, ...loader, launch.script, '--profile', profile, ...patchArgs, ...args]
+  return { exe: node.exe, argv, env: childEnv(node.bundled, { DSH_HOME: home, ...env }) }
 }
 
 /** Inputs for launching a node script (pnpm) with the same cleanup contract. */

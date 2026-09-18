@@ -9,8 +9,8 @@ import { MODAL } from '../theme.ts'
 
 interface CloseConfirmModalProps {
   open: boolean
-  /** Name of a dsh profile the run-console is currently running, if any. */
-  running?: string
+  /** Profiles whose dsh is still running (empty/undefined when idle). */
+  running?: string[]
   onClose: () => void
   onResolve: (action: 'tray' | 'quit', remember: boolean) => void | Promise<void>
 }
@@ -28,9 +28,12 @@ export default function CloseConfirmModal(p: CloseConfirmModalProps): JSX.Elemen
     void p.onResolve(action, remember)
   }
 
+  const runningNames = p.running ?? []
+  const hasRunning = runningNames.length > 0
+
   return (
     <Modal
-      title={p.running !== undefined ? t('window.close.runningTitle') : t('window.close.title')}
+      title={hasRunning ? t('window.close.runningTitle') : t('window.close.title')}
       open={p.open}
       onCancel={p.onClose}
       footer={null}
@@ -44,8 +47,8 @@ export default function CloseConfirmModal(p: CloseConfirmModalProps): JSX.Elemen
       mask={{ closable: false }}
     >
       <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
-        {p.running !== undefined && (
-          <Alert type="warning" showIcon title={t('window.close.runningWarn', { profile: p.running })} />
+        {hasRunning && (
+          <Alert type="warning" showIcon title={t('window.close.runningWarn', { profile: runningNames.join('、') })} />
         )}
 
         <Space orientation="vertical" style={{ width: '100%' }}>

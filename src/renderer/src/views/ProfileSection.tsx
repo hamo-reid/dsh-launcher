@@ -1,8 +1,7 @@
 import { lazy, useCallback, useEffect, useState } from 'react'
 import {
-  Alert, Button, Checkbox, Modal, Segmented, Select, Space, Typography, theme, message,
+  Alert, Button, Modal, Segmented, Select, theme, message,
 } from 'antd'
-import { CaretRightOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
 import AppShell from '../components/AppShell.tsx'
@@ -12,12 +11,10 @@ import ConfirmMenu, { type MenuAction } from '../components/ConfirmMenu.tsx'
 // Profile detail is heavy (dnd-kit drag/drop) — lazy so it isn't in the first
 // profile-screen parse. The App-level Suspense provides its loading fallback.
 const ProfileDetailView = lazy(() => import('./ProfileDetail.tsx'))
-import RunConsole from '../components/RunConsole.tsx'
-import { useRunRuntime } from './useRunRuntime.tsx'
 import { useTrash } from './useTrash.ts'
 import TrashPanel from './TrashPanel.tsx'
 import {
-  CloneProfileModal, CreateProfileModal, ExportProfileModal, ImportProfileModal, MirrorProfileModal, RunFailModal,
+  CloneProfileModal, CreateProfileModal, ExportProfileModal, ImportProfileModal, MirrorProfileModal,
 } from './ProfileModals.tsx'
 import { LAYOUT } from '../theme.ts'
 import type { ProfileSummary, TrashItem } from '../../../shared/types.ts'
@@ -27,12 +24,12 @@ type View = 'profiles' | 'trash'
 const OFFICIAL_BASE = 'template:base'
 const OFFICIAL_WEB = 'template:web'
 
-/** Profile 页：Profile 实例 + 垃圾站 两种视图。运行控制台协调在
- * `useRunRuntime`，回收站状态在 `useTrash`，弹窗在 `ProfileModals`。 */
+/** Profile 页：Profile 实例 + 垃圾站 两种视图。只负责 profile 的管理
+ * （新建/克隆/导入导出/迁移/回收站）；运行与多进程控制台已迁至「运行」页
+ * （`RunsSection`），回收站状态在 `useTrash`，弹窗在 `ProfileModals`。 */
 export default function ProfileSection() {
   const { t } = useTranslation()
   const { token } = theme.useToken()
-  const run = useRunRuntime()
   const trash = useTrash()
   const [view, setView] = useState<View>('profiles')
 
@@ -336,58 +333,22 @@ export default function ProfileSection() {
       }
     >
       {view === 'profiles' && (
-      <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-        {/* Fixed header: profile name + launch/stop. Shown whenever there is a
-            selected profile OR a running process (a reload mid-run must keep the
-            abort button visible even before any detail finishes loading). */}
-        {(selected !== null || run.running) && (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: token.padding,
-              background: token.colorBgContainer,
-              padding: `${token.paddingSM}px ${LAYOUT.pagePaddingLG}px`,
-              borderBottom: `1px solid ${token.colorBorder}`,
-            }}
-          >
-            <Typography.Text strong style={{ fontSize: token.fontSizeLG }} ellipsis={{ tooltip: selected ?? undefined }}>
-              {run.running && run.runningProfile !== undefined ? run.runningProfile : selected}
-            </Typography.Text>
-            <Space size={8}>
-              <Checkbox checked={run.shellLaunch} onChange={e => run.setShellLaunch(e.target.checked)} disabled={run.running}>
-                {t('run.shellMode')}
-              </Checkbox>
-              {run.running
-                ? <Button danger onClick={() => void run.stopRun()}>{t('run.stop')}</Button>
-                : <Button type="primary" icon={<CaretRightOutlined />} onClick={() => void (run.shellLaunch ? run.doLaunchShell(selected ?? '') : run.doLaunch(selected ?? ''))}>{t('run.start')}</Button>}
-            </Space>
-          </div>
-        )}
-
-        {/* Detail (scrolls) above, embedded console below. */}
-        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 8, padding: LAYOUT.pagePaddingLG }}>
-          {run.running && !run.shellLaunch ? (
-            <div style={{ flex: 1, minHeight: 0 }}>
-              <RunConsole logs={run.logs} running fill onUrlClick={run.openUrl} />
-            </div>
-          ) : (
-            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-              {missing.length > 0 && selected !== null && (
-                <Alert
-                  type="warning"
-                  showIcon
-                  style={{ marginBottom: 16 }}
-                  title={t('profile.missingTitle', { list: missing.join('、') })}
-                  description={t('profile.missingDesc', { profile: selected })}
-                />
-              )}
-              {selected !== null
-                ? <ProfileDetailView name={selected ?? run.runningProfile ?? ''} onChanged={() => { if (selected !== null) loadMissing(selected); void refresh() }} />
-                : <EmptyState title={t('profile.selectProfile')} description={t('profile.selectProfileDesc')} />}
-            </div>
+      <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 8, padding: LAYOUT.pagePaddingLG }}>
+        {/* Detail only — running a profile and its console now live on the Run
+            page (`RunsSection`); this page is pure profile management. */}
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+          {missing.length > 0 && selected !== null && (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 16 }}
+              title={t('profile.missingTitle', { list: missing.join('、') })}
+              description={t('profile.missingDesc', { profile: selected })}
+            />
           )}
+          {selected !== null
+            ? <ProfileDetailView name={selected} onChanged={() => { if (selected !== null) loadMissing(selected); void refresh() }} />
+            : <EmptyState title={t('profile.selectProfile')} description={t('profile.selectProfileDesc')} />}
         </div>
       </div>
       )}
@@ -440,12 +401,6 @@ export default function ProfileSection() {
       activeDshVersion={activeDshVersion}
       onClose={() => setImportOpen(false)}
       onImported={onImported}
-    />
-    <RunFailModal
-      failInfo={run.failInfo}
-      logs={run.logs}
-      eaddrinuse={run.eaddrinuse}
-      onClose={run.clearFail}
     />
     <MirrorProfileModal
       open={mirrorTarget !== null}

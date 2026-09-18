@@ -12,13 +12,16 @@ interface AppShellProps {
   /** When true, the content area has no padding and hands scrolling to the
    * child — for full-bleed panels that own a fixed header + scrolled body. */
   flush?: boolean
+  /** Content-area background; defaults to the canvas (`colorBgLayout`). Pass
+   * `colorBgContainer` for a flat all-white surface (no layered canvas). */
+  contentBg?: string
   /** Main area; scrolls vertically (unless `flush`). */
   children: ReactNode
 }
 
 /** Standard two-pane app shell: a fixed-width left rail + scrollable content. */
 export default function AppShell({
-  sider, siderWidth = LAYOUT.sidebarWidth, flush = false, children,
+  sider, siderWidth = LAYOUT.sidebarWidth, flush = false, contentBg, children,
 }: AppShellProps) {
   const { token } = theme.useToken()
   return (
@@ -33,7 +36,7 @@ export default function AppShell({
         style={{
           padding: flush ? 0 : LAYOUT.pagePaddingLG,
           overflowY: flush ? 'hidden' : 'auto',
-          background: token.colorBgLayout,
+          background: contentBg ?? token.colorBgLayout,
           minWidth: 0,
           minHeight: 0,
         }}

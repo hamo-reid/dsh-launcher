@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useState, type CSSProperties, type ReactNode
 import { Alert, Button, ConfigProvider, Layout, message, Modal, Space, Spin, Tabs, theme, Typography } from 'antd'
 import {
   AppstoreOutlined, CloseOutlined, FullscreenExitOutlined, FullscreenOutlined,
-  InfoOutlined, MinusOutlined, ProfileOutlined, RobotOutlined, SettingOutlined,
+  InfoOutlined, MinusOutlined, PlayCircleOutlined, ProfileOutlined, RobotOutlined, SettingOutlined,
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { useAppLang } from './i18n'
@@ -14,20 +14,21 @@ import type { HealthIssue } from '../../shared/types.ts'
 
 // Views are lazy so a tab's heavy deps (markdown renderer, dnd-kit) only parse
 // when that section is first opened, keeping the initial bundle + startup lean.
+const RunsSection = lazy(() => import('./views/RunsSection.tsx'))
 const ProfileSection = lazy(() => import('./views/ProfileSection.tsx'))
 const PluginsSection = lazy(() => import('./views/PluginsSection.tsx'))
 const SettingsSection = lazy(() => import('./views/SettingsSection.tsx'))
 const DshSection = lazy(() => import('./views/DshSection.tsx'))
 const AboutView = lazy(() => import('./views/AboutView.tsx'))
 
-type Tab = 'profile' | 'plugins' | 'settings' | 'dsh' | 'about'
+type Tab = 'run' | 'profile' | 'plugins' | 'settings' | 'dsh' | 'about'
 
 const { Content } = Layout
 
 export default function App() {
   const { t } = useTranslation()
   const { antdLocale } = useAppLang()
-  const [tab, setTab] = useState<Tab>('profile')
+  const [tab, setTab] = useState<Tab>('run')
   const [onboarding, setOnboarding] = useState<'loading' | 'open' | 'done'>('loading')
   const [onboardDefaults, setOnboardDefaults] = useState({ pluginDir: '', dshVersionDir: '' })
   // One-time legacy → versioned store migration is never silent: ask first.
@@ -39,7 +40,7 @@ export default function App() {
   const [maximized, setMaximized] = useState(false)
   const [issues, setIssues] = useState<HealthIssue[]>([])
   // Shown when the main process asks us to pick minimize-to-tray vs quit on close.
-  const [closePrompt, setClosePrompt] = useState<{ running?: string } | null>(null)
+  const [closePrompt, setClosePrompt] = useState<{ running: string[] } | null>(null)
 
   // Decide once whether the first-run wizard is required (fresh install).
   useEffect(() => {
@@ -117,6 +118,7 @@ export default function App() {
 
   const TABS: { key: Tab; label: string; icon: ReactNode }[] = [
     { key: 'dsh', label: t('app.tab.dsh'), icon: <RobotOutlined /> },
+    { key: 'run', label: t('app.tab.run'), icon: <PlayCircleOutlined /> },
     { key: 'profile', label: t('app.tab.profile'), icon: <ProfileOutlined /> },
     { key: 'plugins', label: t('app.tab.plugins'), icon: <AppstoreOutlined /> },
     { key: 'settings', label: t('app.tab.settings'), icon: <SettingOutlined /> },
@@ -201,6 +203,7 @@ export default function App() {
             <Spin />
           </div>
         )}>
+          {tab === 'run' && <RunsSection />}
           {tab === 'profile' && <ProfileSection />}
           {tab === 'plugins' && <PluginsSection key={pluginsEpoch} />}
           {tab === 'settings' && <SettingsSection />}

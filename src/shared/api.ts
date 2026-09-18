@@ -11,6 +11,7 @@ import type {
   DshDataImportResult,
   DshDataManifest,
   DshEntry,
+  DshProfileInfo,
   DshUpdateInfo,
   DownloadSessionInfo,
   HealthIssue,
@@ -35,6 +36,10 @@ import type {
   ProfileSummary,
   RowCreateInput,
   RunEvent,
+  RunDefaults,
+  RunInfo,
+  RunMode,
+  LaunchOptions,
   TrashItem,
 } from './types.ts'
 
@@ -75,12 +80,26 @@ export interface WindowApi {
   }
 
   run: {
-    start: (profile: string, mode?: 'app' | 'shell') => Promise<IpcResult<boolean>>
-    stop: () => Promise<IpcResult<boolean>>
-    state: () => Promise<IpcResult<{ running: boolean; profile?: string }>>
-    command: () => Promise<IpcResult<string>>
-    logs: () => Promise<IpcResult<string>>
-    input: (line: string) => Promise<IpcResult<boolean>>
+    /** Start a profile runtime. `dshId` picks the owning dsh (the Run page
+     * selects it at launch); omitted → the active dsh. Fails with
+     * `run.alreadyRunning` when that (dsh, profile) already runs. When `mode` /
+     * `options` are omitted the saved defaults are reused; explicit values are
+     * validated and saved. Returns its run id. */
+    start: (profile: string, mode?: RunMode, options?: LaunchOptions, dshId?: string) => Promise<IpcResult<{ id: string }>>
+    /** Stop one run by id. */
+    stop: (id: string) => Promise<IpcResult<boolean>>
+    /** Snapshot of every active run (no logs; fetch via `logs`). */
+    list: () => Promise<IpcResult<RunInfo[]>>
+    /** Full buffered output of one run. */
+    logs: (id: string) => Promise<IpcResult<string>>
+    /** Send one line to a run's stdin (app mode only). */
+    input: (id: string, line: string) => Promise<IpcResult<boolean>>
+    /** Saved default mode + launch parameters for a (dsh, profile). */
+    getDefaults: (dshId: string, profile: string) => Promise<IpcResult<RunDefaults>>
+    /** Validate + persist a profile's default mode + launch parameters. */
+    setDefaults: (dshId: string, profile: string, defaults: RunDefaults) => Promise<IpcResult<boolean>>
+    /** Pick a `.yml`/`.yaml` patch file; `''` when cancelled. */
+    pickPatch: () => Promise<IpcResult<string>>
     openExternal: (url: string) => Promise<IpcResult<boolean>>
     onEvent: (callback: (event: RunEvent) => void) => () => void
   }
@@ -179,7 +198,7 @@ export interface WindowApi {
      * persists the choice as the close behaviour and stops future prompts. */
     chooseClose: (action: 'tray' | 'quit', remember: boolean) => Promise<IpcResult<boolean>>
     /** Push event asking the renderer to show the minimize/quit close prompt. Returns an unsubscribe. */
-    onAskClose: (callback: (info: { running?: string }) => void) => () => void
+    onAskClose: (callback: (info: { running: string[] }) => void) => () => void
     /** Push event mirroring maximize state (for the title-bar icon). Returns an unsubscribe. */
     onMaximizeState: (callback: (maximized: boolean) => void) => () => void
   }
@@ -194,6 +213,9 @@ export interface WindowApi {
 
   dsh: {
     list: () => Promise<IpcResult<{ dshes: DshEntry[]; activeDshId?: string }>>
+    /** Profile names under a SPECIFIC dsh — lets the Run page pick a launch
+     * target independently of the globally active dsh. */
+    profiles: (id: string) => Promise<IpcResult<DshProfileInfo[]>>
     add: (path: string) => Promise<IpcResult<DshEntry>>
     remove: (id: string, opts?: { deleteFiles?: boolean }) => Promise<IpcResult<boolean>>
     setActive: (id: string) => Promise<IpcResult<boolean>>

@@ -8,6 +8,7 @@ import type {
   DshDataImportResult,
   DshDataManifest,
   DshEntry,
+  DshProfileInfo,
   DshUpdateInfo,
   DownloadSessionInfo,
   HealthIssue,
@@ -33,6 +34,10 @@ import type {
   ProfileSummary,
   RowCreateInput,
   RunEvent,
+  RunDefaults,
+  RunInfo,
+  RunMode,
+  LaunchOptions,
   TrashItem,
 } from '../shared/types.ts'
 import type { WindowApi } from '../shared/api.ts'
@@ -94,18 +99,22 @@ const api = {
   },
 
   run: {
-    start: (profile: string, mode?: 'app' | 'shell'): Promise<IpcResult<boolean>> =>
-      ipcRenderer.invoke('run:start', profile, mode),
-    stop: (): Promise<IpcResult<boolean>> =>
-      ipcRenderer.invoke('run:stop'),
-    state: (): Promise<IpcResult<{ running: boolean; profile?: string }>> =>
-      ipcRenderer.invoke('run:state'),
-    command: (): Promise<IpcResult<string>> =>
-      ipcRenderer.invoke('run:command'),
-    logs: (): Promise<IpcResult<string>> =>
-      ipcRenderer.invoke('run:logs'),
-    input: (line: string): Promise<IpcResult<boolean>> =>
-      ipcRenderer.invoke('run:input', line),
+    start: (profile: string, mode?: RunMode, options?: LaunchOptions, dshId?: string): Promise<IpcResult<{ id: string }>> =>
+      ipcRenderer.invoke('run:start', profile, mode, options, dshId),
+    stop: (id: string): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('run:stop', id),
+    list: (): Promise<IpcResult<RunInfo[]>> =>
+      ipcRenderer.invoke('run:list'),
+    logs: (id: string): Promise<IpcResult<string>> =>
+      ipcRenderer.invoke('run:logs', id),
+    input: (id: string, line: string): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('run:input', id, line),
+    getDefaults: (dshId: string, profile: string): Promise<IpcResult<RunDefaults>> =>
+      ipcRenderer.invoke('run:getDefaults', dshId, profile),
+    setDefaults: (dshId: string, profile: string, defaults: RunDefaults): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('run:setDefaults', dshId, profile, defaults),
+    pickPatch: (): Promise<IpcResult<string>> =>
+      ipcRenderer.invoke('run:pickPatch'),
     openExternal: (url: string): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('openExternal', url),
     onEvent: (callback: (event: RunEvent) => void): (() => void) => {
@@ -216,6 +225,8 @@ const api = {
   dsh: {
     list: (): Promise<IpcResult<{ dshes: DshEntry[]; activeDshId?: string }>> =>
       ipcRenderer.invoke('dsh:list'),
+    profiles: (id: string): Promise<IpcResult<DshProfileInfo[]>> =>
+      ipcRenderer.invoke('dsh:profiles', id),
     add: (path: string): Promise<IpcResult<DshEntry>> =>
       ipcRenderer.invoke('dsh:add', path),
     remove: (id: string, opts?: { deleteFiles?: boolean }): Promise<IpcResult<boolean>> =>
@@ -270,8 +281,8 @@ const api = {
     isMaximized: (): Promise<IpcResult<boolean>> => ipcRenderer.invoke('window:isMaximized'),
     chooseClose: (action: 'tray' | 'quit', remember: boolean): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('window:chooseClose', action, remember),
-    onAskClose: (callback: (info: { running?: string }) => void): (() => void) => {
-      const handler = (_: unknown, info: { running?: string }): void => callback(info)
+    onAskClose: (callback: (info: { running: string[] }) => void): (() => void) => {
+      const handler = (_: unknown, info: { running: string[] }): void => callback(info)
       ipcRenderer.on('window:askClose', handler)
       return () => { ipcRenderer.removeListener('window:askClose', handler) }
     },

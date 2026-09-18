@@ -11,7 +11,6 @@ import { StepIcon } from '../components/StepIcon.tsx'
 import { MODAL } from '../theme.ts'
 import { majorOfVersion } from '../../../shared/version.ts'
 import type { ImportBundleSource, ImportProfileResult, ImportStep } from '../../../shared/types.ts'
-import type { RunFailInfo } from './useRunRuntime.tsx'
 
 interface CreateProfileModalProps {
   open: boolean
@@ -422,41 +421,6 @@ export function MissingPluginsModal(p: MissingPluginsModalProps): JSX.Element {
       <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, marginTop: 8 }}>
         {t('profile.import.missingDesc')}
       </div>
-    </Modal>
-  )
-}
-
-interface RunFailModalProps {
-  failInfo: RunFailInfo | null
-  logs: string
-  eaddrinuse: RegExpExecArray | null
-  onClose: () => void
-}
-export function RunFailModal(p: RunFailModalProps): JSX.Element {
-  const { t } = useTranslation()
-  const { token } = theme.useToken()
-  const signalSuffix = p.failInfo?.signal != null ? `, ${p.failInfo.signal}` : ''
-  return (
-    <Modal title={t('run.failTitle')} open={p.failInfo !== null} okText={t('common.ok')} onOk={p.onClose} onCancel={p.onClose} width={MODAL.wide}>
-      <Space orientation="vertical" style={{ width: '100%' }} size="middle">
-        <Alert type="error" showIcon title={t('run.exited', { code: p.failInfo?.code ?? '?', signalSuffix })} />
-        {p.eaddrinuse !== null && (
-          <Alert type="warning" showIcon
-            title={t('run.portInUse', { port: p.eaddrinuse[2], addr: p.eaddrinuse[1] })}
-            description={t('run.portInUseDesc')} />
-        )}
-        {p.failInfo?.command !== undefined && (
-          <div>
-            <div style={{ marginBottom: 6, fontSize: token.fontSizeSM, color: token.colorTextSecondary }}>{t('run.commandLabel')}</div>
-            <pre style={{ margin: 0, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: token.fontSizeSM, color: token.colorText, whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: token.colorFillTertiary, padding: token.paddingSM, borderRadius: token.borderRadius }}>
-              {p.failInfo.command}
-            </pre>
-          </div>
-        )}
-        <pre style={{ maxHeight: 360, overflowY: 'auto', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: token.fontSizeSM, whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 }}>
-          {p.logs || t('run.noOutput')}
-        </pre>
-      </Space>
     </Modal>
   )
 }

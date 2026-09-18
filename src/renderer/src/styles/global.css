@@ -58,3 +58,29 @@ body .ant-modal-mask,
 body .ant-modal-wrap {
   top: var(--pm-header-top, 52px) !important;
 }
+
+/* A Tabs instance that fills its parent height, with each pane owning its own
+   scroll. Used by the Run page's 启动 / 进程管理 tabs so the process pane can
+   host a full-height AppShell. antd v6 structure:
+   .ant-tabs > .ant-tabs-body-holder > .ant-tabs-body > .ant-tabs-content(pane). */
+.pm-fill-tabs {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.pm-fill-tabs .ant-tabs-nav {
+  margin: 0;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--pm-surface-border, rgba(0, 0, 0, 0.06));
+}
+
+.pm-fill-tabs > .ant-tabs-body-holder {
+  flex: 1;
+  min-height: 0;
+}
+
+.pm-fill-tabs .ant-tabs-body,
+.pm-fill-tabs .ant-tabs-content {
+  height: 100%;
+}
