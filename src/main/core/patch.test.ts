@@ -10,6 +10,7 @@ import {
   parsePatchRows,
   parseNamedRows,
   parseClassifiedRows,
+  collectInsertIds,
   setRowDisabled,
   setRowConfig,
   setRowInsert,
@@ -156,5 +157,42 @@ describe('extractKeyValue', () => {
 
   it('handles inline scalar values', () => {
     expect(extractKeyValue('- id: a\n  config: {q: 1}\n', 'a', 'config')).toBe('{q: 1}')
+  })
+})
+
+describe('collectInsertIds', () => {
+  it('collects ids nested under an insert key, not id-targeted patch rows', () => {
+    const text = [
+      '- id: tools',
+      '  config:',
+      '    mode: native',
+      '- insert:',
+      '    - id: subagent-model-selection-settings',
+      "      name: '@deepseek-ai/dsh-tool-subagent/model-selection-settings'",
+      '    - id: code-runtime',
+      "      name: '@deepseek-ai/dsh-code-runtime-worker-thread'",
+      '',
+    ].join('\n')
+    expect(collectInsertIds(text)).toEqual(['subagent-model-selection-settings', 'code-runtime'])
+  })
+
+  it('collects a nested insert block without losing its siblings', () => {
+    const text = [
+      '- insert:',
+      '    - id: group',
+      "      name: '@x/group'",
+      '      insert:',
+      '        - id: child',
+      "          name: '@x/child'",
+      '    - id: sibling',
+      "      name: '@x/sibling'",
+      '',
+    ].join('\n')
+    expect(collectInsertIds(text)).toEqual(['group', 'child', 'sibling'])
+  })
+
+  it('returns [] for an empty template or a patch with no inserts', () => {
+    expect(collectInsertIds('[]\n')).toEqual([])
+    expect(collectInsertIds('# just a comment\n- id: a\n  disabled: true\n')).toEqual([])
   })
 })

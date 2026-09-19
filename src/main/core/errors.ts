@@ -102,6 +102,7 @@ export const E = {
   runReservedEnv: 'run.reservedEnv',
   runBadPort: 'run.badPort',
   runOpenHttpOnly: 'run.openHttpOnly',
+  runInsertConflict: 'run.insertConflict',
   // misc
   npmNotFound: 'npm.notFound',
   yamlInvalid: 'yaml.invalid',

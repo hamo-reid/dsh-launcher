@@ -51,7 +51,33 @@ Launcher 在覆盖目录读写，宿主启动时却去 `<DSH_HOME>/profiles` 找
   警告，附可复制的路径，提示用户手动迁移到固定目录。目录被移走后提示自动消失。
 - 不做自动搬迁，避免误合并/误删。
 
-## 5. 不变量（后续改动请遵守）
+## 5. 与宿主对齐的清单字段
+
+Launcher 读写 profile 时严格按宿主契约，不引入私有字段：
+
+- **bundle patch 文件名**：由 bundle 包的 `dsh.bundle.patch` 声明（宿主
+  `loadProfileDirectory` 的契约），Launcher 的组合层/插件列表据此解析，缺失时
+  回退历史默认 `cordis.patch.yml`。bundle 判定同样以 `dsh.bundle.patch` 是否存在
+  为准（对齐宿主 `exportsPatch`）。
+- **`dsh.profile.patchReload`**：宿主用于选择 patch 文件生命周期
+  （`live` 热重载 / `startup` 只读一次）。Launcher 创建/导入 profile 时显式写入
+  （自定义 profile 默认 `live`），导出时一并携带（`ProfileExport.patchReload`，
+  可选、向后兼容），使迁移不丢该策略。
+- **保留名**：`acp / web / headless / sdk / sdk-minimal` 是宿主内置模板名
+  （`PROFILE_TEMPLATES`），宿主会把同名 profile 当内置模板处理。Launcher 拒绝用
+  这些名字创建/克隆/导入，并在弹窗给出提示。规则见 `src/shared/profile-name.ts`。
+
+## 6. 启动前预检（重复 insert id）
+
+宿主按 bundle 层 → profile → home → `--patch` 的顺序应用各层的 `insert` 条目；同一
+loader entry id 被插入两次会以 `duplicate loader entry id` 硬失败。Launcher 在
+`run:start` 前用 `findInsertConflicts`（`core/combo.ts`）复算一次：发现重复就返回
+`run.insertConflict` 并点名冲突的层，而不是把宿主堆栈甩给用户；Profile 详情页也展示
+同样的告警，便于启动前发现。id 覆盖型 patch（`config`/`disabled`）允许跨层重复，
+不计入。典型冲突：一个 profile 同时含 `@deepseek-ai/dsh-web-app` 与某个自带官方
+roster 的替代 app bundle。
+
+## 7. 不变量（后续改动请遵守）
 
 1. 任何 profile 路径都必须由 `DshContext.home` 派生（`profilesDir(ctx)` /
    `profileDir(ctx, name)`），不得引入第二个根。

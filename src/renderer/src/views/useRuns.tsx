@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Modal, message, theme } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
-import type { LaunchOptions, RunInfo, RunMode } from '../../../shared/types.ts'
+import type { InsertConflict, LaunchOptions, RunInfo, RunMode } from '../../../shared/types.ts'
 
 export interface RunFailInfo {
   code: number | null
@@ -15,6 +15,13 @@ export interface RunFailInfo {
   /** Buffered output of the failed run (for the failure dialog). */
   logs: string
   eaddrinuse: RegExpExecArray | null
+}
+
+/** A launch refused because the profile's composed layers insert the same loader
+ * entry id more than once (the host would fail with a duplicate-id error). */
+export interface RunConflictInfo {
+  profile: string
+  conflicts: InsertConflict[]
 }
 
 /** Per-run console buffer cap, mirroring the main process' `RUN_LOG_CAP`. */
@@ -42,6 +49,9 @@ export interface UseRuns {
   openUrl: (url: string) => void
   failInfo: RunFailInfo | null
   clearFail: () => void
+  /** Set when a launch was refused for duplicate inserted entry ids. */
+  conflictInfo: RunConflictInfo | null
+  clearConflict: () => void
 }
 
 /** Friendly hint when the captured output shows a port collision. */
@@ -57,6 +67,7 @@ export function useRuns(): UseRuns {
   const [logs, setLogs] = useState<Record<string, string>>({})
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [failInfo, setFailInfo] = useState<RunFailInfo | null>(null)
+  const [conflictInfo, setConflictInfo] = useState<RunConflictInfo | null>(null)
 
   // Latest buffers, readable from the event callback without re-subscribing.
   const logsRef = useRef<Record<string, string>>({})
@@ -122,7 +133,16 @@ export function useRuns(): UseRuns {
   const start = async (profile: string, mode: RunMode | undefined, options: LaunchOptions | undefined, dshId: string, select = true): Promise<boolean> => {
     if (profile.trim() === '') return false
     const result = await window.api.run.start(profile, mode, options, dshId)
-    if (!result.ok) { void message.error(apiErrorText(result)); return false }
+    if (!result.ok) {
+      // A duplicate-insert-id refusal gets a structured modal (bundles + plugin
+      // ids); every other failure stays a toast.
+      if (result.code === 'run.insertConflict' && result.conflicts !== undefined) {
+        setConflictInfo({ profile, conflicts: result.conflicts })
+      } else {
+        void message.error(apiErrorText(result))
+      }
+      return false
+    }
     // The 'started' event adds it to the list; clear any stale buffer.
     setLogs(prev => ({ ...prev, [result.value.id]: '' }))
     // Quick launch keeps the launcher visible (so several can be started in a
@@ -184,8 +204,11 @@ export function useRuns(): UseRuns {
 
   const clearFail = (): void => setFailInfo(null)
 
+  const clearConflict = (): void => setConflictInfo(null)
+
   return {
     running, exited, selectedId, selected, select: setSelectedId, logsOf,
     start, stop, stopAll, restart, deselect, clearExited, openUrl, failInfo, clearFail,
+    conflictInfo, clearConflict,
   }
 }

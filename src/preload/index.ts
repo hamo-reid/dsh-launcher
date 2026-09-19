@@ -16,6 +16,7 @@ import type {
   InstalledPlugin,
   ImportStep,
   InstalledOverviewRow,
+  InsertConflict,
   IpcResult,
   AppUpdateInfo,
   PluginUsagePoint,
@@ -74,6 +75,8 @@ const api = {
     ipcRenderer.invoke('profile:missingBundles', dshId, name),
   layers: (dshId: string, name: string): Promise<IpcResult<ProfileLayer[]>> =>
     ipcRenderer.invoke('profile:layers', dshId, name),
+  conflicts: (dshId: string, name: string): Promise<IpcResult<InsertConflict[]>> =>
+    ipcRenderer.invoke('profile:conflicts', dshId, name),
   addRow: (dshId: string, name: string, row: RowCreateInput): Promise<IpcResult<boolean>> =>
     ipcRenderer.invoke('profile:addRow', dshId, name, row),
   setRowConfig: (dshId: string, name: string, id: string, configText: string): Promise<IpcResult<boolean>> =>

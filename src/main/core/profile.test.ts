@@ -66,14 +66,21 @@ describe('createProfile', () => {
     createProfile(ctx(), 'base')
     const m = JSON.parse(readFileSync(join(profiles(), 'base', 'package.json'), 'utf8'))
     expect(m.dsh.profile.bundles).toEqual(['@deepseek-ai/dsh-base'])
+    // The host's custom-profile default, written so the manifest is explicit.
+    expect(m.dsh.profile.patchReload).toBe('live')
     expect(existsSync(join(profiles(), 'base', 'cordis.patch.yml'))).toBe(true)
     expect(existsSync(join(profiles(), 'base', 'pnpm-workspace.yaml'))).toBe(true)
   })
 
   it('accepts a custom bundle template and rejects bad names / duplicates', () => {
-    createProfile(ctx(), 'web', ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'])
+    createProfile(ctx(), 'myweb', ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'])
     expect(() => createProfile(ctx(), 'Bad Name')).toThrow(/kebab-case/)
-    expect(() => createProfile(ctx(), 'web')).toThrow(/already exists/)
+    expect(() => createProfile(ctx(), 'myweb')).toThrow(/already exists/)
+  })
+
+  it('refuses a name the host reserves for a shipped template', () => {
+    expect(() => createProfile(ctx(), 'web')).toThrow(/reserved/)
+    expect(() => cloneProfile(ctx(), 'base', 'headless')).toThrow(/reserved/)
   })
 })
 
@@ -153,7 +160,7 @@ describe('exportProfile', () => {
     writeFileSync(join(profiles(), 'exp', 'package.json'), JSON.stringify({
       name: 'dsh-profile-exp',
       dependencies: { npmA: '^1.0.0', locA: 'link:/x', plain: '^2.0.0' },
-      dsh: { profile: { bundles: ['tpl', 'npmA', 'locA'] } },
+      dsh: { profile: { bundles: ['tpl', 'npmA', 'locA'], patchReload: 'startup' } },
     }))
     // locA is a real local plugin iff the store records a file:/link: dep for it.
     writeFileSync(join(store(), 'package.json'), JSON.stringify({ dependencies: { locA: 'link:/x' } }))
@@ -167,6 +174,7 @@ describe('exportProfile', () => {
     // only non-bundle npm deps survive
     expect(out.dependencies).toEqual({ plain: '^2.0.0' })
     expect(out.dshVersion).toBe('1.0.0')
+    expect(out.patchReload).toBe('startup')
   })
 })
 
@@ -210,6 +218,23 @@ describe('importProfile', () => {
     expect(r.ok).toBe(true)
     expect('installed' in r && r.installed).toEqual([])
     expect(runPnpm).toHaveBeenCalledWith(join(profiles(), 'baseonly'), ['install', '--config.confirmModulesPurge=false'])
+    // No patchReload in the payload → the host's custom-profile default.
+    const m = JSON.parse(readFileSync(join(profiles(), 'baseonly', 'package.json'), 'utf8'))
+    expect(m.dsh.profile.patchReload).toBe('live')
+  })
+
+  it('carries a payload patchReload into the manifest', async () => {
+    const payload = JSON.stringify({
+      dshVersion: '1.0.0', bundles: [], dependencies: {}, userPatch: '', patchReload: 'startup',
+    })
+    await importProfile(ctx(), payload, { name: 'frozen' })
+    const m = JSON.parse(readFileSync(join(profiles(), 'frozen', 'package.json'), 'utf8'))
+    expect(m.dsh.profile.patchReload).toBe('startup')
+  })
+
+  it('refuses a host-reserved target name', async () => {
+    const payload = JSON.stringify({ dshVersion: '1.0.0', bundles: [], dependencies: {} })
+    await expect(importProfile(ctx(), payload, { name: 'web' })).rejects.toThrow(/reserved/)
   })
 
   it('reuses an existing store version when it satisfies the range', async () => {

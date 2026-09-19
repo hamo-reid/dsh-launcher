@@ -15,11 +15,28 @@ import { addLocalPlugin, addPlugin, installIntoProfile, installedStoreVersion } 
 import { satisfiesRange } from './version.ts'
 import { uniqueTrashName } from './trash.ts'
 import { listBundleSubdepNames } from './bundle-subdeps.ts'
-import type { ImportBundleSource, ImportProfileResult, ImportStep, ProfileSummary } from '../../shared/types.ts'
+import { isReservedProfileName, PROFILE_NAME_RE, RESERVED_PROFILE_NAMES } from '../../shared/profile-name.ts'
+import type { ImportBundleSource, ImportProfileResult, ImportStep, ProfilePatchReload, ProfileSummary } from '../../shared/types.ts'
 import { logger } from './logger.ts'
 
 /** Re-export the shared profile-summary shape. */
 export type { ProfileSummary } from '../../shared/types.ts'
+
+/** Custom profiles (any name the launcher creates) use the host's default
+ * patch-file lifecycle: `live`. Shipped templates are host-reserved names and
+ * cannot be created here. */
+const DEFAULT_PROFILE_PATCH_RELOAD: ProfilePatchReload = 'live'
+
+/** Validate a custom profile name: kebab-case, and not a name the host reserves
+ * for a shipped template (which would be normalized as that template). */
+function assertCustomProfileName(name: string): void {
+  if (!PROFILE_NAME_RE.test(name)) throw new Error('invalid profile name (use kebab-case)')
+  if (isReservedProfileName(name)) {
+    throw new Error(
+      `profile name "${name}" is reserved by dsh's shipped templates (${RESERVED_PROFILE_NAMES.join(', ')}); choose another name`,
+    )
+  }
+}
 
 const PATCH_TEMPLATE = `# Your patch layer for this dsh profile, applied after every bundle layer:
 # a top-level YAML array of loader patch entries (id-targeted config
@@ -61,7 +78,7 @@ export const PROFILE_TEMPLATES: Record<string, string[]> = {
 
 /** Create a fresh profile instance from an ordered bundle-array template. */
 export function createProfile(ctx: DshContext, name: string, bundles: string[] = PROFILE_TEMPLATES.base): void {
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new Error('invalid profile name (use kebab-case)')
+  assertCustomProfileName(name)
   const dir = profileDir(ctx, name)
   if (existsSync(dir)) throw new Error(`profile "${name}" already exists`)
   mkdirSync(dir, { recursive: true })
@@ -69,7 +86,7 @@ export function createProfile(ctx: DshContext, name: string, bundles: string[] =
     name: `dsh-profile-${name}`,
     private: true,
     dependencies: {},
-    dsh: { profile: { bundles } },
+    dsh: { profile: { bundles, patchReload: DEFAULT_PROFILE_PATCH_RELOAD } },
   }
   writeFileSync(join(dir, 'package.json'), JSON.stringify(manifest, null, 2) + '\n')
   writeFileSync(join(dir, 'cordis.patch.yml'), PATCH_TEMPLATE)
@@ -79,7 +96,7 @@ export function createProfile(ctx: DshContext, name: string, bundles: string[] =
 
 /** Clone a profile's configuration (without installed node_modules). */
 export function cloneProfile(ctx: DshContext, name: string, newName: string): void {
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(newName)) throw new Error('invalid name (use kebab-case)')
+  assertCustomProfileName(newName)
   const src = profileDir(ctx, name)
   const dst = profileDir(ctx, newName)
   if (!existsSync(src)) throw new Error(`profile "${name}" not found`)
@@ -189,6 +206,8 @@ export interface ProfileExport {
   dependencies: Record<string, string>
   /** `cordis.patch.yml` verbatim. */
   userPatch: string
+  /** The manifest's `dsh.profile.patchReload`, when it declares one. */
+  patchReload?: ProfilePatchReload
 }
 
 /** Plugin store's recorded dependency specs — the source of truth for
@@ -237,7 +256,7 @@ export function exportProfile(ctx: DshContext, name: string): string {
   const manifest = JSON.parse(readFileSync(join(root, name, 'package.json'), 'utf8')) as {
     name?: string
     dependencies?: Record<string, string>
-    dsh?: { profile?: { bundles?: string[] } }
+    dsh?: { profile?: { bundles?: string[]; patchReload?: string } }
   }
   const deps = manifest.dependencies ?? {}
   const storeDeps = readStoreDeps(pluginDir())
@@ -250,6 +269,8 @@ export function exportProfile(ctx: DshContext, name: string): string {
   }
   const patchPath = join(root, name, 'cordis.patch.yml')
   const patchText = existsSync(patchPath) ? readFileSync(patchPath, 'utf8') : ''
+  const rawReload = manifest.dsh?.profile?.patchReload
+  const patchReload = rawReload === 'live' || rawReload === 'startup' ? rawReload : undefined
   const payload: ProfileExport = {
     schemaVersion: 2,
     name: manifest.name ?? name,
@@ -257,6 +278,7 @@ export function exportProfile(ctx: DshContext, name: string): string {
     bundles,
     dependencies,
     userPatch: patchText,
+    ...(patchReload !== undefined ? { patchReload } : {}),
   }
   return JSON.stringify(payload, null, 2)
 }
@@ -364,7 +386,7 @@ export async function importProfile(
   }
 
   const target = (opts.name ?? (typeof data.name === 'string' ? data.name : '')).trim()
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(target)) throw new Error('invalid profile name (use kebab-case)')
+  assertCustomProfileName(target)
   const dir = join(profilesRootFor(ctx), target)
   if (existsSync(dir)) throw new Error(`profile "${target}" already exists`)
 
@@ -383,6 +405,9 @@ export async function importProfile(
     deps[k] = v
   }
   const userPatch = typeof data.userPatch === 'string' ? data.userPatch : ''
+  // A portable export may carry the manifest's patch-file lifecycle; an older
+  // export (or a hand-written one) falls back to the host's custom-profile default.
+  const patchReload: ProfilePatchReload = data.patchReload === 'startup' ? 'startup' : 'live'
   const storeDir = pluginDir()
   const localSource = opts.localSource ?? ''
 
@@ -392,7 +417,7 @@ export async function importProfile(
     name: `dsh-profile-${target}`,
     private: true,
     dependencies: deps,
-    dsh: { profile: { bundles: bundles.map(b => b.name) } },
+    dsh: { profile: { bundles: bundles.map(b => b.name), patchReload } },
   }, null, 2) + '\n')
   writeFileSync(join(dir, 'cordis.patch.yml'), userPatch || '[]')
   writeFileSync(join(dir, 'pnpm-workspace.yaml'), PROFILE_PNPM_WORKSPACE)

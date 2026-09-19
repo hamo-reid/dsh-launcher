@@ -4,13 +4,13 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { dshHome, homePatchPath, installAnchor, profileDir, profilesDir } from './home.ts'
 import { readManifest } from './manifest.ts'
-import { extractKeyValue, parseClassifiedRows, parseNamedRows, parsePatchRows } from './patch.ts'
+import { collectInsertIds, extractKeyValue, parseClassifiedRows, parseNamedRows, parsePatchRows } from './patch.ts'
 import { child } from './logger.ts'
 import type { DshContext } from './appState.ts'
-import type { ComboPlugin, ProfileLayer } from '../../shared/types.ts'
+import type { ComboPlugin, InsertConflict, InsertConflictLayer, ProfileLayer } from '../../shared/types.ts'
 
 /** Domain-tagged logger for profile-composition work. */
 const cplog = child('combo')
@@ -18,19 +18,45 @@ const cplog = child('combo')
 /** Re-export the shared composed-plugin shape. */
 export type { ComboPlugin } from '../../shared/types.ts'
 
-/** Locate a bundle package's `cordis.patch.yml`. Installation anchor comes
- * first — mirrors dsh's two-anchor resolution so in-box bundles are composed
- * from the same install the running dsh loads — then profile / shared fallback. */
-export function resolveBundlePatch(ctx: DshContext, bundle: string, profile: string): string | undefined {
+/** Candidate node_modules roots a bundle may be installed under, nearest first:
+ * the dsh installation anchor (so in-box bundles come from the same install the
+ * running dsh loads), then the profile, the shared profiles root, the dsh home.
+ * Mirrors the host's install-anchor-first resolution. */
+function bundleRoots(ctx: DshContext, profile: string): string[] {
+  const roots: string[] = []
   const anchor = installAnchor(ctx)
-  const candidates = [
-    ...(anchor !== undefined ? [join(anchor, 'node_modules', bundle, 'cordis.patch.yml')] : []),
-    join(profileDir(ctx, profile), 'node_modules', bundle, 'cordis.patch.yml'),
-    join(profilesDir(ctx), 'node_modules', bundle, 'cordis.patch.yml'),
-    join(dshHome(ctx), 'node_modules', bundle, 'cordis.patch.yml'),
-  ]
-  for (const path of candidates) {
-    if (existsSync(path)) return path
+  if (anchor !== undefined) roots.push(join(anchor, 'node_modules'))
+  roots.push(join(profileDir(ctx, profile), 'node_modules'))
+  roots.push(join(profilesDir(ctx), 'node_modules'))
+  roots.push(join(dshHome(ctx), 'node_modules'))
+  return roots
+}
+
+/** The patch filename a bundle package declares via `dsh.bundle.patch` — the
+ * host's contract — falling back to the historical `cordis.patch.yml` for a
+ * package that omits the field or cannot be read. */
+function bundlePatchRel(bundleDir: string): string {
+  try {
+    const manifest = JSON.parse(readFileSync(join(bundleDir, 'package.json'), 'utf8')) as {
+      dsh?: { bundle?: { patch?: unknown } }
+    }
+    const declared = manifest.dsh?.bundle?.patch
+    if (typeof declared === 'string' && declared.trim() !== '') return declared
+  } catch {
+    // missing/invalid manifest — fall through to the default filename
+  }
+  return 'cordis.patch.yml'
+}
+
+/** Locate a bundle package's patch file: its declared `dsh.bundle.patch` (else
+ * the `cordis.patch.yml` default), under the nearest resolvable node_modules
+ * root. The host requires the declaration and fails loud without it; the
+ * launcher is a viewer, so a package that omits it still resolves by filename. */
+export function resolveBundlePatch(ctx: DshContext, bundle: string, profile: string): string | undefined {
+  for (const root of bundleRoots(ctx, profile)) {
+    const bundleDir = join(root, bundle)
+    const patchPath = join(bundleDir, bundlePatchRel(bundleDir))
+    if (existsSync(patchPath)) return patchPath
   }
   return undefined
 }
@@ -93,20 +119,55 @@ export function composeProfileLayers(ctx: DshContext, profile: string): ProfileL
   return layers
 }
 
-/** Whether a package (resolved from any node_modules root) declares `dsh.bundle`. */
+/**
+ * Find loader entry ids inserted by more than one layer of a profile's composed
+ * stack (bundle layers → profile → home → `--patch` overlays). The host applies
+ * inserts in that order and hard-fails on a repeated id, so any entry here means
+ * the profile cannot boot. A viewer-side pre-flight: it turns the host's
+ * "duplicate loader entry id" stack trace into a named layer pair.
+ */
+export function findInsertConflicts(
+  ctx: DshContext, profile: string, extraPatches: readonly string[] = [],
+): InsertConflict[] {
+  const layers: { source: InsertConflictLayer['source']; label?: string; bundle?: string; text: string }[] = []
+  const { bundles } = readManifest(ctx, profile)
+  for (const bundle of bundles) {
+    const patchPath = resolveBundlePatch(ctx, bundle, profile)
+    if (patchPath === undefined) continue
+    layers.push({ source: 'bundle', bundle, text: readFileSync(patchPath, 'utf8') })
+  }
+  const userText = readUserPatch(ctx, profile)
+  if (userText.trim() !== '') layers.push({ source: 'profile', label: profile, text: userText })
+  const homePath = homePatchPath(ctx)
+  if (existsSync(homePath)) layers.push({ source: 'home', text: readFileSync(homePath, 'utf8') })
+  for (const file of extraPatches) {
+    if (!existsSync(file)) continue
+    layers.push({ source: 'patch', label: basename(file), text: readFileSync(file, 'utf8') })
+  }
+
+  const byId = new Map<string, InsertConflictLayer[]>()
+  for (const layer of layers) {
+    for (const id of collectInsertIds(layer.text)) {
+      const list = byId.get(id) ?? []
+      list.push({ source: layer.source, bundle: layer.bundle, label: layer.label })
+      byId.set(id, list)
+    }
+  }
+  return [...byId.entries()]
+    .filter(([, list]) => list.length > 1)
+    .map(([id, list]) => ({ id, layers: list }))
+}
+
+/** Whether a package (resolved from any node_modules root) declares a
+ * `dsh.bundle.patch` — the host's own bundle test (`exportsPatch`). */
 function declaresBundle(ctx: DshContext, pkgName: string, profile: string): boolean {
-  const roots: string[] = []
-  const anchor = installAnchor(ctx)
-  if (anchor !== undefined) roots.push(join(anchor, 'node_modules'))
-  roots.push(join(profileDir(ctx, profile), 'node_modules'))
-  roots.push(join(profilesDir(ctx), 'node_modules'))
-  roots.push(join(dshHome(ctx), 'node_modules'))
-  for (const root of roots) {
+  for (const root of bundleRoots(ctx, profile)) {
     const manifestPath = join(root, pkgName, 'package.json')
     if (!existsSync(manifestPath)) continue
     try {
-      const pkg = JSON.parse(readFileSync(manifestPath, 'utf8')) as { dsh?: { bundle?: unknown } }
-      if (pkg.dsh?.bundle !== undefined) return true
+      const pkg = JSON.parse(readFileSync(manifestPath, 'utf8')) as { dsh?: { bundle?: { patch?: unknown } } }
+      const patch = pkg.dsh?.bundle?.patch
+      if (typeof patch === 'string' && patch.trim() !== '') return true
     } catch {
       // skip unresolvable manifests
     }

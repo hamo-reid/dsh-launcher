@@ -11,14 +11,17 @@ import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { existsExecutable, resolveLaunchEntry, type LaunchEntry } from '../core/dsh.ts'
 import { buildDshLaunch } from '../core/launch-spec.ts'
+import { findInsertConflicts } from '../core/combo.ts'
 import { nodeEnvironment } from '../core/node-env.ts'
 import { nodePreferenceValue } from '../core/settings.ts'
-import { dshEntryById, readLaunchOptions, readRunMode, writeLaunchOptions, writeRunMode } from '../core/appState.ts'
+import { contextForEntry, dshEntryById, readLaunchOptions, readRunMode, writeLaunchOptions, writeRunMode } from '../core/appState.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
 import { child, logger } from '../core/logger.ts'
 import { effectiveArgs, sanitizeLaunchOptions } from '../core/launch-options.ts'
 import { hasRun, nextRunId } from '../core/run-registry.ts'
-import type { IpcResult, LaunchOptions, RunDefaults, RunEvent, RunInfo, RunMode } from '../../shared/types.ts'
+import type {
+  InsertConflict, InsertConflictLayer, IpcResult, LaunchOptions, RunDefaults, RunEvent, RunInfo, RunMode,
+} from '../../shared/types.ts'
 
 /** One live profile runtime. */
 interface RuntimeState {
@@ -164,6 +167,21 @@ function launchShellWindow(exe: string, argv: string[], env: NodeJS.ProcessEnv, 
   return spawn('cmd.exe', ['/c', 'start', '', '/wait', 'powershell.exe', '-NoExit', '-ExecutionPolicy', 'Bypass', '-File', scriptPath], { windowsHide: false, env, cwd })
 }
 
+/** Human-readable label for one conflict layer, e.g. `bundle:@deepseek-ai/dsh-web-app`. */
+function insertLayerLabel(layer: InsertConflictLayer): string {
+  if (layer.source === 'bundle') return `bundle:${layer.bundle ?? '?'}`
+  if (layer.source === 'profile') return `profile:${layer.label ?? '?'}`
+  if (layer.source === 'home') return 'home'
+  return `patch:${layer.label ?? '?'}`
+}
+
+/** One-line-per-id description of insert conflicts, for the launch error detail. */
+function describeInsertConflicts(conflicts: InsertConflict[]): string {
+  return conflicts
+    .map(c => `${c.id} ← ${c.layers.map(insertLayerLabel).join(' + ')}`)
+    .join('; ')
+}
+
 export function registerRunIpc(): void {
   handle('run:start', (_event, profile: string, mode?: RunMode, options?: LaunchOptions, dshId?: string): IpcResult<{ id: string }> => {
     // The target dsh is always explicit now (the Run page picks it at launch);
@@ -186,6 +204,21 @@ export function registerRunIpc(): void {
           env: sanitized.env,
           ...(sanitized.port !== undefined && { port: sanitized.port }),
         })
+      }
+      // Pre-flight the composed patch stack: two layers inserting the same
+      // loader entry id make the host abort with a raw "duplicate loader entry
+      // id" stack trace; catch it here with the offending layers named.
+      const conflicts = findInsertConflicts(contextForEntry(entry), profile, sanitized.patches)
+      if (conflicts.length > 0) {
+        // Structured so the renderer can show the offending bundles and the
+        // colliding plugin ids as two lists instead of a raw message.
+        return {
+          ok: false,
+          code: E.runInsertConflict,
+          params: { ids: conflicts.map(c => c.id).join('、') },
+          error: describeInsertConflicts(conflicts),
+          conflicts,
+        }
       }
       // Launch the dsh entry directly with array args (no cmd/powershell command
       // string — the output pipe stays UTF-8). Prefer a system `node` when one

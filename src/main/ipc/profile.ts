@@ -13,7 +13,7 @@ import {
   appendRowBlock, extractKeyValue, extractRowBlock, parsePatchRows, removeRow, setRowConfig, setRowDisabled, upsertRow,
 } from '../core/patch.ts'
 import {
-  composeProfileLayers, defaultConfigText, listUnclaimedBundles, reconcileBundles, resolveBundlePatch,
+  composeProfileLayers, defaultConfigText, findInsertConflicts, listUnclaimedBundles, reconcileBundles, resolveBundlePatch,
 } from '../core/combo.ts'
 import {
   cloneProfile, createProfile, exportProfile, importProfile, listLocalBundles, listProfileSummaries,
@@ -25,7 +25,7 @@ import { fail, E } from '../core/errors.ts'
 import { handle } from './handle.ts'
 import { pathIdentifierInvalid, pathOutsideRoot, rowIdInvalid } from './validate.ts'
 import type {
-  ImportProfileResult, IpcResult, ProfileDetail, ProfileLayer, RowCreateInput,
+  ImportProfileResult, InsertConflict, IpcResult, ProfileDetail, ProfileLayer, RowCreateInput,
 } from '../../shared/types.ts'
 
 /** Validate a config value is a YAML mapping (FAILSAFE: structure only, so
@@ -314,6 +314,15 @@ export function registerProfileIpc(): void {
     if (ctx === null) return fail(E.dshNotFound)
     if (invalidName(name)) return fail(E.nameInvalid)
     return { ok: true, value: composeProfileLayers(ctx, name) }
+  })
+
+  // Loader entry ids inserted by more than one composed layer. The host
+  // hard-fails on a repeated insert id, so the UI surfaces it before launch.
+  handle('profile:conflicts', (_event, dshId: string, name: string): IpcResult<InsertConflict[]> => {
+    const ctx = ctxOf(dshId)
+    if (ctx === null) return fail(E.dshNotFound)
+    if (invalidName(name)) return fail(E.nameInvalid)
+    return { ok: true, value: findInsertConflicts(ctx, name) }
   })
 
   // Create / update a row (pure id, disabled, config override, or insert) on the

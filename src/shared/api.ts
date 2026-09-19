@@ -19,6 +19,7 @@ import type {
   ImportStep,
   InstalledOverviewRow,
   InstalledPlugin,
+  InsertConflict,
   IpcResult,
   PluginUsagePoint,
   MarketListOpts,
@@ -65,6 +66,9 @@ export interface WindowApi {
   onImportEvent: (callback: (step: ImportStep) => void) => () => void
   missingBundles: (dshId: string, name: string) => Promise<IpcResult<string[]>>
   layers: (dshId: string, name: string) => Promise<IpcResult<ProfileLayer[]>>
+  /** Loader entry ids inserted by more than one composed layer (a boot-blocking
+   * duplicate the host would otherwise only report as a raw stack trace). */
+  conflicts: (dshId: string, name: string) => Promise<IpcResult<InsertConflict[]>>
   addRow: (dshId: string, name: string, row: RowCreateInput) => Promise<IpcResult<boolean>>
   setRowConfig: (dshId: string, name: string, id: string, configText: string) => Promise<IpcResult<boolean>>
   removeRow: (dshId: string, name: string, id: string) => Promise<IpcResult<boolean>>

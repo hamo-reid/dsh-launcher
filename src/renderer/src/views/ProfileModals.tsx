@@ -10,6 +10,7 @@ import { ErrorDetailModal } from '../components/ErrorDetailModal.tsx'
 import { StepIcon } from '../components/StepIcon.tsx'
 import { MODAL } from '../theme.ts'
 import { majorOfVersion } from '../../../shared/version.ts'
+import { isReservedProfileName } from '../../../shared/profile-name.ts'
 import type { ImportBundleSource, ImportProfileResult, ImportStep } from '../../../shared/types.ts'
 
 interface CreateProfileModalProps {
@@ -25,11 +26,15 @@ interface CreateProfileModalProps {
 export function CreateProfileModal(p: CreateProfileModalProps): JSX.Element {
   const { t } = useTranslation()
   const { token } = theme.useToken()
+  const reserved = isReservedProfileName(p.name.trim())
   return (
     <Modal title={t('profile.create.title')} open={p.open} okText={t('profile.create.create')} onOk={() => void p.onOk()}
-      okButtonProps={{ disabled: p.name.trim() === '' }} onCancel={p.onCancel} width={MODAL.narrow}>
+      okButtonProps={{ disabled: p.name.trim() === '' || reserved }} onCancel={p.onCancel} width={MODAL.narrow}>
       <Space orientation="vertical" style={{ width: '100%' }}>
         <Input value={p.name} onChange={e => p.setName(e.target.value)} placeholder={t('profile.create.namePlaceholder')} onPressEnter={() => void p.onOk()} />
+        {reserved && (
+          <Alert type="warning" showIcon title={t('profile.create.reservedName', { name: p.name.trim() })} />
+        )}
         <div>
           <div style={{ marginBottom: 6, color: token.colorTextSecondary }}>{t('profile.create.basedOn')}</div>
           <Select value={p.template} onChange={p.setTemplate} style={{ width: '100%' }} options={p.sources} />
@@ -48,10 +53,17 @@ interface CloneProfileModalProps {
 }
 export function CloneProfileModal(p: CloneProfileModalProps): JSX.Element {
   const { t } = useTranslation()
+  const reserved = isReservedProfileName(p.name.trim())
   return (
     <Modal title={t('profile.clone.title', { name: p.target ?? '' })} open={p.target !== null} okText={t('profile.clone.clone')}
+      okButtonProps={{ disabled: p.name.trim() === '' || reserved }}
       onOk={() => void p.onOk()} onCancel={p.onCancel} destroyOnHidden width={MODAL.narrow}>
-      <Input value={p.name} onChange={e => p.setName(e.target.value)} placeholder={t('profile.clone.namePlaceholder')} onPressEnter={() => void p.onOk()} />
+      <Space orientation="vertical" style={{ width: '100%' }}>
+        <Input value={p.name} onChange={e => p.setName(e.target.value)} placeholder={t('profile.clone.namePlaceholder')} onPressEnter={() => void p.onOk()} />
+        {reserved && (
+          <Alert type="warning" showIcon title={t('profile.create.reservedName', { name: p.name.trim() })} />
+        )}
+      </Space>
     </Modal>
   )
 }
@@ -166,6 +178,7 @@ export function ImportProfileModal(p: ImportProfileModalProps): JSX.Element {
   }, [p.open, p.defaultName])
 
   const mismatch = p.importDshVersion !== '' && majorOfVersion(p.importDshVersion) !== majorOfVersion(p.activeDshVersion)
+  const reserved = isReservedProfileName(name.trim())
 
   const doImport = async (): Promise<void> => {
     const target = name.trim()
@@ -197,7 +210,7 @@ export function ImportProfileModal(p: ImportProfileModalProps): JSX.Element {
           : (
               <Space>
                 <Button onClick={p.onClose}>{t('common.cancel')}</Button>
-                <Button type="primary" onClick={() => void doImport()}>{t('profile.import.import')}</Button>
+                <Button type="primary" disabled={reserved} onClick={() => void doImport()}>{t('profile.import.import')}</Button>
               </Space>
             )}
     >
@@ -215,6 +228,9 @@ export function ImportProfileModal(p: ImportProfileModalProps): JSX.Element {
         {!running && !done && (
           <>
             <Input value={name} onChange={e => setName(e.target.value)} placeholder={t('profile.import.namePlaceholder')} onPressEnter={() => void doImport()} disabled={running} />
+            {reserved && (
+              <Alert type="warning" showIcon title={t('profile.create.reservedName', { name: name.trim() })} />
+            )}
             {mismatch && (
               <Checkbox checked={forceImport} onChange={e => setForceImport(e.target.checked)}>
                 {t('profile.import.force')}

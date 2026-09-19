@@ -38,6 +38,24 @@ export interface ProfileLayer {
   rows: ClassifiedRow[]
 }
 
+/** One layer of a profile's composed stack, for insert-conflict reporting. */
+export interface InsertConflictLayer {
+  source: 'bundle' | 'profile' | 'home' | 'patch'
+  /** Bundle package name (`source === 'bundle'`). */
+  bundle?: string
+  /** Profile name (`source === 'profile'`) or overlay filename (`source === 'patch'`). */
+  label?: string
+}
+
+/** A loader entry id inserted by more than one layer of a profile's composed
+ * patch stack. The host applies each layer's inserts in order and hard-fails on
+ * a repeated entry id (`duplicate loader entry id`), so this profile cannot boot. */
+export interface InsertConflict {
+  id: string
+  /** Every layer that inserts this id, in application order. */
+  layers: InsertConflictLayer[]
+}
+
 /** Input for creating/updating a row in the profile layer's patch. */
 export interface RowCreateInput {
   id: string
@@ -45,6 +63,11 @@ export interface RowCreateInput {
   config?: string
   insert?: string[]
 }
+
+/** The user patch-file lifecycle a profile manifest declares
+ * (`dsh.profile.patchReload`): `live` watches and hot-reloads the patch file,
+ * `startup` reads it once at boot. */
+export type ProfilePatchReload = 'live' | 'startup'
 
 /** One point where a plugin is in use: a profile under some dsh. */
 export interface PluginUsagePoint {
@@ -132,7 +155,7 @@ export interface ProfileDetail {
  * raw `error` string as a fallback/detail. */
 export type IpcResult<T> =
   | { ok: true; value: T }
-  | { ok: false; code: string; params?: Record<string, string> | string[]; error: string }
+  | { ok: false; code: string; params?: Record<string, string> | string[]; error: string; conflicts?: InsertConflict[] }
 
 /** Launch mode for a profile runtime: embedded console (`app`) or a visible OS
  * terminal window (`shell`). Both are owned/tracked by the main process. */

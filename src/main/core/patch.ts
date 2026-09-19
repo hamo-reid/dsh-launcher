@@ -72,6 +72,37 @@ export interface NamedRow {
   disabled: boolean
 }
 
+/**
+ * Collect the loader-entry ids a patch layer *inserts*: the `id` of every row
+ * nested under an `insert:` key (nested `insert:` blocks included). Id-targeted
+ * rows (`- id: x` carrying `config`/`disabled`) patch an existing entry and may
+ * repeat across layers; only inserts create new entries, so a repeated insert id
+ * is exactly the host's hard `duplicate loader entry id` failure.
+ */
+export function collectInsertIds(text: string): string[] {
+  const lines = text.split('\n')
+  const ids: string[] = []
+  // Indentation of each `insert:` key currently in scope (a stack so a nested
+  // insert block does not hide its siblings).
+  const stack: number[] = []
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (trimmed === '' || trimmed.startsWith('#')) continue
+    const indent = /^(\s*)/.exec(line)?.[1].length ?? 0
+    while (stack.length > 0 && indent <= stack[stack.length - 1]) stack.pop()
+    const key = /^(\s*)(?:-\s*)?insert\s*:\s*$/.exec(line)
+    if (key !== null) {
+      stack.push(key[1].length)
+      continue
+    }
+    if (stack.length > 0) {
+      const m = ID_RE.exec(line)
+      if (m !== null) ids.push(m[2])
+    }
+  }
+  return ids
+}
+
 /** Parse rows including each block's `name:` (for bundle-built plugin rows). */
 export function parseNamedRows(text: string): NamedRow[] {
   const lines = text.split('\n')

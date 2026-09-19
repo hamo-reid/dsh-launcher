@@ -8,7 +8,7 @@ import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-
 import { CSS } from '@dnd-kit/utilities'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
-import type { ProfileDetail, ProfileLayer, RowCreateInput } from '../../../shared/types.ts'
+import type { InsertConflict, InsertConflictLayer, ProfileDetail, ProfileLayer, RowCreateInput } from '../../../shared/types.ts'
 import ActionCard from '../components/ActionCard.tsx'
 import FieldLabel from '../components/FieldLabel.tsx'
 import Loadable from '../components/Loadable.tsx'
@@ -42,6 +42,7 @@ export default function ProfileDetailView({ dshId, name, onChanged }: Props) {
   // this state updates (stale-guarded), so fast switching never remounts.
   const [detail, setDetail] = useState<ProfileDetail | null>(null)
   const [layers, setLayers] = useState<ProfileLayer[] | null>(null)
+  const [conflicts, setConflicts] = useState<InsertConflict[]>([])
   const [loading, setLoading] = useState(true)
 
   const [openBlock, setOpenBlock] = useState<'bundles' | 'deps' | null>(null)
@@ -64,6 +65,13 @@ export default function ProfileDetailView({ dshId, name, onChanged }: Props) {
     return t('profile.layer.home')
   }
 
+  const conflictLayerLabel = (layer: InsertConflictLayer): string => {
+    if (layer.source === 'bundle') return t('profile.layer.bundle', { name: layer.bundle ?? '' })
+    if (layer.source === 'profile') return t('profile.layer.profile', { name: layer.label ?? '' })
+    if (layer.source === 'home') return t('profile.layer.home')
+    return t('profile.detail.patchLayer', { name: layer.label ?? '' })
+  }
+
   // A bumped sequence guards the last-write-wins: whenever `name` changes or a
 // handler triggers a refresh, every in-flight load past the newer seq is
 // discarded so a stale response can't overwrite fresher data (e.g. after a fast
@@ -71,21 +79,24 @@ export default function ProfileDetailView({ dshId, name, onChanged }: Props) {
 const loadSeq = useRef(0)
   const load = async (): Promise<void> => {
     const seq = ++loadSeq.current
-    if (name === '') { setDetail(null); setLayers(null); setLoading(false); return }
+    if (name === '') { setDetail(null); setLayers(null); setConflicts([]); setLoading(false); return }
     setLoading(true)
-    const [detailRes, layersRes] = await Promise.all([
+    const [detailRes, layersRes, conflictsRes] = await Promise.all([
       window.api.loadProfile(dshId, name),
       window.api.layers(dshId, name),
+      window.api.conflicts(dshId, name),
     ])
     if (seq !== loadSeq.current) return // a newer load superseded this one
     if (detailRes.ok) setDetail(detailRes.value)
     if (layersRes.ok) setLayers(layersRes.value)
+    if (conflictsRes.ok) setConflicts(conflictsRes.value)
     setLoading(false)
   }
 
   useEffect(() => {
     setDetail(null)
     setLayers(null)
+    setConflicts([])
     setLoading(true)
     if (name === '') { setLoading(false); return undefined }
     void load()
@@ -324,6 +335,28 @@ const loadSeq = useRef(0)
           <Button size="small" onClick={() => void reconcileNow()} loading={reconciling}>{t('profile.detail.reconcile')}</Button>
         </Space>
       )} />
+      {conflicts.length > 0 && (
+        <Alert
+          type="error"
+          showIcon
+          style={{ marginBottom: token.paddingSM }}
+          title={t('profile.detail.insertConflictTitle')}
+          description={(
+            <div>
+              <div>{t('profile.detail.insertConflictDesc')}</div>
+              <ul style={{ margin: '6px 0 0', paddingInlineStart: 18 }}>
+                {conflicts.map(c => (
+                  <li key={c.id}>
+                    <code>{c.id}</code>
+                    {' — '}
+                    {c.layers.map(conflictLayerLabel).join(' + ')}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        />
+      )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: token.paddingSM, marginBottom: token.paddingLG }}>
         {blockButton(t('profile.detail.bundles'), t('profile.detail.nBundlesMeta', { count: bundles.length }), () => setOpenBlock('bundles'))}
         {blockButton(t('profile.detail.deps'), t('profile.detail.nDepsMeta', { count: dependencies.length }), () => setOpenBlock('deps'))}

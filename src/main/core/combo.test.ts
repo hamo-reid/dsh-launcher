@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { contextForEntry } from './appState.ts'
 import {
-  composeProfileLayers, defaultConfigText, listComboPlugins, listUnclaimedBundles,
+  composeProfileLayers, defaultConfigText, findInsertConflicts, listComboPlugins, listUnclaimedBundles,
   reconcileBundles, resolveBundlePatch,
 } from './combo.ts'
 
@@ -47,11 +47,11 @@ function mkBundle(p: string, bundle: string, text: string): void {
   writeFileSync(join(dir, 'cordis.patch.yml'), text)
 }
 
-/** A manually installed bundle package declaring `dsh.bundle`. */
+/** A manually installed bundle package declaring `dsh.bundle.patch`. */
 function mkBundlePkg(p: string, bundle: string): void {
   const dir = join(profileDir(p), 'node_modules', bundle)
   mkdirSync(dir, { recursive: true })
-  writeFileSync(join(dir, 'package.json'), JSON.stringify({ dsh: { bundle: true } }))
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ dsh: { bundle: { patch: './cordis.patch.yml' } } }))
 }
 
 function mkUserPatch(p: string, text: string): void {
@@ -69,6 +69,16 @@ describe('resolveBundlePatch', () => {
   it('returns undefined when no candidate holds the patch', () => {
     mkProfile('p', [], {})
     expect(resolveBundlePatch(ctx(), 'missing', 'p')).toBeUndefined()
+  })
+
+  it("honours a bundle's declared dsh.bundle.patch filename", () => {
+    mkProfile('p', ['b1'], {})
+    const dir = join(profileDir('p'), 'node_modules', 'b1')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ dsh: { bundle: { patch: './custom.patch.yml' } } }))
+    writeFileSync(join(dir, 'custom.patch.yml'), '- id: one\n')
+    expect(resolveBundlePatch(ctx(), 'b1', 'p')).toBe(join(dir, 'custom.patch.yml'))
+    expect(listComboPlugins(ctx(), 'p').map(r => r.id)).toEqual(['one'])
   })
 })
 
@@ -154,5 +164,42 @@ describe('listUnclaimedBundles', () => {
     mkBundlePkg('p', 'active')
     mkBundlePkg('p', 'stray')
     expect(listUnclaimedBundles(ctx(), 'p')).toEqual(['stray'])
+  })
+})
+
+describe('findInsertConflicts', () => {
+  it('flags an id inserted by two bundle layers, naming both', () => {
+    mkProfile('p', ['b1', 'b2'], {})
+    mkBundle('p', 'b1', '- insert:\n    - id: shared\n      name: pkg\n')
+    mkBundle('p', 'b2', '- insert:\n    - id: shared\n      name: pkg\n')
+    expect(findInsertConflicts(ctx(), 'p')).toEqual([
+      { id: 'shared', layers: [{ source: 'bundle', bundle: 'b1' }, { source: 'bundle', bundle: 'b2' }] },
+    ])
+  })
+
+  it('does not flag an id merely patched (not inserted) by another layer', () => {
+    mkProfile('p', ['b1', 'b2'], {})
+    mkBundle('p', 'b1', '- insert:\n    - id: shared\n      name: pkg\n')
+    mkBundle('p', 'b2', '- id: shared\n  config:\n    k: v\n')
+    expect(findInsertConflicts(ctx(), 'p')).toEqual([])
+  })
+
+  it('flags a profile-layer insert colliding with a bundle insert', () => {
+    mkProfile('p', ['b1'], {})
+    mkBundle('p', 'b1', '- insert:\n    - id: shared\n      name: pkg\n')
+    mkUserPatch('p', '- insert:\n    - id: shared\n      name: pkg\n')
+    expect(findInsertConflicts(ctx(), 'p')).toEqual([
+      { id: 'shared', layers: [{ source: 'bundle', bundle: 'b1' }, { source: 'profile', label: 'p' }] },
+    ])
+  })
+
+  it('includes --patch overlays passed at launch', () => {
+    mkProfile('p', [], {})
+    mkUserPatch('p', '- insert:\n    - id: shared\n      name: pkg\n')
+    const overlay = join(root, 'overlay.yml')
+    writeFileSync(overlay, '- insert:\n    - id: shared\n      name: pkg\n')
+    expect(findInsertConflicts(ctx(), 'p', [overlay])).toEqual([
+      { id: 'shared', layers: [{ source: 'profile', label: 'p' }, { source: 'patch', label: 'overlay.yml' }] },
+    ])
   })
 })

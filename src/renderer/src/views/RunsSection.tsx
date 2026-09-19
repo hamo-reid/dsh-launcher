@@ -19,7 +19,7 @@ import Panel from '../components/Panel.tsx'
 import RunConsole from '../components/RunConsole.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
 import { useRuns } from './useRuns.tsx'
-import { RunFailModal } from './RunsModals.tsx'
+import { RunConflictModal, RunFailModal } from './RunsModals.tsx'
 import RunLaunchModal from './RunLaunchModal.tsx'
 import { LAYOUT } from '../theme.ts'
 import type { DshProfileInfo, LaunchOptions, RunInfo, RunMode } from '../../../shared/types.ts'
@@ -404,6 +404,7 @@ export default function RunsSection(): JSX.Element {
       onLaunch={handleLaunch}
     />
     <RunFailModal failInfo={run.failInfo} onClose={run.clearFail} />
+    <RunConflictModal info={run.conflictInfo} onClose={run.clearConflict} />
     </>
   )
 }
