@@ -96,6 +96,8 @@ const api = {
     ipcRenderer.invoke('profile:addBundle', dshId, name, pkg),
   rename: (dshId: string, oldName: string, newName: string): Promise<IpcResult<boolean>> =>
     ipcRenderer.invoke('profile:rename', dshId, oldName, newName),
+  transferPatch: (sourceDshId: string, sourceName: string, targetDshId: string, targetName: string, move: boolean): Promise<IpcResult<boolean>> =>
+    ipcRenderer.invoke('profile:transferPatch', sourceDshId, sourceName, targetDshId, targetName, move),
   addRow: (dshId: string, name: string, row: RowCreateInput): Promise<IpcResult<boolean>> =>
     ipcRenderer.invoke('profile:addRow', dshId, name, row),
   setRowConfig: (dshId: string, name: string, id: string, configText: string): Promise<IpcResult<boolean>> =>

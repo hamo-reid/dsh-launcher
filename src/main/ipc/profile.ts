@@ -20,7 +20,7 @@ import {
 import {
   addBundle, cloneProfile, createProfile, exportProfile, importProfile, listLocalBundles, listProfileSummaries,
   mirrorProfile, PROFILE_TEMPLATES, readProfileFile, removeBundle, removeDependency, renameProfile, reorderBundle,
-  setDependency, setManifestMeta, softDeleteProfile, writeProfileFile, type ProfileSummary,
+  setDependency, setManifestMeta, softDeleteProfile, transferProfilePatch, writeProfileFile, type ProfileSummary,
 } from '../core/profile.ts'
 import { contextForEntry, dshEntryById, pluginDir, type DshContext } from '../core/appState.ts'
 import { addDirToZip, dedentRowBlock, verifyDisabledState } from '../core/app-util.ts'
@@ -394,6 +394,16 @@ export function registerProfileIpc(): void {
     if (invalidName(oldName) || invalidName(newName)) return fail(E.nameInvalid)
     if (isProfileRunning(dshId, oldName)) return fail(E.runAlreadyRunning, { profile: oldName })
     renameProfile(ctx, oldName, newName)
+    return { ok: true, value: true }
+  })
+
+  // Copy (or move) a profile's patch layer into another profile, merging by id.
+  handle('profile:transferPatch', (_event, sourceDshId: string, sourceName: string, targetDshId: string, targetName: string, move: boolean): IpcResult<boolean> => {
+    const source = ctxOf(sourceDshId)
+    const target = ctxOf(targetDshId)
+    if (source === null || target === null) return fail(E.dshNotFound)
+    if (invalidName(sourceName) || invalidName(targetName)) return fail(E.nameInvalid)
+    transferProfilePatch(source, sourceName, target, targetName, move === true)
     return { ok: true, value: true }
   })
 

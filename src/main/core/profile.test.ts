@@ -29,7 +29,7 @@ import { contextForEntry } from './appState.ts'
 import {
   addBundle, cloneProfile, createProfile, exportProfile, importProfile,
   listLocalBundles, listProfileSummaries, readProfileFile, removeBundle, removeDependency, renameProfile,
-  reorderBundle, setDependency, setManifestMeta, softDeleteProfile, writeProfileFile,
+  reorderBundle, setDependency, setManifestMeta, softDeleteProfile, transferProfilePatch, writeProfileFile,
 } from './profile.ts'
 
 let root: string
@@ -243,6 +243,31 @@ describe('renameProfile', () => {
     createProfile(ctx(), 'taken')
     expect(() => renameProfile(ctx(), 'old', 'web')).toThrow(/reserved/)
     expect(() => renameProfile(ctx(), 'old', 'taken')).toThrow(/already exists/)
+  })
+})
+
+describe('transferProfilePatch', () => {
+  it('merges rows by id into the target and clears them on move', () => {
+    createProfile(ctx(), 'src')
+    createProfile(ctx(), 'dst')
+    writeFileSync(join(profiles(), 'src', 'cordis.patch.yml'), '- id: a\n- id: b\n')
+    writeFileSync(join(profiles(), 'dst', 'cordis.patch.yml'), '- id: b\n  disabled: true\n')
+    transferProfilePatch(ctx(), 'src', ctx(), 'dst', false)
+    const dst = readFileSync(join(profiles(), 'dst', 'cordis.patch.yml'), 'utf8')
+    expect(dst).toContain('- id: a')
+    // The target's same-id row is replaced by the source's (no longer disabled).
+    expect(dst).not.toContain('disabled: true')
+    // Copy leaves the source intact.
+    expect(readFileSync(join(profiles(), 'src', 'cordis.patch.yml'), 'utf8')).toContain('- id: a')
+
+    transferProfilePatch(ctx(), 'src', ctx(), 'dst', true)
+    expect(readFileSync(join(profiles(), 'src', 'cordis.patch.yml'), 'utf8').trim()).toBe('[]')
+  })
+
+  it('refuses the same profile', () => {
+    createProfile(ctx(), 'p')
+    writeFileSync(join(profiles(), 'p', 'cordis.patch.yml'), '- id: a\n')
+    expect(() => transferProfilePatch(ctx(), 'p', ctx(), 'p', false)).toThrow(/同一个/)
   })
 })
 

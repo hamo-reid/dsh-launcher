@@ -9,7 +9,7 @@ import { listProfiles, profileDir, profilesDir } from './home.ts'
 import { pluginDir, profilesRootFor, type DshContext } from './appState.ts'
 import { readManifest } from './manifest.ts'
 import { listComboPlugins, reconcileBundles, resolveBundlePatch } from './combo.ts'
-import { parsePatchRows, assertPatchDocValid } from './patch.ts'
+import { appendRowBlock, assertPatchDocValid, extractRowBlock, parsePatchRows, removeRow } from './patch.ts'
 import { runPnpm, type PnpmResult } from './pnpm.ts'
 import { addLocalPlugin, addPlugin, installIntoProfile, installedStoreVersion } from './plugins.ts'
 import { satisfiesRange } from './version.ts'
@@ -210,6 +210,45 @@ export function addBundle(ctx: DshContext, profile: string, pkg: string): void {
   manifest.dsh = { ...manifest.dsh, profile: { ...manifest.dsh?.profile, bundles: [...bundles, pkg] } }
   writeRawManifest(dir, manifest)
   logger.info(`bundle activated: ${profile} · ${pkg}`)
+}
+
+/**
+ * Copy (or move) a profile's own patch layer into another profile's layer,
+ * merging by row id: a target row with the same id is replaced by the source
+ * row, others are appended. `move` then clears those rows from the source.
+ * Both profiles may live under different dsh installs.
+ */
+export function transferProfilePatch(
+  source: DshContext, sourceName: string, target: DshContext, targetName: string, move: boolean,
+): void {
+  if (source.home === target.home && sourceName === targetName) throw new Error('源与目标是同一个 profile')
+  const srcPath = join(profilesRootFor(source), sourceName, 'cordis.patch.yml')
+  const srcDir = join(profilesRootFor(source), sourceName)
+  const dstDir = join(profilesRootFor(target), targetName)
+  if (!existsSync(join(srcDir, 'package.json'))) throw new Error(`profile "${sourceName}" 不存在`)
+  if (!existsSync(join(dstDir, 'package.json'))) throw new Error(`目标 profile "${targetName}" 不存在`)
+  if (!existsSync(srcPath)) throw new Error(`profile "${sourceName}" 没有 patch 层`)
+
+  const text = readFileSync(srcPath, 'utf8')
+  const rows = parsePatchRows(text)
+  if (rows.length === 0) throw new Error(`profile "${sourceName}" 的 patch 层没有行`)
+
+  const dstPath = join(dstDir, 'cordis.patch.yml')
+  let dst = existsSync(dstPath) ? readFileSync(dstPath, 'utf8') : '[]'
+  for (const row of rows) {
+    const block = extractRowBlock(text, row.id)
+    if (block === undefined) continue
+    dst = appendRowBlock(removeRow(dst, row.id), block)
+  }
+  assertPatchDocValid(dst)
+  writeFileSync(dstPath, dst)
+
+  if (move) {
+    let src = text
+    for (const row of rows) src = removeRow(src, row.id)
+    writeFileSync(srcPath, src.trim() === '' ? '[]\n' : src)
+  }
+  logger.info(`profile patch ${move ? 'moved' : 'copied'}: ${sourceName} → ${targetName} (${rows.length} rows)`)
 }
 
 /** Rename a profile's directory. Refuses a reserved or colliding name; keeps the

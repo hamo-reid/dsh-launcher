@@ -86,6 +86,8 @@ export interface WindowApi {
   addBundle: (dshId: string, name: string, pkg: string) => Promise<IpcResult<boolean>>
   /** Rename a profile's directory (refused while it is running). */
   rename: (dshId: string, oldName: string, newName: string) => Promise<IpcResult<boolean>>
+  /** Copy (or move) a profile's patch layer into another profile, merging by id. */
+  transferPatch: (sourceDshId: string, sourceName: string, targetDshId: string, targetName: string, move: boolean) => Promise<IpcResult<boolean>>
   addRow: (dshId: string, name: string, row: RowCreateInput) => Promise<IpcResult<boolean>>
   setRowConfig: (dshId: string, name: string, id: string, configText: string) => Promise<IpcResult<boolean>>
   removeRow: (dshId: string, name: string, id: string) => Promise<IpcResult<boolean>>

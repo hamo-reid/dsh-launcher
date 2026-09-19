@@ -93,6 +93,12 @@ export default function ProfileDetailView({ dshId, name, onChanged, onRenamed }:
   const [renameValue, setRenameValue] = useState('')
   const [renaming, setRenaming] = useState(false)
 
+  // Cross-profile patch transfer.
+  const [transferOpen, setTransferOpen] = useState(false)
+  const [transferTargets, setTransferTargets] = useState<string[]>([])
+  const [transferTarget, setTransferTarget] = useState<string>()
+  const [transferBusy, setTransferBusy] = useState(false)
+
   const [newRowOpen, setNewRowOpen] = useState(false)
   const [newRowId, setNewRowId] = useState('')
   const [newRowDisabled, setNewRowDisabled] = useState(false)
@@ -445,6 +451,26 @@ const loadSeq = useRef(0)
     onRenamed?.(target)
   }
 
+  const openTransfer = async (): Promise<void> => {
+    setTransferTarget(undefined)
+    setTransferOpen(true)
+    const result = await window.api.listProfiles(dshId)
+    if (result.ok) setTransferTargets(result.value.filter(p => p !== name))
+  }
+
+  const doTransfer = async (move: boolean): Promise<void> => {
+    if (transferTarget === undefined) return
+    setTransferBusy(true)
+    const result = await window.api.transferPatch(dshId, name, dshId, transferTarget, move)
+    setTransferBusy(false)
+    if (!result.ok) { void message.error(apiErrorText(result)); return }
+    setTransferOpen(false)
+    void message.success(move
+      ? t('profile.workspace.patchMoved', { name: transferTarget })
+      : t('profile.workspace.patchCopied', { name: transferTarget }))
+    if (move) { void load(); onChanged?.() }
+  }
+
   const removeBundleRow = (bundle: string): void => {
     Modal.confirm({
       title: t('profile.detail.removeBundle'),
@@ -670,8 +696,9 @@ const loadSeq = useRef(0)
 
       {section === 'patch' && (
         <>
-          <div style={{ marginBottom: token.paddingSM }}>
+          <div style={{ marginBottom: token.paddingSM, display: 'flex', gap: 8 }}>
             <Button size="small" icon={<CodeOutlined />} onClick={() => void openSource()}>{t('profile.detail.sourceEdit')}</Button>
+            <Button size="small" onClick={() => void openTransfer()}>{t('profile.workspace.transfer')}</Button>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: token.paddingSM }}>
             {(layers ?? []).map((layer, i) => cloneElement(
@@ -815,6 +842,23 @@ const loadSeq = useRef(0)
       <Modal title={t('profile.workspace.renameTitle')} open={renameOpen} okText={t('common.save')} onOk={() => void doRename()} onCancel={() => setRenameOpen(false)} confirmLoading={renaming} width={MODAL.narrow} destroyOnHidden>
         <FieldLabel>{t('profile.workspace.renameLabel')}</FieldLabel>
         <Input value={renameValue} onChange={e => setRenameValue(e.target.value)} onPressEnter={() => void doRename()} placeholder={t('profile.create.namePlaceholder')} />
+      </Modal>
+
+      <Modal title={t('profile.workspace.transferTitle')} open={transferOpen} footer={null} onCancel={() => setTransferOpen(false)} width={MODAL.narrow} destroyOnHidden>
+        <Space orientation="vertical" size="small" style={{ width: '100%' }}>
+          <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>{t('profile.workspace.transferHint')}</div>
+          <Select
+            value={transferTarget}
+            onChange={setTransferTarget}
+            placeholder={t('profile.workspace.transferPlaceholder')}
+            style={{ width: '100%' }}
+            options={transferTargets.map(p => ({ value: p, label: p }))}
+          />
+          <Space>
+            <Button type="primary" disabled={transferTarget === undefined} loading={transferBusy} onClick={() => void doTransfer(false)}>{t('profile.workspace.transferCopy')}</Button>
+            <Button danger disabled={transferTarget === undefined} loading={transferBusy} onClick={() => void doTransfer(true)}>{t('profile.workspace.transferMove')}</Button>
+          </Space>
+        </Space>
       </Modal>
     </div>
     </Loadable>
