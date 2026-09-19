@@ -77,12 +77,15 @@ export default function ProfileDetailView({ dshId, name, onChanged, onRenamed }:
 
   // Dependency editing + manifest metadata.
   const [depEdits, setDepEdits] = useState<Record<string, string>>({})
+  const [depEditing, setDepEditing] = useState<string | null>(null)
   const [newDepPkg, setNewDepPkg] = useState('')
   const [newDepSpec, setNewDepSpec] = useState('')
   const [depBusy, setDepBusy] = useState(false)
   const [metaName, setMetaName] = useState('')
   const [metaReload, setMetaReload] = useState<'live' | 'startup'>('live')
   const [metaBusy, setMetaBusy] = useState(false)
+  // Collapse state for the (potentially very long) conflict list.
+  const [conflictsOpen, setConflictsOpen] = useState(false)
 
   // Bundle activation: installed-but-inactive bundles offered for activation.
   const [candidates, setCandidates] = useState<string[]>([])
@@ -382,6 +385,7 @@ const loadSeq = useRef(0)
     if (!result.ok) { void message.error(apiErrorText(result)); return }
     void message.success(t('profile.workspace.depSaved', { pkg }))
     setDepEdits(prev => { const next = { ...prev }; delete next[pkg]; return next })
+    setDepEditing(null)
     void load()
     onChanged?.()
   }
@@ -586,7 +590,7 @@ const loadSeq = useRef(0)
         ))}
       </div>
       <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', paddingRight: 4 }}>
-      <SectionHeading title={t('profile.detail.overview')} extra={(
+      <SectionHeading title={name} extra={(
         <Space size={8}>
           <Button size="small" onClick={revalidate} loading={validating}>{t('profile.workspace.validate')}</Button>
           <Button size="small" onClick={() => { setRenameValue(name); setRenameOpen(true) }}>{t('profile.workspace.rename')}</Button>
@@ -600,11 +604,18 @@ const loadSeq = useRef(0)
           type="error"
           showIcon
           style={{ marginBottom: token.paddingSM }}
-          title={t('profile.detail.insertConflictTitle')}
-          description={(
+          title={(
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              {t('profile.detail.insertConflictTitle')}（{conflicts.length}）
+              <Button type="link" size="small" style={{ padding: 0 }} onClick={() => setConflictsOpen(open => !open)}>
+                {conflictsOpen ? t('common.collapse') : t('common.expand')}
+              </Button>
+            </span>
+          )}
+          description={conflictsOpen ? (
             <div>
               <div>{t('profile.detail.insertConflictDesc')}</div>
-              <ul style={{ margin: '6px 0 0', paddingInlineStart: 18 }}>
+              <ul style={{ margin: '6px 0 0', paddingInlineStart: 18, maxHeight: 240, overflowY: 'auto' }}>
                 {conflicts.map(c => (
                   <li key={c.id}>
                     <code>{c.id}</code>
@@ -614,7 +625,7 @@ const loadSeq = useRef(0)
                 ))}
               </ul>
             </div>
-          )}
+          ) : undefined}
         />
       )}
       {section === 'manifest' && (
@@ -649,18 +660,31 @@ const loadSeq = useRef(0)
           <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>{t('profile.workspace.depsHint')}</div>
           {dependencies.length === 0 && <div style={{ color: token.colorTextTertiary }}>{t('common.none')}</div>}
           {dependencies.map(dep => {
+            const editing = depEditing === dep
             const draft = depEdits[dep] ?? dependencySpecs[dep] ?? ''
             return (
               <div key={dep} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ flex: '0 0 38%', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: token.fontSizeSM }}>{dep}</span>
-                <Input size="small" value={draft} onChange={e => setDepEdits(prev => ({ ...prev, [dep]: e.target.value }))} style={{ flex: 1 }} />
-                <Button size="small" disabled={depBusy} onClick={() => void saveDependency(dep)}>{t('common.save')}</Button>
-                <Button size="small" danger type="text" disabled={depBusy} onClick={() => removeDep(dep)}>{t('profile.detail.remove')}</Button>
+                <span style={{ flex: '0 0 34%', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: token.fontSizeSM }}>{dep}</span>
+                {editing
+                  ? (
+                    <>
+                      <Input size="small" value={draft} onChange={e => setDepEdits(prev => ({ ...prev, [dep]: e.target.value }))} style={{ flex: 1 }} onPressEnter={() => void saveDependency(dep)} />
+                      <Button size="small" type="primary" disabled={depBusy} onClick={() => void saveDependency(dep)}>{t('common.save')}</Button>
+                      <Button size="small" onClick={() => { setDepEditing(null); setDepEdits(prev => { const next = { ...prev }; delete next[dep]; return next }) }}>{t('common.cancel')}</Button>
+                    </>
+                  )
+                  : (
+                    <>
+                      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: token.colorTextSecondary, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: token.fontSizeSM }}>{dependencySpecs[dep] ?? ''}</span>
+                      <Button size="small" onClick={() => { setDepEdits(prev => ({ ...prev, [dep]: dependencySpecs[dep] ?? '' })); setDepEditing(dep) }}>{t('profile.workspace.depEdit')}</Button>
+                      <Button size="small" danger type="text" disabled={depBusy} onClick={() => removeDep(dep)}>{t('profile.detail.remove')}</Button>
+                    </>
+                  )}
               </div>
             )
           })}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: token.paddingSM }}>
-            <Input size="small" value={newDepPkg} onChange={e => setNewDepPkg(e.target.value)} placeholder={t('profile.workspace.depPkg')} style={{ flex: '0 0 38%' }} />
+            <Input size="small" value={newDepPkg} onChange={e => setNewDepPkg(e.target.value)} placeholder={t('profile.workspace.depPkg')} style={{ flex: '0 0 34%' }} />
             <Input size="small" value={newDepSpec} onChange={e => setNewDepSpec(e.target.value)} placeholder={t('profile.workspace.depSpec')} style={{ flex: 1 }} onPressEnter={() => void addDep()} />
             <Button size="small" type="primary" loading={depBusy} onClick={() => void addDep()}>{t('profile.workspace.depAdd')}</Button>
           </div>
@@ -742,10 +766,17 @@ const loadSeq = useRef(0)
                 {validation.patchError !== undefined && <Alert type="error" showIcon title={t('profile.workspace.patchError')} description={validation.patchError} />}
                 {validation.conflicts.length > 0 && (
                   <div>
-                    <div style={{ fontWeight: 600, marginBottom: 4 }}>{t('profile.detail.insertConflictTitle')}（{validation.conflicts.length}）</div>
-                    <ul style={{ margin: 0, paddingInlineStart: 18 }}>
-                      {validation.conflicts.map(c => <li key={c.id}><code>{c.id}</code> — {c.layers.map(conflictLayerLabel).join(' + ')}</li>)}
-                    </ul>
+                    <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                      {t('profile.detail.insertConflictTitle')}（{validation.conflicts.length}）
+                      <Button type="link" size="small" style={{ padding: 0, marginInlineStart: 8 }} onClick={() => setConflictsOpen(open => !open)}>
+                        {conflictsOpen ? t('common.collapse') : t('common.expand')}
+                      </Button>
+                    </div>
+                    {conflictsOpen && (
+                      <ul style={{ margin: 0, paddingInlineStart: 18, maxHeight: 240, overflowY: 'auto' }}>
+                        {validation.conflicts.map(c => <li key={c.id}><code>{c.id}</code> — {c.layers.map(conflictLayerLabel).join(' + ')}</li>)}
+                      </ul>
+                    )}
                   </div>
                 )}
                 {validation.missingBundles.length > 0 && (
