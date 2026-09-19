@@ -7,10 +7,10 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { dshHome, homePatchPath, installAnchor, profileDir, profilesDir } from './home.ts'
 import { readManifest } from './manifest.ts'
-import { collectInsertIds, extractKeyValue, parseClassifiedRows, parseNamedRows, parsePatchRows } from './patch.ts'
+import { assertPatchDocValid, collectInsertIds, extractKeyValue, parseClassifiedRows, parseNamedRows, parsePatchRows } from './patch.ts'
 import { child } from './logger.ts'
 import type { DshContext } from './appState.ts'
-import type { ComboPlugin, InsertConflict, InsertConflictLayer, ProfileLayer } from '../../shared/types.ts'
+import type { ComboPlugin, InsertConflict, InsertConflictLayer, ProfileLayer, ProfileValidation } from '../../shared/types.ts'
 
 /** Domain-tagged logger for profile-composition work. */
 const cplog = child('combo')
@@ -156,6 +156,48 @@ export function findInsertConflicts(
   return [...byId.entries()]
     .filter(([, list]) => list.length > 1)
     .map(([id, list]) => ({ id, layers: list }))
+}
+
+/** Bundles listed in the manifest whose patch file cannot be resolved — the
+ * profile would fail to load them at boot. */
+export function listMissingBundles(ctx: DshContext, profile: string): string[] {
+  const { bundles } = readManifest(ctx, profile)
+  return bundles.filter(bundle => resolveBundlePatch(ctx, bundle, profile) === undefined)
+}
+
+/**
+ * Pre-launch composition check for one profile: manifest/patch parse errors,
+ * duplicate inserted entry ids, missing bundles and unclaimed (installed but
+ * inactive) bundles. `extraPatches` are the `--patch` overlays a launch would
+ * add, so the check reflects what would actually boot.
+ */
+export function validateComposition(
+  ctx: DshContext, profile: string, extraPatches: readonly string[] = [],
+): ProfileValidation {
+  const result: ProfileValidation = { ok: true, conflicts: [], missingBundles: [], unclaimedBundles: [] }
+
+  const patchPath = join(profileDir(ctx, profile), 'cordis.patch.yml')
+  try {
+    assertPatchDocValid(existsSync(patchPath) ? readFileSync(patchPath, 'utf8') : '[]')
+  } catch (error) {
+    result.patchError = error instanceof Error ? error.message : String(error)
+  }
+
+  try {
+    result.missingBundles = listMissingBundles(ctx, profile)
+    result.unclaimedBundles = listUnclaimedBundles(ctx, profile)
+  } catch (error) {
+    result.manifestError = error instanceof Error ? error.message : String(error)
+  }
+
+  // findInsertConflicts reads the manifest; skip it when that already failed.
+  if (result.manifestError === undefined) result.conflicts = findInsertConflicts(ctx, profile, extraPatches)
+
+  result.ok = result.manifestError === undefined
+    && result.patchError === undefined
+    && result.conflicts.length === 0
+    && result.missingBundles.length === 0
+  return result
 }
 
 /** Whether a package (resolved from any node_modules root) declares a

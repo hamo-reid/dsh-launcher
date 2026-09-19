@@ -11,6 +11,7 @@ import {
   parseNamedRows,
   parseClassifiedRows,
   collectInsertIds,
+  assertPatchDocValid,
   setRowDisabled,
   setRowConfig,
   setRowInsert,
@@ -194,5 +195,22 @@ describe('collectInsertIds', () => {
   it('returns [] for an empty template or a patch with no inserts', () => {
     expect(collectInsertIds('[]\n')).toEqual([])
     expect(collectInsertIds('# just a comment\n- id: a\n  disabled: true\n')).toEqual([])
+  })
+})
+
+describe('assertPatchDocValid', () => {
+  it('accepts a top-level list (including an empty one)', () => {
+    expect(() => assertPatchDocValid('[]\n')).not.toThrow()
+    expect(() => assertPatchDocValid('- id: a\n  disabled: true\n')).not.toThrow()
+  })
+
+  it('rejects malformed YAML and a non-array document', () => {
+    expect(() => assertPatchDocValid('- id: a\n  bad: [\n')).toThrow()
+    expect(() => assertPatchDocValid('id: a\n')).toThrow(/顶层/)
+    expect(() => assertPatchDocValid('')).toThrow()
+  })
+
+  it('skips the deep check when cordis !!js tags are present', () => {
+    expect(() => assertPatchDocValid('mode: !!js process.env.X\n')).not.toThrow()
   })
 })

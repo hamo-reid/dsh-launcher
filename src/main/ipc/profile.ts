@@ -6,18 +6,21 @@ import { app, dialog, shell } from 'electron'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import AdmZip from 'adm-zip'
-import yaml from 'js-yaml'
+import { load as loadYaml, FAILSAFE_SCHEMA } from 'js-yaml'
 import { listProfiles, profileDir } from '../core/home.ts'
 import { readManifest } from '../core/manifest.ts'
 import {
-  appendRowBlock, extractKeyValue, extractRowBlock, parsePatchRows, removeRow, setRowConfig, setRowDisabled, upsertRow,
+  appendRowBlock, assertPatchDocValid, extractKeyValue, extractRowBlock, parsePatchRows, removeRow,
+  setRowConfig, setRowDisabled, upsertRow,
 } from '../core/patch.ts'
 import {
-  composeProfileLayers, defaultConfigText, findInsertConflicts, listUnclaimedBundles, reconcileBundles, resolveBundlePatch,
+  composeProfileLayers, defaultConfigText, findInsertConflicts, listUnclaimedBundles, reconcileBundles,
+  resolveBundlePatch, validateComposition,
 } from '../core/combo.ts'
 import {
   cloneProfile, createProfile, exportProfile, importProfile, listLocalBundles, listProfileSummaries,
-  mirrorProfile, PROFILE_TEMPLATES, removeBundle, reorderBundle, softDeleteProfile, type ProfileSummary,
+  mirrorProfile, PROFILE_TEMPLATES, readProfileFile, removeBundle, reorderBundle, softDeleteProfile,
+  writeProfileFile, type ProfileSummary,
 } from '../core/profile.ts'
 import { contextForEntry, dshEntryById, pluginDir, type DshContext } from '../core/appState.ts'
 import { addDirToZip, dedentRowBlock, verifyDisabledState } from '../core/app-util.ts'
@@ -25,7 +28,8 @@ import { fail, E } from '../core/errors.ts'
 import { handle } from './handle.ts'
 import { pathIdentifierInvalid, pathOutsideRoot, rowIdInvalid } from './validate.ts'
 import type {
-  ImportProfileResult, InsertConflict, IpcResult, ProfileDetail, ProfileLayer, RowCreateInput,
+  ImportProfileResult, InsertConflict, IpcResult, ProfileDetail, ProfileFileKind, ProfileLayer,
+  ProfileValidation, RowCreateInput,
 } from '../../shared/types.ts'
 
 /** Validate a config value is a YAML mapping (FAILSAFE: structure only, so
@@ -33,7 +37,7 @@ import type {
 function assertConfigValid(configText: string): void {
   let parsed: unknown
   try {
-    parsed = yaml.load(configText, { schema: yaml.FAILSAFE_SCHEMA })
+    parsed = loadYaml(configText, { schema: FAILSAFE_SCHEMA })
   } catch (error) {
     throw new Error(`config 不是合法 YAML：${String(error instanceof Error ? error.message : error)}`)
   }
@@ -45,28 +49,9 @@ function assertConfigValid(configText: string): void {
 /** Validate an insert list reads as a YAML sequence. */
 function assertInsertValid(items: string[]): void {
   try {
-    yaml.load(items.map(item => `- ${item}`).join('\n'), { schema: yaml.FAILSAFE_SCHEMA })
+    loadYaml(items.map(item => `- ${item}`).join('\n'), { schema: FAILSAFE_SCHEMA })
   } catch (error) {
     throw new Error(`insert 不是合法 YAML 列表：${String(error instanceof Error ? error.message : error)}`)
-  }
-}
-
-/** Validate a fully-assembled patch document before it is written. A malformed
- * result (e.g. a row nested as a child of a scalar key) must never reach disk.
- * Files carrying cordis `!!js` tags skip the deep check so a custom tag is not
- * misread as bad YAML. */
-function assertPatchDocValid(next: string): void {
-  if (next.includes('!!js')) return
-  let parsed: unknown
-  try {
-    parsed = yaml.load(next, { schema: yaml.FAILSAFE_SCHEMA })
-  } catch (error) {
-    throw new Error(`生成的 patch 不是合法 YAML，已拒绝写入：${String(error instanceof Error ? error.message : error)}`)
-  }
-  // dsh 要求 patch 顶层是 loader-patch 条目数组。空文档(只有注释 → null)、对象、标量
-  // 都会在启动时检查失败,必须在写入前拒绝——否则会静默写坏,到启动才暴露。
-  if (!Array.isArray(parsed)) {
-    throw new Error('生成的 patch 顶层必须是 YAML 数组（loader patch 条目列表），已拒绝写入')
   }
 }
 
@@ -323,6 +308,32 @@ export function registerProfileIpc(): void {
     if (ctx === null) return fail(E.dshNotFound)
     if (invalidName(name)) return fail(E.nameInvalid)
     return { ok: true, value: findInsertConflicts(ctx, name) }
+  })
+
+  // ── source mode: raw file access + composition validation ───────────────
+  handle('profile:readFile', (_event, dshId: string, name: string, kind: ProfileFileKind): IpcResult<{ text: string; path: string }> => {
+    const ctx = ctxOf(dshId)
+    if (ctx === null) return fail(E.dshNotFound)
+    if (invalidName(name)) return fail(E.nameInvalid)
+    if (kind !== 'manifest' && kind !== 'patch') return fail(E.nameInvalid)
+    return { ok: true, value: readProfileFile(ctx, name, kind) }
+  })
+
+  handle('profile:writeFile', (_event, dshId: string, name: string, kind: ProfileFileKind, text: string): IpcResult<boolean> => {
+    const ctx = ctxOf(dshId)
+    if (ctx === null) return fail(E.dshNotFound)
+    if (invalidName(name)) return fail(E.nameInvalid)
+    if (kind !== 'manifest' && kind !== 'patch') return fail(E.nameInvalid)
+    writeProfileFile(ctx, name, kind, text)
+    return { ok: true, value: true }
+  })
+
+  // Pre-launch composition check (parse + layers + conflicts + bundles).
+  handle('profile:validate', (_event, dshId: string, name: string): IpcResult<ProfileValidation> => {
+    const ctx = ctxOf(dshId)
+    if (ctx === null) return fail(E.dshNotFound)
+    if (invalidName(name)) return fail(E.nameInvalid)
+    return { ok: true, value: validateComposition(ctx, name) }
   })
 
   // Create / update a row (pure id, disabled, config override, or insert) on the

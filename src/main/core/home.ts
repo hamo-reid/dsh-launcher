@@ -3,10 +3,11 @@
  * There is no global "active" dsh: every caller passes the dsh it targets, so a
  * profile operation can never silently act on a different install. */
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { resolveInstallAnchor } from './dsh.ts'
 import { profilesRootFor, type DshContext } from './appState.ts'
+import { assertPatchDocValid } from './patch.ts'
 import type { DshProfileInfo } from '../../shared/types.ts'
 
 /** The dsh's home directory. */
@@ -30,6 +31,20 @@ export function installAnchor(ctx: DshContext): string | undefined {
  * the profile patch). */
 export function homePatchPath(ctx: DshContext): string {
   return join(ctx.home, 'cordis.patch.yml')
+}
+
+/** Read the machine-level home patch layer. `text` is `''` when it does not exist. */
+export function readHomePatch(ctx: DshContext): { text: string; path: string } {
+  const path = homePatchPath(ctx)
+  return { text: existsSync(path) ? readFileSync(path, 'utf8') : '', path }
+}
+
+/** Write the machine-level home patch layer after YAML validation, then verify. */
+export function writeHomePatch(ctx: DshContext, text: string): void {
+  assertPatchDocValid(text)
+  const path = homePatchPath(ctx)
+  writeFileSync(path, text)
+  if (readFileSync(path, 'utf8') !== text) throw new Error('write verify failed')
 }
 
 /** One profile's directory. */

@@ -2,7 +2,7 @@
 
 import { handle } from './handle.ts'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { homePatchPath } from '../core/home.ts'
+import { homePatchPath, readHomePatch, writeHomePatch } from '../core/home.ts'
 import { contextForEntry, dshEntryById } from '../core/appState.ts'
 import { setRowDisabled } from '../core/patch.ts'
 import { verifyDisabledState } from '../core/app-util.ts'
@@ -26,5 +26,19 @@ export function registerHomeIpc(): void {
     } catch (error) {
       return failFromError(error)
     }
+  })
+
+  // The home patch layer's raw text (source mode).
+  handle('home:readPatch', (_event, dshId: string): IpcResult<{ text: string; path: string }> => {
+    const entry = dshEntryById(dshId)
+    if (entry === undefined) return fail(E.dshNotFound)
+    return { ok: true, value: readHomePatch(contextForEntry(entry)) }
+  })
+
+  handle('home:writePatch', (_event, dshId: string, text: string): IpcResult<boolean> => {
+    const entry = dshEntryById(dshId)
+    if (entry === undefined) return fail(E.dshNotFound)
+    writeHomePatch(contextForEntry(entry), text)
+    return { ok: true, value: true }
   })
 }

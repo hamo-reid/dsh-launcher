@@ -31,8 +31,10 @@ import type {
   PackageVersionInfo,
   PluginRow,
   ProfileDetail,
+  ProfileFileKind,
   ProfileLayer,
   ProfileSummary,
+  ProfileValidation,
   RowCreateInput,
   RunEvent,
   RunDefaults,
@@ -77,6 +79,12 @@ const api = {
     ipcRenderer.invoke('profile:layers', dshId, name),
   conflicts: (dshId: string, name: string): Promise<IpcResult<InsertConflict[]>> =>
     ipcRenderer.invoke('profile:conflicts', dshId, name),
+  readFile: (dshId: string, name: string, kind: ProfileFileKind): Promise<IpcResult<{ text: string; path: string }>> =>
+    ipcRenderer.invoke('profile:readFile', dshId, name, kind),
+  writeFile: (dshId: string, name: string, kind: ProfileFileKind, text: string): Promise<IpcResult<boolean>> =>
+    ipcRenderer.invoke('profile:writeFile', dshId, name, kind, text),
+  validate: (dshId: string, name: string): Promise<IpcResult<ProfileValidation>> =>
+    ipcRenderer.invoke('profile:validate', dshId, name),
   addRow: (dshId: string, name: string, row: RowCreateInput): Promise<IpcResult<boolean>> =>
     ipcRenderer.invoke('profile:addRow', dshId, name, row),
   setRowConfig: (dshId: string, name: string, id: string, configText: string): Promise<IpcResult<boolean>> =>
@@ -99,6 +107,10 @@ const api = {
   home: {
     setDisabled: (dshId: string, id: string, disabled: boolean): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('home:setDisabled', dshId, id, disabled),
+    readPatch: (dshId: string): Promise<IpcResult<{ text: string; path: string }>> =>
+      ipcRenderer.invoke('home:readPatch', dshId),
+    writePatch: (dshId: string, text: string): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('home:writePatch', dshId, text),
   },
 
   run: {

@@ -9,8 +9,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { contextForEntry } from './appState.ts'
 import {
-  composeProfileLayers, defaultConfigText, findInsertConflicts, listComboPlugins, listUnclaimedBundles,
-  reconcileBundles, resolveBundlePatch,
+  composeProfileLayers, defaultConfigText, findInsertConflicts, listComboPlugins, listMissingBundles,
+  listUnclaimedBundles, reconcileBundles, resolveBundlePatch, validateComposition,
 } from './combo.ts'
 
 let root: string
@@ -201,5 +201,33 @@ describe('findInsertConflicts', () => {
     expect(findInsertConflicts(ctx(), 'p', [overlay])).toEqual([
       { id: 'shared', layers: [{ source: 'profile', label: 'p' }, { source: 'patch', label: 'overlay.yml' }] },
     ])
+  })
+})
+
+describe('listMissingBundles / validateComposition', () => {
+  it('reports a listed bundle with no resolvable patch', () => {
+    mkProfile('p', ['present', 'gone'], {})
+    mkBundle('p', 'present', '- id: a\n')
+    expect(listMissingBundles(ctx(), 'p')).toEqual(['gone'])
+  })
+
+  it('flags conflicts and missing bundles; ok when clean', () => {
+    mkProfile('p', ['b1', 'b2'], {})
+    mkBundle('p', 'b1', '- insert:\n    - id: shared\n      name: pkg\n')
+    mkBundle('p', 'b2', '- insert:\n    - id: shared\n      name: pkg\n')
+    const bad = validateComposition(ctx(), 'p')
+    expect(bad.ok).toBe(false)
+    expect(bad.conflicts.map(c => c.id)).toEqual(['shared'])
+    expect(bad.missingBundles).toEqual([])
+
+    mkProfile('clean', ['b1'], {})
+    mkBundle('clean', 'b1', '- insert:\n    - id: only\n      name: pkg\n')
+    expect(validateComposition(ctx(), 'clean').ok).toBe(true)
+  })
+
+  it('reports a manifest error without throwing', () => {
+    const v = validateComposition(ctx(), 'nope')
+    expect(v.ok).toBe(false)
+    expect(v.manifestError).toBeDefined()
   })
 })

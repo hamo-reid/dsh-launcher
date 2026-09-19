@@ -28,7 +28,8 @@ import { openDatabase, saveSettings } from './settings.ts'
 import { contextForEntry } from './appState.ts'
 import {
   cloneProfile, createProfile, exportProfile, importProfile,
-  listLocalBundles, listProfileSummaries, removeBundle, reorderBundle, softDeleteProfile,
+  listLocalBundles, listProfileSummaries, readProfileFile, removeBundle, reorderBundle, softDeleteProfile,
+  writeProfileFile,
 } from './profile.ts'
 
 let root: string
@@ -151,6 +152,34 @@ describe('listProfileSummaries', () => {
     createProfile(ctx(), 'sum')
     const list = listProfileSummaries(ctx())
     expect(list).toEqual([{ name: 'sum', bundles: 1, plugins: 0, patchRows: 0 }])
+  })
+})
+
+describe('profile files (source mode)', () => {
+  it('reads a missing file as empty and round-trips a valid manifest', () => {
+    expect(readProfileFile(ctx(), 'p', 'manifest').text).toBe('')
+    mkdirSync(join(profiles(), 'p'), { recursive: true })
+    const manifest = JSON.stringify({
+      dsh: { profile: { bundles: ['@deepseek-ai/dsh-base'], patchReload: 'live' } },
+      dependencies: { a: '^1' },
+    })
+    writeProfileFile(ctx(), 'p', 'manifest', manifest)
+    expect(readProfileFile(ctx(), 'p', 'manifest').text).toBe(manifest)
+  })
+
+  it('rejects a malformed manifest', () => {
+    mkdirSync(join(profiles(), 'p'), { recursive: true })
+    expect(() => writeProfileFile(ctx(), 'p', 'manifest', '{')).toThrow(/JSON/)
+    expect(() => writeProfileFile(ctx(), 'p', 'manifest', JSON.stringify({ dsh: { profile: { bundles: 'x' } } }))).toThrow(/bundles/)
+    expect(() => writeProfileFile(ctx(), 'p', 'manifest', JSON.stringify({ dsh: { profile: { patchReload: 'nope' } } }))).toThrow(/patchReload/)
+    expect(() => writeProfileFile(ctx(), 'p', 'manifest', JSON.stringify({ dependencies: { a: 1 } }))).toThrow(/dependencies/)
+  })
+
+  it('round-trips a valid patch and rejects a non-array one', () => {
+    mkdirSync(join(profiles(), 'p'), { recursive: true })
+    writeProfileFile(ctx(), 'p', 'patch', '- id: a\n')
+    expect(readProfileFile(ctx(), 'p', 'patch').text).toBe('- id: a\n')
+    expect(() => writeProfileFile(ctx(), 'p', 'patch', 'id: a\n')).toThrow(/顶层/)
   })
 })
 

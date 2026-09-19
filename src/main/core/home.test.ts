@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { contextForEntry } from './appState.ts'
-import { dshHome, homePatchPath, listProfileInfos, listProfiles, profileDir, profilesDir } from './home.ts'
+import { dshHome, homePatchPath, listProfileInfos, listProfiles, profileDir, profilesDir, readHomePatch, writeHomePatch } from './home.ts'
 import type { DshContext } from './appState.ts'
 import type { DshEntry } from '../../shared/types.ts'
 
@@ -76,5 +76,17 @@ describe('listProfileInfos', () => {
 
   it('returns [] when the context has no profiles dir', () => {
     expect(listProfileInfos(ctx({ home: join(root, 'empty-home') }))).toEqual([])
+  })
+})
+
+describe('home patch (source mode)', () => {
+  it('reads empty then round-trips a valid patch, rejecting a non-array one', () => {
+    const h = join(root, 'hp-home')
+    mkdirSync(h, { recursive: true })
+    const c = ctx({ home: h })
+    expect(readHomePatch(c).text).toBe('')
+    writeHomePatch(c, '- id: a\n')
+    expect(readHomePatch(c).text).toBe('- id: a\n')
+    expect(() => writeHomePatch(c, 'id: a\n')).toThrow(/顶层/)
   })
 })

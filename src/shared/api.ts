@@ -33,8 +33,10 @@ import type {
   PackageVersionInfo,
   PluginRow,
   ProfileDetail,
+  ProfileFileKind,
   ProfileLayer,
   ProfileSummary,
+  ProfileValidation,
   RowCreateInput,
   RunEvent,
   RunDefaults,
@@ -69,6 +71,11 @@ export interface WindowApi {
   /** Loader entry ids inserted by more than one composed layer (a boot-blocking
    * duplicate the host would otherwise only report as a raw stack trace). */
   conflicts: (dshId: string, name: string) => Promise<IpcResult<InsertConflict[]>>
+  /** Raw file access for the source editor; writes validate before landing. */
+  readFile: (dshId: string, name: string, kind: ProfileFileKind) => Promise<IpcResult<{ text: string; path: string }>>
+  writeFile: (dshId: string, name: string, kind: ProfileFileKind, text: string) => Promise<IpcResult<boolean>>
+  /** Pre-launch composition check: parse, layers, conflicts and bundles. */
+  validate: (dshId: string, name: string) => Promise<IpcResult<ProfileValidation>>
   addRow: (dshId: string, name: string, row: RowCreateInput) => Promise<IpcResult<boolean>>
   setRowConfig: (dshId: string, name: string, id: string, configText: string) => Promise<IpcResult<boolean>>
   removeRow: (dshId: string, name: string, id: string) => Promise<IpcResult<boolean>>
@@ -83,6 +90,9 @@ export interface WindowApi {
 
   home: {
     setDisabled: (dshId: string, id: string, disabled: boolean) => Promise<IpcResult<boolean>>
+    /** The home patch layer's raw text (source mode). */
+    readPatch: (dshId: string) => Promise<IpcResult<{ text: string; path: string }>>
+    writePatch: (dshId: string, text: string) => Promise<IpcResult<boolean>>
   }
 
   run: {

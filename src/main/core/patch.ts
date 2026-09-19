@@ -7,6 +7,7 @@
  */
 
 import type { ClassifiedRow, PluginRow, RowCreateInput } from '../../shared/types.ts'
+import { load, FAILSAFE_SCHEMA } from 'js-yaml'
 
 /** Matches a `- id: xxx` row start (optionally quoted id). */
 const ID_RE = /^(\s*)- id:\s*'?([^'\s]+)'?\s*$/
@@ -70,6 +71,27 @@ export interface NamedRow {
   id: string
   name?: string
   disabled: boolean
+}
+
+/**
+ * Validate a fully-assembled patch document before it is written. A malformed
+ * result (e.g. a row nested as a child of a scalar key) must never reach disk.
+ * Files carrying cordis `!!js` tags skip the deep check so a custom tag is not
+ * misread as bad YAML. Throws a friendly message.
+ */
+export function assertPatchDocValid(next: string): void {
+  if (next.includes('!!js')) return
+  let parsed: unknown
+  try {
+    parsed = load(next, { schema: FAILSAFE_SCHEMA })
+  } catch (error) {
+    throw new Error(`patch 不是合法 YAML：${String(error instanceof Error ? error.message : error)}`)
+  }
+  // dsh 要求 patch 顶层是 loader-patch 条目数组。空文档(只有注释 → null)、对象、标量
+  // 都会在启动时检查失败,必须在写入前拒绝——否则会静默写坏,到启动才暴露。
+  if (!Array.isArray(parsed)) {
+    throw new Error('patch 顶层必须是 YAML 数组（loader patch 条目列表）')
+  }
 }
 
 /**

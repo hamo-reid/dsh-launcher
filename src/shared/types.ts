@@ -56,6 +56,25 @@ export interface InsertConflict {
   layers: InsertConflictLayer[]
 }
 
+/** A raw, user-editable file of a profile (source mode). */
+export type ProfileFileKind = 'manifest' | 'patch'
+
+/** Pre-launch composition check for one profile. */
+export interface ProfileValidation {
+  /** True when nothing blocks a boot. */
+  ok: boolean
+  /** `package.json` parse/shape error, when malformed. */
+  manifestError?: string
+  /** `cordis.patch.yml` parse/shape error, when malformed. */
+  patchError?: string
+  /** Entry ids inserted by more than one layer (boot-blocking). */
+  conflicts: InsertConflict[]
+  /** Listed bundles whose patch cannot be resolved (missing install). */
+  missingBundles: string[]
+  /** Installed bundles not activated as a layer. */
+  unclaimedBundles: string[]
+}
+
 /** Input for creating/updating a row in the profile layer's patch. */
 export interface RowCreateInput {
   id: string

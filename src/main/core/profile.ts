@@ -9,14 +9,14 @@ import { listProfiles, profileDir, profilesDir } from './home.ts'
 import { pluginDir, profilesRootFor, type DshContext } from './appState.ts'
 import { readManifest } from './manifest.ts'
 import { listComboPlugins } from './combo.ts'
-import { parsePatchRows } from './patch.ts'
+import { parsePatchRows, assertPatchDocValid } from './patch.ts'
 import { runPnpm, type PnpmResult } from './pnpm.ts'
 import { addLocalPlugin, addPlugin, installIntoProfile, installedStoreVersion } from './plugins.ts'
 import { satisfiesRange } from './version.ts'
 import { uniqueTrashName } from './trash.ts'
 import { listBundleSubdepNames } from './bundle-subdeps.ts'
 import { isReservedProfileName, PROFILE_NAME_RE, RESERVED_PROFILE_NAMES } from '../../shared/profile-name.ts'
-import type { ImportBundleSource, ImportProfileResult, ImportStep, ProfilePatchReload, ProfileSummary } from '../../shared/types.ts'
+import type { ImportBundleSource, ImportProfileResult, ImportStep, ProfileFileKind, ProfilePatchReload, ProfileSummary } from '../../shared/types.ts'
 import { logger } from './logger.ts'
 
 /** Re-export the shared profile-summary shape. */
@@ -68,6 +68,65 @@ export function listProfileSummaries(ctx: DshContext): ProfileSummary[] {
     const patchText = existsSync(patchPath) ? readFileSync(patchPath, 'utf8') : ''
     return { name, bundles: manifest.bundles.length, plugins, patchRows: parsePatchRows(patchText).length }
   })
+}
+
+// ── raw file access (source mode) ───────────────────────────────────────────
+
+/** Absolute path of one editable profile file. */
+export function profileFilePath(ctx: DshContext, name: string, kind: ProfileFileKind): string {
+  return kind === 'manifest'
+    ? join(profilesRootFor(ctx), name, 'package.json')
+    : join(profilesRootFor(ctx), name, 'cordis.patch.yml')
+}
+
+/** Read a profile's raw file. `text` is `''` when it does not exist yet. */
+export function readProfileFile(ctx: DshContext, name: string, kind: ProfileFileKind): { text: string; path: string } {
+  const path = profileFilePath(ctx, name, kind)
+  return { text: existsSync(path) ? readFileSync(path, 'utf8') : '', path }
+}
+
+/** Validate a manifest's raw JSON: structure plus the fields the host reads
+ * (`dsh.profile.bundles`, `dsh.profile.patchReload`, `dependencies`). */
+export function assertManifestText(text: string): void {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch (error) {
+    throw new Error(`package.json 不是合法 JSON：${String(error instanceof Error ? error.message : error)}`)
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('package.json 顶层必须是对象')
+  }
+  const manifest = parsed as {
+    dependencies?: unknown
+    dsh?: { profile?: { bundles?: unknown; patchReload?: unknown } }
+  }
+  const bundles = manifest.dsh?.profile?.bundles
+  if (bundles !== undefined && (!Array.isArray(bundles) || bundles.some(b => typeof b !== 'string'))) {
+    throw new Error('dsh.profile.bundles 必须是字符串数组')
+  }
+  const reload = manifest.dsh?.profile?.patchReload
+  if (reload !== undefined && reload !== 'live' && reload !== 'startup') {
+    throw new Error('dsh.profile.patchReload 必须是 "live" 或 "startup"')
+  }
+  const deps = manifest.dependencies
+  if (deps !== undefined) {
+    if (deps === null || typeof deps !== 'object' || Array.isArray(deps)) {
+      throw new Error('dependencies 必须是对象')
+    }
+    for (const [key, value] of Object.entries(deps)) {
+      if (typeof value !== 'string') throw new Error(`dependencies["${key}"] 必须是字符串`)
+    }
+  }
+}
+
+/** Write a profile's raw file after validation, then verify the bytes landed. */
+export function writeProfileFile(ctx: DshContext, name: string, kind: ProfileFileKind, text: string): void {
+  if (kind === 'manifest') assertManifestText(text)
+  else assertPatchDocValid(text)
+  const path = profileFilePath(ctx, name, kind)
+  writeFileSync(path, text)
+  if (readFileSync(path, 'utf8') !== text) throw new Error('write verify failed')
 }
 
 /** Official profile templates offered by the "create from template" dialog. */
