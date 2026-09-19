@@ -82,6 +82,10 @@ export default function ProfileDetailView({ dshId, name, onChanged }: Props) {
   const [metaReload, setMetaReload] = useState<'live' | 'startup'>('live')
   const [metaBusy, setMetaBusy] = useState(false)
 
+  // Bundle activation: installed-but-inactive bundles offered for activation.
+  const [candidates, setCandidates] = useState<string[]>([])
+  const [addBundlePkg, setAddBundlePkg] = useState<string>()
+
   const [newRowOpen, setNewRowOpen] = useState(false)
   const [newRowId, setNewRowId] = useState('')
   const [newRowDisabled, setNewRowDisabled] = useState(false)
@@ -110,10 +114,11 @@ const loadSeq = useRef(0)
     const seq = ++loadSeq.current
     if (name === '') { setDetail(null); setLayers(null); setConflicts([]); setLoading(false); return }
     setLoading(true)
-    const [detailRes, layersRes, conflictsRes] = await Promise.all([
+    const [detailRes, layersRes, conflictsRes, candidatesRes] = await Promise.all([
       window.api.loadProfile(dshId, name),
       window.api.layers(dshId, name),
       window.api.conflicts(dshId, name),
+      window.api.missingBundles(dshId, name),
     ])
     if (seq !== loadSeq.current) return // a newer load superseded this one
     if (detailRes.ok) {
@@ -123,6 +128,7 @@ const loadSeq = useRef(0)
     }
     if (layersRes.ok) setLayers(layersRes.value)
     if (conflictsRes.ok) setConflicts(conflictsRes.value)
+    if (candidatesRes.ok) setCandidates(candidatesRes.value)
     setLoading(false)
   }
 
@@ -408,6 +414,18 @@ const loadSeq = useRef(0)
     onChanged?.()
   }
 
+  const activateBundle = async (): Promise<void> => {
+    if (addBundlePkg === undefined) return
+    setDepBusy(true)
+    const result = await window.api.addBundle(dshId, name, addBundlePkg)
+    setDepBusy(false)
+    if (!result.ok) { void message.error(apiErrorText(result)); return }
+    void message.success(t('profile.workspace.bundleActivated', { pkg: addBundlePkg }))
+    setAddBundlePkg(undefined)
+    void load()
+    onChanged?.()
+  }
+
   const removeBundleRow = (bundle: string): void => {
     Modal.confirm({
       title: t('profile.detail.removeBundle'),
@@ -604,15 +622,30 @@ const loadSeq = useRef(0)
       )}
 
       {section === 'bundles' && (
-        bundles.length === 0
-          ? <div style={{ color: token.colorTextTertiary }}>{t('common.none')}</div>
-          : (
-            <DndContext collisionDetection={closestCenter} autoScroll={false} onDragEnd={onDragEnd}>
-              <SortableContext items={bundles} strategy={verticalListSortingStrategy}>
-                {bundles.map(bundle => <SortableBundle key={bundle} bundle={bundle} onRemove={removeBundleRow} />)}
-              </SortableContext>
-            </DndContext>
-          )
+        <div style={{ display: 'flex', flexDirection: 'column', gap: token.paddingSM }}>
+          {bundles.length === 0
+            ? <div style={{ color: token.colorTextTertiary }}>{t('common.none')}</div>
+            : (
+              <DndContext collisionDetection={closestCenter} autoScroll={false} onDragEnd={onDragEnd}>
+                <SortableContext items={bundles} strategy={verticalListSortingStrategy}>
+                  {bundles.map(bundle => <SortableBundle key={bundle} bundle={bundle} onRemove={removeBundleRow} />)}
+                </SortableContext>
+              </DndContext>
+            )}
+          {candidates.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: token.paddingSM }}>
+              <Select
+                size="small"
+                value={addBundlePkg}
+                onChange={setAddBundlePkg}
+                placeholder={t('profile.workspace.bundleActivatePlaceholder')}
+                style={{ flex: 1 }}
+                options={candidates.map(pkg => ({ value: pkg, label: pkg }))}
+              />
+              <Button size="small" type="primary" disabled={addBundlePkg === undefined} loading={depBusy} onClick={() => void activateBundle()}>{t('profile.workspace.bundleActivate')}</Button>
+            </div>
+          )}
+        </div>
       )}
 
       {section === 'patch' && (

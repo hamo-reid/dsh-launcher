@@ -27,7 +27,7 @@ import { addLocalPlugin, addPlugin, installIntoProfile } from './plugins.ts'
 import { openDatabase, saveSettings } from './settings.ts'
 import { contextForEntry } from './appState.ts'
 import {
-  cloneProfile, createProfile, exportProfile, importProfile,
+  addBundle, cloneProfile, createProfile, exportProfile, importProfile,
   listLocalBundles, listProfileSummaries, readProfileFile, removeBundle, removeDependency, reorderBundle,
   setDependency, setManifestMeta, softDeleteProfile, writeProfileFile,
 } from './profile.ts'
@@ -208,6 +208,24 @@ describe('dependencies / manifest meta', () => {
     const manifest = JSON.parse(readFileSync(join(profiles(), 'p', 'package.json'), 'utf8'))
     expect(manifest.name).toBe('My Profile')
     expect(manifest.dsh.profile.patchReload).toBe('startup')
+  })
+})
+
+describe('addBundle', () => {
+  it('activates an installed package that declares a bundle patch', () => {
+    createProfile(ctx(), 'p')
+    const dir = join(profiles(), 'p', 'node_modules', 'my-bundle')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ dsh: { bundle: { patch: './cordis.patch.yml' } } }))
+    writeFileSync(join(dir, 'cordis.patch.yml'), '- id: a\n')
+    addBundle(ctx(), 'p', 'my-bundle')
+    const manifest = JSON.parse(readFileSync(join(profiles(), 'p', 'package.json'), 'utf8'))
+    expect(manifest.dsh.profile.bundles).toContain('my-bundle')
+  })
+
+  it('refuses a package with no resolvable patch', () => {
+    createProfile(ctx(), 'p')
+    expect(() => addBundle(ctx(), 'p', 'ghost')).toThrow(/找不到/)
   })
 })
 

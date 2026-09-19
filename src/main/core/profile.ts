@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { listProfiles, profileDir, profilesDir } from './home.ts'
 import { pluginDir, profilesRootFor, type DshContext } from './appState.ts'
 import { readManifest } from './manifest.ts'
-import { listComboPlugins, reconcileBundles } from './combo.ts'
+import { listComboPlugins, reconcileBundles, resolveBundlePatch } from './combo.ts'
 import { parsePatchRows, assertPatchDocValid } from './patch.ts'
 import { runPnpm, type PnpmResult } from './pnpm.ts'
 import { addLocalPlugin, addPlugin, installIntoProfile, installedStoreVersion } from './plugins.ts'
@@ -195,6 +195,21 @@ export function setManifestMeta(
     manifest.dsh = { ...manifest.dsh, profile: { ...manifest.dsh?.profile, patchReload: meta.patchReload } }
   }
   writeRawManifest(dir, manifest)
+}
+
+/** Activate an already-installed package as a bundle layer: it must resolve to
+ * a `dsh.bundle.patch`, and is appended to `dsh.profile.bundles`. */
+export function addBundle(ctx: DshContext, profile: string, pkg: string): void {
+  const dir = profileDir(ctx, profile)
+  const manifest = readRawManifest(dir)
+  const bundles = manifest.dsh?.profile?.bundles ?? []
+  if (bundles.includes(pkg)) return
+  if (resolveBundlePatch(ctx, pkg, profile) === undefined) {
+    throw new Error(`找不到 bundle「${pkg}」的 patch；请先在「依赖」里安装它`)
+  }
+  manifest.dsh = { ...manifest.dsh, profile: { ...manifest.dsh?.profile, bundles: [...bundles, pkg] } }
+  writeRawManifest(dir, manifest)
+  logger.info(`bundle activated: ${profile} · ${pkg}`)
 }
 
 /** Official profile templates offered by the "create from template" dialog. */

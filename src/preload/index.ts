@@ -92,6 +92,8 @@ const api = {
     ipcRenderer.invoke('profile:removeDependency', dshId, name, pkg),
   setManifest: (dshId: string, name: string, meta: { displayName?: string; patchReload?: ProfilePatchReload }): Promise<IpcResult<boolean>> =>
     ipcRenderer.invoke('profile:setManifest', dshId, name, meta),
+  addBundle: (dshId: string, name: string, pkg: string): Promise<IpcResult<boolean>> =>
+    ipcRenderer.invoke('profile:addBundle', dshId, name, pkg),
   addRow: (dshId: string, name: string, row: RowCreateInput): Promise<IpcResult<boolean>> =>
     ipcRenderer.invoke('profile:addRow', dshId, name, row),
   setRowConfig: (dshId: string, name: string, id: string, configText: string): Promise<IpcResult<boolean>> =>

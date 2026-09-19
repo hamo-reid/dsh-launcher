@@ -18,7 +18,7 @@ import {
   resolveBundlePatch, validateComposition,
 } from '../core/combo.ts'
 import {
-  cloneProfile, createProfile, exportProfile, importProfile, listLocalBundles, listProfileSummaries,
+  addBundle, cloneProfile, createProfile, exportProfile, importProfile, listLocalBundles, listProfileSummaries,
   mirrorProfile, PROFILE_TEMPLATES, readProfileFile, removeBundle, removeDependency, reorderBundle,
   setDependency, setManifestMeta, softDeleteProfile, writeProfileFile, type ProfileSummary,
 } from '../core/profile.ts'
@@ -374,6 +374,15 @@ export function registerProfileIpc(): void {
     if (ctx === null) return fail(E.dshNotFound)
     if (invalidName(name)) return fail(E.nameInvalid)
     setManifestMeta(ctx, name, meta)
+    return { ok: true, value: true }
+  })
+
+  // Activate an installed package as a bundle layer.
+  handle('profile:addBundle', (_event, dshId: string, name: string, pkg: string): IpcResult<boolean> => {
+    const ctx = ctxOf(dshId)
+    if (ctx === null) return fail(E.dshNotFound)
+    if (invalidName(name) || invalidName(pkg)) return fail(E.nameInvalid)
+    addBundle(ctx, name, pkg)
     return { ok: true, value: true }
   })
 
