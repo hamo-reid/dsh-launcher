@@ -3,8 +3,8 @@
  *
  * The typed API comes from `editor.api`; `editor.main` is imported for its side
  * effects — it registers every editing contribution (find, suggest, context
- * menu, …) and all basic languages, which includes YAML highlighting. The JSON
- * language service (manifest validation) is added explicitly.
+ * menu, …), all basic languages (which includes YAML highlighting) and the
+ * language features (JSON validation among them).
  *
  * Monaco's web workers are routed to Vite-emitted, same-origin chunks. There is
  * deliberately no CDN loader: the renderer is sandboxed and offline, and the
@@ -13,11 +13,10 @@
  * Imported only by the lazy-loaded `CodeEditor`, so Monaco lands in its own
  * dynamic chunk and never weighs on app startup.
  */
-import * as monaco from 'monaco-editor/editor/editor.api'
-import 'monaco-editor/editor/editor.main'
-import 'monaco-editor/language/json/monaco.contribution'
-import EditorWorker from 'monaco-editor/editor/editor.worker?worker'
-import JsonWorker from 'monaco-editor/language/json/json.worker?worker'
+import * as monaco from 'monaco-editor/editor/editor.api.js'
+import 'monaco-editor/editor/editor.main.js'
+import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker'
+import JsonWorker from 'monaco-editor/language/json/json.worker.js?worker'
 
 interface MonacoEnvironment {
   getWorker: (moduleId: string, label: string) => Worker

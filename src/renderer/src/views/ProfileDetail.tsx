@@ -1,8 +1,8 @@
-import { cloneElement, useEffect, useMemo, useRef, useState } from 'react'
+import { cloneElement, lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert, Button, Input, List, Modal, Select, Space, Tag, theme, message,
 } from 'antd'
-import { FileTextOutlined } from '@ant-design/icons'
+import { FileTextOutlined, CodeOutlined } from '@ant-design/icons'
 import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -16,6 +16,9 @@ import ScrollModal from '../components/ScrollModal.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
 import StatusTag from '../components/StatusTag.tsx'
 import { MODAL } from '../theme.ts'
+
+// The Monaco wrapper pulls the whole editor; keep it out of the first parse.
+const CodeEditor = lazy(() => import('../components/CodeEditor.tsx'))
 
 interface Props {
   /** The dsh this profile belongs to (no global active dsh). */
@@ -52,6 +55,12 @@ export default function ProfileDetailView({ dshId, name, onChanged }: Props) {
   const [cfgDefault, setCfgDefault] = useState('')
   const [saving, setSaving] = useState(false)
   const [reconciling, setReconciling] = useState(false)
+
+  // Source mode: raw `cordis.patch.yml` editing in Monaco.
+  const [sourceOpen, setSourceOpen] = useState(false)
+  const [sourceText, setSourceText] = useState('')
+  const [sourceLoading, setSourceLoading] = useState(false)
+  const [sourceSaving, setSourceSaving] = useState(false)
 
   const [newRowOpen, setNewRowOpen] = useState(false)
   const [newRowId, setNewRowId] = useState('')
@@ -230,6 +239,27 @@ const loadSeq = useRef(0)
     if (!result.ok) void message.error(apiErrorText(result))
   }
 
+  // Source mode: edit the same patch file in place, validated on save.
+  const openSource = async (): Promise<void> => {
+    setSourceOpen(true)
+    setSourceLoading(true)
+    const result = await window.api.readFile(dshId, name, 'patch')
+    setSourceLoading(false)
+    if (!result.ok) { void message.error(apiErrorText(result)); setSourceOpen(false); return }
+    setSourceText(result.value.text)
+  }
+
+  const saveSource = async (): Promise<void> => {
+    setSourceSaving(true)
+    const result = await window.api.writeFile(dshId, name, 'patch', sourceText)
+    setSourceSaving(false)
+    if (!result.ok) { void message.error(apiErrorText(result)); return }
+    setSourceOpen(false)
+    void message.success(t('profile.detail.sourceSaved'))
+    void load()
+    onChanged?.()
+  }
+
   const removeBundleRow = (bundle: string): void => {
     Modal.confirm({
       title: t('profile.detail.removeBundle'),
@@ -331,6 +361,7 @@ const loadSeq = useRef(0)
     <div>
       <SectionHeading title={t('profile.detail.overview')} extra={(
         <Space size={8}>
+          <Button size="small" icon={<CodeOutlined />} onClick={() => void openSource()}>{t('profile.detail.sourceEdit')}</Button>
           <Button size="small" icon={<FileTextOutlined />} onClick={() => void openPatchSource()}>{t('profile.detail.openPatchSource')}</Button>
           <Button size="small" onClick={() => void reconcileNow()} loading={reconciling}>{t('profile.detail.reconcile')}</Button>
         </Space>
@@ -441,6 +472,15 @@ const loadSeq = useRef(0)
           <div><FieldLabel>{t('profile.detail.newRow.config')}</FieldLabel><Input.TextArea rows={4} value={newRowConfig} onChange={e => setNewRowConfig(e.target.value)} placeholder={'key: value\nnested:\n  a: 1'} /></div>
           <div><FieldLabel>{t('profile.detail.newRow.insert')}</FieldLabel><Input.TextArea rows={3} value={newRowInsert} onChange={e => setNewRowInsert(e.target.value)} placeholder={t('profile.detail.editor.insertPlaceholder')} /></div>
         </Space>
+      </Modal>
+      <Modal title={t('profile.detail.sourceTitle')} open={sourceOpen} okText={t('common.save')} onOk={() => void saveSource()} onCancel={() => setSourceOpen(false)} confirmLoading={sourceSaving} width={MODAL.wide} destroyOnHidden>
+        {sourceLoading
+          ? <div style={{ height: 420, display: 'flex', alignItems: 'center', justifyContent: 'center', color: token.colorTextTertiary }}>{t('common.loading')}</div>
+          : (
+            <Suspense fallback={<div style={{ height: 420, display: 'flex', alignItems: 'center', justifyContent: 'center', color: token.colorTextTertiary }}>{t('common.loading')}</div>}>
+              <CodeEditor value={sourceText} language="yaml" onChange={setSourceText} height={420} />
+            </Suspense>
+          )}
       </Modal>
     </div>
     </Loadable>

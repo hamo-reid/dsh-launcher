@@ -1,5 +1,27 @@
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
+import type { Plugin } from 'vite'
+
+/**
+ * Monaco ships every basic language plus language features — and their workers
+ * — for TypeScript, CSS and HTML. The profile editor only edits YAML and JSON,
+ * so stub everything else out: without this, the unused workers are emitted
+ * (ts.worker alone is ~13 MB) and ~80 language definitions bloat the editor
+ * chunk even though nothing ever loads them.
+ */
+function dropUnusedMonacoFeatures(): Plugin {
+  return {
+    name: 'pm:drop-unused-monaco-features',
+    load(id) {
+      const path = id.replace(/\\/g, '/')
+      if (/\/languages\/features\/(css|html|typescript)\//.test(path)) return 'export {}'
+      // Keep only the YAML and JSON basic-language registers; leave shared
+      // files like `_.contribution.js` alone.
+      if (/\/languages\/definitions\/(?!yaml\/|json\/|_)[^/]+\/register\.js$/.test(path)) return 'export {}'
+      return null
+    },
+  }
+}
 
 /**
  * Stable heavy dependencies get their own chunks so the initial bundle stays
@@ -14,7 +36,7 @@ export default defineConfig({
   },
   preload: {},
   renderer: {
-    plugins: [react()],
+    plugins: [react(), dropUnusedMonacoFeatures()],
     build: {
       rollupOptions: {
         output: {
