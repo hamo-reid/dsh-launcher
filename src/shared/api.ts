@@ -41,6 +41,8 @@ import type {
   ProfileValidation,
   RowCreateInput,
   PluginApplyResult,
+  PluginCleanupResult,
+  PluginMigrationResult,
   PluginUpdateInfo,
   RunEvent,
   RunDefaults,
@@ -157,6 +159,10 @@ export interface WindowApi {
     checkUpdates: (opts?: { refresh?: boolean }) => Promise<IpcResult<PluginUpdateInfo[]>>
     /** Apply plugin version updates to a profile (refused while it runs). */
     applyUpdates: (dshId: string, profile: string, updates: { name: string; version: string }[]) => Promise<IpcResult<{ results: PluginApplyResult[] }>>
+    /** Remove a plugin's unused archived versions (keeps the newest + in-use ones). */
+    cleanupVersions: (name: string) => Promise<IpcResult<PluginCleanupResult>>
+    /** Migrate a deprecated plugin to its replacement across every using profile. */
+    migrateReplacement: (name: string, replacement: string) => Promise<IpcResult<PluginMigrationResult>>
     reveal: (name: string) => Promise<IpcResult<boolean>>
     readme: (name: string) => Promise<IpcResult<{ content: string; dir: string }>>
     search: (query: string, opts?: { from?: number; size?: number }) => Promise<IpcResult<{ hits: NpmSearchHit[]; total: number }>>

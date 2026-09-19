@@ -225,6 +225,31 @@ export default function PluginsSection() {
     if (!r.ok) void message.error(apiErrorText(r))
   }
 
+  // Remove the plugin's unused archived versions (keep newest + in-use).
+  const cleanupVersions = async (name: string): Promise<void> => {
+    setBusy(true)
+    const r = await window.api.plugins.cleanupVersions(name)
+    setBusy(false)
+    if (!r.ok) { void message.error(apiErrorText(r)); return }
+    void message.success(r.value.removed.length > 0
+      ? t('plugin.cleanup.done', { count: r.value.removed.length })
+      : t('plugin.cleanup.none'))
+    const rows = await load()
+    setTarget(rows?.find(x => x.name === name) ?? null)
+    await refreshStoreNames()
+  }
+
+  // Migrate a deprecated plugin to its catalog replacement across using profiles.
+  const migrateReplacement = async (name: string, replacement: string): Promise<void> => {
+    setBusy(true)
+    const r = await window.api.plugins.migrateReplacement(name, replacement)
+    setBusy(false)
+    if (!r.ok) { void message.error(apiErrorText(r)); return }
+    void message.success(t('plugin.migrate.done', { target: r.value.target, count: r.value.installed }))
+    setTarget(null)
+    await Promise.all([load(), refreshStoreNames()])
+  }
+
   // Sizes are an explicit user action (walking each archived node_modules is costly),
   // so they are NOT recomputed on every overview load.
   const calcSizes = async (): Promise<void> => {
@@ -633,6 +658,9 @@ export default function PluginsSection() {
       onUninstallVersion={(name, version) => void uninstallVersion(name, version)}
       onReveal={name => void revealDir(name)}
       onInstallToProfile={name => { setTarget(null); setInstallPkg(name) }}
+      onCleanupVersions={name => void cleanupVersions(name)}
+      replacement={target !== null ? annotations?.plugins[target.name]?.replacement : undefined}
+      onMigrate={(name, replacement) => void migrateReplacement(name, replacement)}
     />
     <InstallToProfileModal
       installPkg={installPkg}

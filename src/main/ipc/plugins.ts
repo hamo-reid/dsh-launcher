@@ -13,8 +13,9 @@ import {
   cancelPluginDownload, cleanupPluginDownloads, listPluginDownloads, onDownloadsChange, startPluginDownload,
 } from '../core/pluginDownloads.ts'
 import { checkPluginUpdates } from '../core/plugin-updates.ts'
+import { installSpecFor, marketSourceState, resolveMarket } from '../core/market.ts'
 import { contextForEntry, dshEntryById, dshScopes, pluginDir, profilesRootFor, type DshContext } from '../core/appState.ts'
-import { isProfileRunning } from './run.ts'
+import { isProfileRunning, listRuns } from './run.ts'
 import { loadSettings, saveSettings } from '../core/settings.ts'
 import { inlineRelativeImages } from '../core/app-util.ts'
 import { fetchPackageVersions, npmSearch } from '../core/npm.ts'
@@ -22,7 +23,7 @@ import { attachPluginSizes } from '../core/store-overview.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
 import { pathIdentifierInvalid, versionInvalid } from './validate.ts'
 import { handle } from './handle.ts'
-import type { ComboPlugin, DownloadSessionInfo, InstalledOverviewRow, IpcResult, NpmSearchHit, PackageVersionInfo, PluginApplyResult, PluginUpdateInfo, PluginUsagePoint } from '../../shared/types.ts'
+import type { ComboPlugin, DownloadSessionInfo, InstalledOverviewRow, IpcResult, NpmSearchHit, PackageVersionInfo, PluginApplyResult, PluginCleanupResult, PluginMigrationResult, PluginUpdateInfo, PluginUsagePoint } from '../../shared/types.ts'
 
 /** Validate + persist the plugin-store location (shared by `plugins:setDir`
  * and the onboarding wizard). On success the dir is made usable and saved. */
@@ -256,6 +257,85 @@ export function registerPluginsIpc(): void {
         results.push({ name, version, ok: linked.ok, text: linked.text })
       }
       return { ok: true, value: { results } }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Garbage-collect a plugin's UNUSED archived versions (keep the newest, and any
+  // version a profile still resolves to). Frees disk without breaking profiles.
+  handle('plugins:cleanupVersions', (_event, name: string): IpcResult<PluginCleanupResult> => {
+    try {
+      if (pathIdentifierInvalid(name)) return fail(E.nameInvalid)
+      const store = pluginDir()
+      const versions = storeVersions(store, name)
+      if (versions.length <= 1) return { ok: true, value: { removed: [] } }
+      const used = new Set(
+        (buildInstalledOverview(dshScopes(), store).find(r => r.name === name)?.usage ?? [])
+          .map(u => u.version)
+          .filter((v): v is string => v !== undefined && v !== ''),
+      )
+      const keep = versions[versions.length - 1]
+      const removed: string[] = []
+      for (const version of versions) {
+        if (version === keep || used.has(version)) continue
+        if (removePlugin(store, name, version).ok) removed.push(version)
+      }
+      return { ok: true, value: { removed } }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Migrate a deprecated plugin to its catalog replacement across every profile
+  // that uses it: install the replacement first, then detach the deprecated one.
+  // Refused while any using profile runs.
+  handle('plugins:migrateReplacement', async (
+    _event, name: string, replacement: string,
+  ): Promise<IpcResult<PluginMigrationResult>> => {
+    try {
+      if (pathIdentifierInvalid(name) || pathIdentifierInvalid(replacement)) return fail(E.nameInvalid)
+      const store = pluginDir()
+      // Resolve the replacement's install spec + real package name from the
+      // catalog when possible; otherwise treat the replacement as an npm name.
+      let pkgName = replacement
+      let spec: string | null = replacement
+      try {
+        const catalog = await resolveMarket(marketSourceState())
+        const entry = catalog.plugins.find(p => p.npm === replacement || p.name === replacement)
+        if (entry !== undefined) {
+          const resolved = installSpecFor(entry)
+          if (resolved !== null) {
+            spec = resolved
+            pkgName = typeof entry.npm === 'string' && entry.npm !== '' ? entry.npm : entry.name
+          }
+        }
+      } catch { /* offline — fall back to the npm name */ }
+      if (pkgName === name) return fail(E.nameInvalid)
+
+      const dshes = dshScopes()
+      const usage = buildInstalledOverview(dshes, store).find(r => r.name === name)?.usage ?? []
+      if (usage.length === 0) return fail(E.pluginNotInstalled, { name })
+      // Refuse while any using profile runs (mutating node_modules under a live run).
+      const running = new Set(listRuns().map(r => `${r.dshId}\u0000${r.profile}`))
+      const idByName = new Map(dshes.map(d => [d.name, d.id]))
+      const active = usage.filter(u => running.has(`${idByName.get(u.dsh) ?? ''}\u0000${u.profile}`))
+      if (active.length > 0) return fail(E.runAlreadyRunning, { profile: active.map(u => u.profile).join('、') })
+
+      if (storeVersions(store, pkgName).length === 0) {
+        if (spec === null) return fail(E.pluginNotInstalled, { name: replacement })
+        const added = await addPlugin(store, spec, pkgName)
+        if (!added.ok) return fail(E.storeOperationFailed, { detail: added.text })
+      }
+      let installed = 0
+      for (const u of usage) {
+        const dsh = dshes.find(d => d.name === u.dsh)
+        if (dsh === undefined) continue
+        const res = await installIntoProfile(join(dsh.home, 'profiles'), u.profile, pkgName, store)
+        if (res.ok) installed += 1
+      }
+      const detached = await removePluginFromProfiles(dshes, name)
+      return { ok: true, value: { target: pkgName, installed, detached: detached.length } }
     } catch (error) {
       return failFromError(error)
     }

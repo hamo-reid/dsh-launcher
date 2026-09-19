@@ -39,6 +39,8 @@ import type {
   ProfileValidation,
   RowCreateInput,
   PluginApplyResult,
+  PluginCleanupResult,
+  PluginMigrationResult,
   PluginUpdateInfo,
   RunEvent,
   RunDefaults,
@@ -186,6 +188,10 @@ const api = {
       ipcRenderer.invoke('plugins:checkUpdates', opts),
     applyUpdates: (dshId: string, profile: string, updates: { name: string; version: string }[]): Promise<IpcResult<{ results: PluginApplyResult[] }>> =>
       ipcRenderer.invoke('plugins:applyUpdates', dshId, profile, updates),
+    cleanupVersions: (name: string): Promise<IpcResult<PluginCleanupResult>> =>
+      ipcRenderer.invoke('plugins:cleanupVersions', name),
+    migrateReplacement: (name: string, replacement: string): Promise<IpcResult<PluginMigrationResult>> =>
+      ipcRenderer.invoke('plugins:migrateReplacement', name, replacement),
     reveal: (name: string): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('plugins:reveal', name),
     readme: (name: string): Promise<IpcResult<{ content: string; dir: string }>> =>

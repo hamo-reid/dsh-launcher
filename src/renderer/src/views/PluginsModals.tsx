@@ -68,6 +68,12 @@ interface PluginDetailModalProps {
   onUninstallVersion: (name: string, version: string) => void
   onReveal: (name: string) => void
   onInstallToProfile: (name: string) => void
+  /** Remove the plugin's unused archived versions (keep newest + in-use). */
+  onCleanupVersions: (name: string) => void
+  /** Catalog replacement name when this plugin is deprecated. */
+  replacement?: string
+  /** Migrate the deprecated plugin to `replacement` across using profiles. */
+  onMigrate: (name: string, replacement: string) => void
 }
 export function PluginDetailModal(p: PluginDetailModalProps): JSX.Element {
   const { t } = useTranslation()
@@ -86,6 +92,9 @@ export function PluginDetailModal(p: PluginDetailModalProps): JSX.Element {
   }, [p.target])
 
   const target = p.target
+  const usedVersions = new Set((target?.usage ?? []).map(u => u.version).filter((v): v is string => v !== undefined && v !== ''))
+  const latestStoreVersion = p.storeVersions.length > 0 ? p.storeVersions[p.storeVersions.length - 1] : undefined
+  const unusedVersions = p.storeVersions.filter(v => v !== latestStoreVersion && !usedVersions.has(v))
   return (
     <Modal title={target?.name ?? ''} open={target !== null} onCancel={p.onClose} width={MODAL.wide}
       footer={target !== null ? (
@@ -115,6 +124,22 @@ export function PluginDetailModal(p: PluginDetailModalProps): JSX.Element {
               <Button type="primary" onClick={() => { void p.onInstallToProfile(target.name) }}>{t('plugin.detail.installToProfile')}</Button>
             </>
           )}
+          {p.replacement !== undefined && p.replacement !== '' && (
+            <Button
+              type="primary"
+              onClick={() => {
+                const replacement = p.replacement as string
+                Modal.confirm({
+                  title: t('plugin.detail.migrateConfirmTitle', { name: target.name, target: replacement }),
+                  content: t('plugin.detail.migrateConfirmBody'),
+                  okText: t('common.confirm'),
+                  onOk: () => { p.onMigrate(target.name, replacement) },
+                })
+              }}
+            >
+              {t('plugin.detail.migrateTo', { target: p.replacement })}
+            </Button>
+          )}
         </Space>
       ) : null}>
       <Tabs activeKey={tab} onChange={key => setTab(key as 'usage' | 'readme')} items={[
@@ -132,7 +157,19 @@ export function PluginDetailModal(p: PluginDetailModalProps): JSX.Element {
                 {p.sizeBytes !== undefined && <Tag>{t('plugin.detail.size')}: {fmtBytes(p.sizeBytes)}</Tag>}
               </Space>
               <div>
-                <FieldLabel>{t('plugin.detail.versionsLabel')}</FieldLabel>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                  <FieldLabel>{t('plugin.detail.versionsLabel')}</FieldLabel>
+                  {unusedVersions.length > 0 && (
+                    <Popconfirm
+                      title={t('plugin.detail.cleanupConfirm', { count: unusedVersions.length })}
+                      okText={t('common.confirm')}
+                      okButtonProps={{ danger: true }}
+                      onConfirm={() => { if (target !== null) p.onCleanupVersions(target.name) }}
+                    >
+                      <Button size="small" loading={p.busy}>{t('plugin.detail.cleanupVersions', { count: unusedVersions.length })}</Button>
+                    </Popconfirm>
+                  )}
+                </div>
                 {target !== null && p.storeVersions.length === 0 && (target.versions.length === 0)
                   ? <span style={{ color: token.colorTextSecondary }}>{t('plugin.detail.noVersions')}</span>
                   : (

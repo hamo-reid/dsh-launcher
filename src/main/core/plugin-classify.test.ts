@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { kindOf, originOf, orderProvenances, provenanceOf } from './store-overview.ts'
-import { isUpdateAvailable, toUpdateInfo } from './plugin-updates.ts'
+import { isUpdateAvailable, repoFromSpec, toUpdateInfo } from './plugin-updates.ts'
 import { annotationsFor } from './market.ts'
 import type { MarketCatalog, PluginSource } from '../../shared/types.ts'
 
@@ -60,6 +60,19 @@ describe('orderProvenances', () => {
   })
 })
 
+describe('repoFromSpec', () => {
+  it('extracts owner/repo from a github spec', () => {
+    expect(repoFromSpec('github:owner/repo')).toBe('owner/repo')
+    expect(repoFromSpec('github:owner/repo#path:/packages/thing')).toBe('owner/repo')
+  })
+  it('is undefined for a non-github or malformed spec', () => {
+    expect(repoFromSpec('@scope/pkg@1.0.0')).toBeUndefined()
+    expect(repoFromSpec('file:/x')).toBeUndefined()
+    expect(repoFromSpec(undefined)).toBeUndefined()
+    expect(repoFromSpec('github:owner')).toBeUndefined()
+  })
+})
+
 describe('isUpdateAvailable', () => {
   it('is true when the latest beats every candidate', () => {
     expect(isUpdateAvailable('2.0.0', ['1.0.0', '1.5.0'])).toBe(true)
@@ -95,6 +108,16 @@ describe('toUpdateInfo', () => {
     expect(info.manual).toBe(true)
     expect(info.latest).toBeUndefined()
     expect(info.updateAvailable).toBe(false)
+  })
+
+  it('treats a github origin with a resolved latest as checkable, not manual', () => {
+    const info = toUpdateInfo(
+      { name: 'g', versions: ['1.0.0'], usage: [{ dsh: 'd', profile: 'a', version: '1.0.0' }], origin: 'github' },
+      '2.0.0',
+    )
+    expect(info.manual).toBe(false)
+    expect(info.latest).toBe('2.0.0')
+    expect(info.updateAvailable).toBe(true)
   })
 
   it('dedupes applied versions across profiles', () => {

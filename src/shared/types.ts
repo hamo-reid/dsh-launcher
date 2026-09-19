@@ -150,6 +150,21 @@ export interface PluginApplyResult {
   text: string
 }
 
+/** Result of garbage-collecting a plugin's unused archived versions. */
+export interface PluginCleanupResult {
+  removed: string[]
+}
+
+/** Result of migrating a deprecated plugin to its replacement. */
+export interface PluginMigrationResult {
+  /** The package name the profiles were migrated to. */
+  target: string
+  /** Profiles that received the replacement. */
+  installed: number
+  /** Profiles the deprecated plugin was detached from. */
+  detached: number
+}
+
 /** One plugin's catalog-derived annotations (category + deprecation). */
 export interface MarketAnnotation {
   category: string

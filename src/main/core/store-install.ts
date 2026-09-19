@@ -141,7 +141,7 @@ export async function installSource(storeDir: string, name: string, source: stri
   // Moving `.staging` → version dir dangles pnpm's absolute top-level links (they
   // name the now-gone `.staging`); let pnpm rewire them to this version's goods.
   await reinstallVersion(dest, join(dest, 'node_modules', name), storeDir)
-  recordPluginSource(storeDir, name, version, sourceKindOf(source))
+  recordPluginSource(storeDir, name, version, sourceKindOf(source), source)
   logger.info(`plugin store add: ${name}@${version} (${source})`)
   return { ok: true, text: `已下载 ${name}@${version}` }
 }
