@@ -249,7 +249,7 @@ export function InstallToProfileModal(p: InstallToProfileModalProps): JSX.Elemen
   const doInstall = async (): Promise<void> => {
     if (p.installPkg === null || installDsh === undefined || installProfile === undefined) { void message.warning(t('plugin.install.needBoth')); return }
     setInstalling(true)
-    const res = await window.api.plugins.installToProfile(installProfile, p.installPkg, version, installDsh)
+    const res = await window.api.plugins.installToProfile(installDsh, installProfile, p.installPkg, version)
     setInstalling(false)
     if (!res.ok) { void message.error(apiErrorText(res)); return }
     void message.success(`${p.installPkg}${version !== undefined ? `@${version}` : ''} → ${installProfile}：${res.value}`)

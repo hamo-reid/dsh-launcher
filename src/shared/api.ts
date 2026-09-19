@@ -44,48 +44,49 @@ import type {
 } from './types.ts'
 
 export interface WindowApi {
-  listProfiles: () => Promise<IpcResult<string[]>>
-  loadProfile: (name: string) => Promise<IpcResult<ProfileDetail>>
-  setDisabled: (name: string, id: string, disabled: boolean) => Promise<IpcResult<boolean>>
+  /** Every profile operation targets an explicit `dshId` — there is no global
+   * active dsh. */
+  listProfiles: (dshId: string) => Promise<IpcResult<string[]>>
+  loadProfile: (dshId: string, name: string) => Promise<IpcResult<ProfileDetail>>
+  setDisabled: (dshId: string, name: string, id: string, disabled: boolean) => Promise<IpcResult<boolean>>
 
-  listProfileSummaries: () => Promise<IpcResult<ProfileSummary[]>>
-  createProfile: (name: string, template?: string) => Promise<IpcResult<boolean>>
-  cloneProfile: (name: string, newName: string) => Promise<IpcResult<boolean>>
-  deleteProfile: (name: string) => Promise<IpcResult<boolean>>
-  exportProfile: (name: string) => Promise<IpcResult<string>>
-  exportToFile: (name: string, opts?: { zip?: boolean }) => Promise<IpcResult<string>>
-  localBundles: (name: string) => Promise<IpcResult<string[]>>
+  listProfileSummaries: (dshId: string) => Promise<IpcResult<ProfileSummary[]>>
+  createProfile: (dshId: string, name: string, template?: string) => Promise<IpcResult<boolean>>
+  cloneProfile: (dshId: string, name: string, newName: string) => Promise<IpcResult<boolean>>
+  deleteProfile: (dshId: string, name: string) => Promise<IpcResult<boolean>>
+  exportProfile: (dshId: string, name: string) => Promise<IpcResult<string>>
+  exportToFile: (dshId: string, name: string, opts?: { zip?: boolean }) => Promise<IpcResult<string>>
+  localBundles: (dshId: string, name: string) => Promise<IpcResult<string[]>>
   importFromFile: () => Promise<IpcResult<{ json: string; name: string; dshVersion: string; unpackDir: string }>>
-  importProfile: (json: string, name?: string, forceDsh?: boolean, localSource?: string) => Promise<IpcResult<ImportProfileResult>>
+  importProfile: (dshId: string, json: string, name?: string, forceDsh?: boolean, localSource?: string) => Promise<IpcResult<ImportProfileResult>>
   /** Copy a profile from one dsh to another (cross-version migration; source stays). */
   mirrorProfile: (sourceDshId: string, targetDshId: string, profileName: string) => Promise<IpcResult<ImportProfileResult>>
   /** Stream of per-step import progress (for the import dialog). Returns an unsubscribe. */
   onImportEvent: (callback: (step: ImportStep) => void) => () => void
-  missingBundles: (name: string) => Promise<IpcResult<string[]>>
-  layers: (name: string) => Promise<IpcResult<ProfileLayer[]>>
-  addRow: (name: string, row: RowCreateInput) => Promise<IpcResult<boolean>>
-  setRowConfig: (name: string, id: string, configText: string) => Promise<IpcResult<boolean>>
-  removeRow: (name: string, id: string) => Promise<IpcResult<boolean>>
-  copyRow: (name: string, bundle: string, id: string) => Promise<IpcResult<boolean>>
-  removeBundle: (name: string, bundle: string) => Promise<IpcResult<boolean>>
+  missingBundles: (dshId: string, name: string) => Promise<IpcResult<string[]>>
+  layers: (dshId: string, name: string) => Promise<IpcResult<ProfileLayer[]>>
+  addRow: (dshId: string, name: string, row: RowCreateInput) => Promise<IpcResult<boolean>>
+  setRowConfig: (dshId: string, name: string, id: string, configText: string) => Promise<IpcResult<boolean>>
+  removeRow: (dshId: string, name: string, id: string) => Promise<IpcResult<boolean>>
+  copyRow: (dshId: string, name: string, bundle: string, id: string) => Promise<IpcResult<boolean>>
+  removeBundle: (dshId: string, name: string, bundle: string) => Promise<IpcResult<boolean>>
   /** Move a bundle layer to `toIndex` within the profile's bundle order. */
-  reorderBundles: (name: string, bundle: string, toIndex: number) => Promise<IpcResult<boolean>>
-  reconcileBundles: (name: string) => Promise<IpcResult<{ added: string[]; removed: string[] }>>
-  configInfo: (name: string, id: string) => Promise<IpcResult<{ default: string; current: string }>>
+  reorderBundles: (dshId: string, name: string, bundle: string, toIndex: number) => Promise<IpcResult<boolean>>
+  reconcileBundles: (dshId: string, name: string) => Promise<IpcResult<{ added: string[]; removed: string[] }>>
+  configInfo: (dshId: string, name: string, id: string) => Promise<IpcResult<{ default: string; current: string }>>
   /** Open the profile's `cordis.patch.yml` in the OS default editor. */
-  openPatchSource: (name: string) => Promise<IpcResult<boolean>>
+  openPatchSource: (dshId: string, name: string) => Promise<IpcResult<boolean>>
 
   home: {
-    setDisabled: (id: string, disabled: boolean) => Promise<IpcResult<boolean>>
+    setDisabled: (dshId: string, id: string, disabled: boolean) => Promise<IpcResult<boolean>>
   }
 
   run: {
-    /** Start a profile runtime. `dshId` picks the owning dsh (the Run page
-     * selects it at launch); omitted → the active dsh. Fails with
+    /** Start a profile runtime under an explicit `dshId`. Fails with
      * `run.alreadyRunning` when that (dsh, profile) already runs. When `mode` /
      * `options` are omitted the saved defaults are reused; explicit values are
      * validated and saved. Returns its run id. */
-    start: (profile: string, mode?: RunMode, options?: LaunchOptions, dshId?: string) => Promise<IpcResult<{ id: string }>>
+    start: (profile: string, mode: RunMode | undefined, options: LaunchOptions | undefined, dshId: string) => Promise<IpcResult<{ id: string }>>
     /** Stop one run by id. */
     stop: (id: string) => Promise<IpcResult<boolean>>
     /** Snapshot of every active run (no logs; fetch via `logs`). */
@@ -111,13 +112,13 @@ export interface WindowApi {
     add: (source: string, name?: string) => Promise<IpcResult<string>>
     addLocal: (kind: 'folder' | 'zip') => Promise<IpcResult<string>>
     installOptions: () => Promise<IpcResult<{ id: string; name: string; version?: string; profiles: string[] }[]>>
-    installToProfile: (profile: string, pkg: string, version?: string, dshId?: string) => Promise<IpcResult<string>>
+    installToProfile: (dshId: string, profile: string, pkg: string, version?: string) => Promise<IpcResult<string>>
     remove: (name: string, version?: string) => Promise<IpcResult<string>>
     /** Cascade full uninstall: detach the plugin from every using profile, then
      * remove the whole plugin (all versions) from the store. Returns the detached
      * usage points. */
     uninstall: (name: string) => Promise<IpcResult<{ removed: PluginUsagePoint[] }>>
-    listCombo: (profile: string) => Promise<IpcResult<ComboPlugin[]>>
+    listCombo: (dshId: string, profile: string) => Promise<IpcResult<ComboPlugin[]>>
     overview: () => Promise<IpcResult<InstalledOverviewRow[]>>
     /** Size of each plugin (inode-dedup) — manual, triggered by the calc button. */
     calcSizes: () => Promise<IpcResult<Record<string, number>>>
@@ -156,10 +157,10 @@ export interface WindowApi {
   }
 
   trash: {
-    list: () => Promise<IpcResult<TrashItem[]>>
-    restore: (name: string) => Promise<IpcResult<boolean>>
-    delete: (name: string) => Promise<IpcResult<boolean>>
-    empty: () => Promise<IpcResult<number>>
+    list: (dshId: string) => Promise<IpcResult<TrashItem[]>>
+    restore: (dshId: string, name: string) => Promise<IpcResult<boolean>>
+    delete: (dshId: string, name: string) => Promise<IpcResult<boolean>>
+    empty: (dshId: string) => Promise<IpcResult<number>>
   }
 
   settings: {
@@ -212,15 +213,12 @@ export interface WindowApi {
   }
 
   dsh: {
-    list: () => Promise<IpcResult<{ dshes: DshEntry[]; activeDshId?: string }>>
-    /** Profile names under a SPECIFIC dsh — lets the Run page pick a launch
-     * target independently of the globally active dsh. */
+    list: () => Promise<IpcResult<{ dshes: DshEntry[] }>>
+    /** Profile names under a SPECIFIC dsh — the Run page picks a launch target. */
     profiles: (id: string) => Promise<IpcResult<DshProfileInfo[]>>
     add: (path: string) => Promise<IpcResult<DshEntry>>
     remove: (id: string, opts?: { deleteFiles?: boolean }) => Promise<IpcResult<boolean>>
-    setActive: (id: string) => Promise<IpcResult<boolean>>
     setHome: (id: string, home: string) => Promise<IpcResult<boolean>>
-    setProfileDir: (id: string, dir: string) => Promise<IpcResult<boolean>>
     installOfficial: (options?: { versionDir?: string; name?: string; version?: string; force?: boolean }) => Promise<IpcResult<{ id: string }>>
     /** Published `@deepseek-ai/dsh` versions + dist-tags (for the official-install picker). */
     pkgVersions: () => Promise<IpcResult<PackageVersionInfo>>

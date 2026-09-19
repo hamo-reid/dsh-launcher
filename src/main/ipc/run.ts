@@ -13,7 +13,7 @@ import { existsExecutable, resolveLaunchEntry, type LaunchEntry } from '../core/
 import { buildDshLaunch } from '../core/launch-spec.ts'
 import { nodeEnvironment } from '../core/node-env.ts'
 import { nodePreferenceValue } from '../core/settings.ts'
-import { activeDshEntry, readDshState, readLaunchOptions, readRunMode, writeLaunchOptions, writeRunMode } from '../core/appState.ts'
+import { dshEntryById, readLaunchOptions, readRunMode, writeLaunchOptions, writeRunMode } from '../core/appState.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
 import { child, logger } from '../core/logger.ts'
 import { effectiveArgs, sanitizeLaunchOptions } from '../core/launch-options.ts'
@@ -166,12 +166,10 @@ function launchShellWindow(exe: string, argv: string[], env: NodeJS.ProcessEnv, 
 
 export function registerRunIpc(): void {
   handle('run:start', (_event, profile: string, mode?: RunMode, options?: LaunchOptions, dshId?: string): IpcResult<{ id: string }> => {
-    // Resolve the target dsh: an explicit id (the Run page picks at launch time)
-    // else the globally active dsh.
-    const entry = dshId === undefined || dshId === ''
-      ? activeDshEntry()
-      : readDshState().dshes.find(d => d.id === dshId)
-    if (entry === undefined) return fail(dshId === undefined || dshId === '' ? E.needActiveDsh : E.dshNotFound)
+    // The target dsh is always explicit now (the Run page picks it at launch);
+    // there is no global active dsh to fall back to.
+    const entry = dshEntryById(dshId)
+    if (entry === undefined) return fail(E.dshNotFound)
     if (hasRun([...runs.values()], entry.id, profile)) return fail(E.runAlreadyRunning, { profile })
     if (!existsExecutable(entry.execPath)) return fail(E.runExecMissing, { path: entry.execPath })
     try {

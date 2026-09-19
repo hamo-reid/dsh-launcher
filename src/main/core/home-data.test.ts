@@ -35,7 +35,7 @@ afterAll(() => {
   rmSync(root, { recursive: true, force: true })
 })
 
-const ctx = (h: string, version = '1.2.3'): DshContext => ({ home: h, version })
+const ctx = (h: string, version = '1.2.3'): DshContext => ({ execPath: '/fake', home: h, version })
 
 describe('listMigratableHomeData', () => {
   it('lists only existing migratable entries', () => {

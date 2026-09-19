@@ -5,11 +5,11 @@
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { loadSettings, openDatabase, saveSettings } from './settings.ts'
 import {
-  activeDshEntry, configureAppState, dshScopes, dshVersionDir, effectiveProfileDir,
-  pluginDir, readDshState, writeDshState,
+  configureAppState, dshEntryById, dshScopes, dshVersionDir, effectiveProfileDir,
+  legacyProfilesDir, pluginDir, readDshState, writeDshState,
 } from './appState.ts'
 import type { DshEntry } from '../../shared/types.ts'
 
@@ -28,46 +28,57 @@ afterAll(() => rmSync(root, { recursive: true, force: true }))
 beforeEach(() => {
   saveSettings({
     ...loadSettings(),
-    dshes: undefined, activeDshId: undefined, pluginDir: undefined, dshVersionDir: undefined,
+    dshes: undefined, pluginDir: undefined, dshVersionDir: undefined,
   })
 })
 
 describe('dsh state', () => {
-  it('starts with no dshes and no active id', () => {
-    expect(readDshState()).toEqual({ dshes: [], activeDshId: undefined })
-    expect(activeDshEntry()).toBeUndefined()
+  it('starts with no dshes', () => {
+    expect(readDshState()).toEqual({ dshes: [] })
+    expect(dshEntryById('a')).toBeUndefined()
   })
 
-  it('writeDshState persists entries + active id; activeDshEntry resolves it', () => {
-    writeDshState([ENTRY_A, { ...ENTRY_A, id: 'b', name: 'dsh@b' }], 'a')
-    expect(activeDshEntry()?.id).toBe('a')
-    expect(readDshState().activeDshId).toBe('a')
+  it('writeDshState persists entries; dshEntryById resolves one', () => {
+    writeDshState([ENTRY_A, { ...ENTRY_A, id: 'b', name: 'dsh@b' }])
+    expect(dshEntryById('a')?.id).toBe('a')
+    expect(dshEntryById('b')?.name).toBe('dsh@b')
   })
 
-  it('activeDshEntry is undefined when the active id matches nothing', () => {
-    writeDshState([ENTRY_A], 'missing')
-    expect(activeDshEntry()).toBeUndefined()
+  it('dshEntryById is undefined for an unknown / empty id', () => {
+    writeDshState([ENTRY_A])
+    expect(dshEntryById('missing')).toBeUndefined()
+    expect(dshEntryById(undefined)).toBeUndefined()
   })
 
   it('dshScopes carries each entry into a scope', () => {
     writeDshState([
       { ...ENTRY_A },
-      { ...ENTRY_A, id: 'b', name: 'dsh@b', home: '/home/b', profilesDir: '/pb' },
-    ], undefined)
+      { ...ENTRY_A, id: 'b', name: 'dsh@b', home: '/home/b' },
+    ])
     expect(dshScopes()).toEqual([
-      { id: 'a', name: 'dsh@a', version: 'a', home: '/home/a', profilesDir: undefined },
-      { id: 'b', name: 'dsh@b', version: 'a', home: '/home/b', profilesDir: '/pb' },
+      { id: 'a', name: 'dsh@a', version: 'a', home: '/home/a' },
+      { id: 'b', name: 'dsh@b', version: 'a', home: '/home/b' },
     ])
   })
 })
 
 describe('effectiveProfileDir', () => {
-  it('defaults to <home>/profiles without an override', () => {
+  it('is always <home>/profiles, matching the host layout', () => {
     expect(effectiveProfileDir({ ...ENTRY_A })).toBe(join('/home/a', 'profiles'))
   })
-  it('uses the configured override when present, ignoring blank', () => {
-    expect(effectiveProfileDir({ ...ENTRY_A, profilesDir: '/custom' })).toBe('/custom')
-    expect(effectiveProfileDir({ ...ENTRY_A, profilesDir: '   ' })).toBe(join('/home/a', 'profiles'))
+})
+
+describe('legacyProfilesDir', () => {
+  it('is undefined without a stale override', () => {
+    expect(legacyProfilesDir({ ...ENTRY_A })).toBeUndefined()
+  })
+  it('surfaces a stale override that differs from <home>/profiles', () => {
+    const entry = { ...ENTRY_A, profilesDir: '/custom' } as DshEntry
+    expect(legacyProfilesDir(entry)).toBe(resolve('/custom'))
+  })
+  it('ignores an override that resolves to the canonical dir, or a blank one', () => {
+    expect(legacyProfilesDir({ ...ENTRY_A, profilesDir: join('/home/a', 'profiles') } as DshEntry)).toBeUndefined()
+    expect(legacyProfilesDir({ ...ENTRY_A, profilesDir: '   ' } as DshEntry)).toBeUndefined()
   })
 })
 

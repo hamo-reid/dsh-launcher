@@ -197,11 +197,13 @@ export interface DshEntry {
   version: string
   /** This dsh's own data home (profiles live under `<home>/profiles`). */
   home: string
-  /** Optional override for this dsh's profiles directory (default `<home>/profiles`). */
-  profilesDir?: string
-  /** Effective (resolved) profiles directory, computed at read time after any
-   * override; distinct from the configured `profilesDir`. */
+  /** Effective (resolved) profiles directory, computed at read time: always
+   * `<home>/profiles`. */
   profileDir?: string
+  /** A legacy profiles-dir override still persisted in settings. Ignored for
+   * every operation (profiles always live at `<home>/profiles`); present only so
+   * the DSH page can point the user at data that predates the fix. */
+  legacyProfilesDir?: string
   /** Persisted app-managed marker (set on official install; the read side merges
    * it with a path-derived check so a clobbered marker still leaves an app
    * install deletable). System/globally-installed dsh are never managed. */
@@ -444,7 +446,7 @@ export interface InstalledPlugin {
   version: string
 }
 
-// ── trash (`<profilesDir>/.trash`) ──────────────────────────────────────────
+// ── trash (`<home>/profiles/.trash`) ────────────────────────────────────────
 
 /** One soft-deleted profile sitting in the trash, for `trash:list`. */
 export interface TrashItem {

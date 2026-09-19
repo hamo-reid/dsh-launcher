@@ -1,5 +1,4 @@
-/** IPC for dsh installs (`dsh:*`): registry, activation, home/profile-dir, and
- * official installation. */
+/** IPC for dsh installs (`dsh:*`): registry, home, and official installation. */
 
 import { shell } from 'electron'
 import { existsSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
@@ -11,9 +10,10 @@ import {
   resolveDshPackage, updateDsh, versionExists, type DshEntry,
 } from '../core/dsh.ts'
 import {
-  dshVersionDir, effectiveProfileDir, readDshState, writeDshState,
+  contextForEntry, dshEntryById, dshVersionDir, effectiveProfileDir, legacyProfilesDir,
+  readDshState, writeDshState,
 } from '../core/appState.ts'
-import { listProfileInfosForEntry } from '../core/home.ts'
+import { listProfileInfos } from '../core/home.ts'
 import { startDshDownload } from '../core/pluginDownloads.ts'
 import { loadSettings, saveSettings } from '../core/settings.ts'
 import { fetchPackageVersions } from '../core/npm.ts'
@@ -108,14 +108,14 @@ export function setVersionDirValue(dir: string): IpcResult<boolean> {
 }
 
 export function registerDshIpc(): void {
-  handle('dsh:list', (): IpcResult<{ dshes: DshEntry[]; activeDshId?: string }> => {
-    const { dshes, activeDshId } = readDshState()
+  handle('dsh:list', (): IpcResult<{ dshes: DshEntry[] }> => {
+    const { dshes } = readDshState()
     // Surface dsh versions already on disk in the version repo but not yet
     // registered: auto-register them so they appear in the DSH list (and stop
     // invisibly blocking an official install of the same name). Idempotent.
     const discovered = discoverVersionRepo(dshes, dshVersionDir())
     if (discovered.length > 0) {
-      writeDshState([...dshes, ...discovered], activeDshId)
+      writeDshState([...dshes, ...discovered])
       logger.info(`discovered ${discovered.length} repo version(s): ${discovered.map(x => x.name).join(',')}`)
     }
     const merged = [...dshes, ...discovered]
@@ -126,6 +126,10 @@ export function registerDshIpc(): void {
           // 精确定位 dsh 包根：版本读 `@deepseek-ai/dsh`（或 apps/cli）的 package.json，
           // 所在位置指向包根而非 `.bin` shim 目录。shim 上旧式暴力上溯会读错版本。
           const resolved = resolveDshPackage(d.execPath)
+          // A pre-fix settings value may still name a custom profiles dir. It is
+          // ignored for every operation; surfaced only while it still exists, so
+          // the DSH page can point the user at data worth moving into <home>/profiles.
+          const legacy = legacyProfilesDir(d)
           return {
             ...d,
             version: resolved?.version ?? d.version ?? readVersionFromPath(d.execPath),
@@ -133,20 +137,20 @@ export function registerDshIpc(): void {
             managed: isDeletableDsh(d, d.versionDir ?? dshVersionDir()),
             launch: baseLaunch(d.execPath),
             profileDir: effectiveProfileDir(d),
+            legacyProfilesDir: legacy !== undefined && existsSync(legacy) ? legacy : undefined,
             dir: resolved?.root ?? installDir(d.execPath),
           }
         }),
-        activeDshId,
       },
     }
   })
 
-  // Profiles under a SPECIFIC dsh (for the Run page's launch picker/launcher),
-  // independent of the global active dsh.
+  // Profile info under a SPECIFIC dsh (for the Run page's launch picker/launcher),
+  // independent of any global selection.
   handle('dsh:profiles', (_event, id: string): IpcResult<DshProfileInfo[]> => {
-    const entry = readDshState().dshes.find(d => d.id === id)
+    const entry = dshEntryById(id)
     if (entry === undefined) return fail(E.dshNotFound)
-    return { ok: true, value: listProfileInfosForEntry(entry) }
+    return { ok: true, value: listProfileInfos(contextForEntry(entry)) }
   })
 
   // Whether a managed dsh has a newer release available. `value: null` = up to date.
@@ -161,7 +165,7 @@ export function registerDshIpc(): void {
   // closes its dialog immediately). Cross-major still requires `ackMajorRisk`.
   // Returns the new session id instead of awaiting the full reinstall.
   handle('dsh:update', async (_event, id: string, opts?: { version?: string; ackMajorRisk?: boolean }): Promise<IpcResult<{ id: string }>> => {
-    const { dshes, activeDshId } = readDshState()
+    const { dshes } = readDshState()
     const entry = dshes.find(d => d.id === id)
     if (entry === undefined) return fail(E.dshNotFound)
     if (!isDeletableDsh(entry, entry.versionDir ?? dshVersionDir())) return fail(E.dshNotManaged)
@@ -179,7 +183,7 @@ export function registerDshIpc(): void {
     const sessionId = startDshDownload(entry.name, `→ v${target}`, async patchStep => {
       const result = await updateDsh(entry, dshVersionDir(), { version: target },
         step => patchStep(toDownloadStep(step)))
-      writeDshState(dshes.map(d => d.id === id ? { ...d, version: result.version } : d), activeDshId)
+      writeDshState(dshes.map(d => d.id === id ? { ...d, version: result.version } : d))
       logger.info(`dsh updated: ${entry.name} ${entry.version} → ${result.version} (backup ${result.backupDir})`)
     })
     return { ok: true, value: { id: sessionId } }
@@ -212,7 +216,7 @@ export function registerDshIpc(): void {
   })
 
   handle('dsh:remove', async (_event, id: string, opts?: { deleteFiles?: boolean }): Promise<IpcResult<boolean>> => {
-    const { dshes, activeDshId } = readDshState()
+    const { dshes } = readDshState()
     const entry = dshes.find(d => d.id === id)
     // 非 app 管理的（系统级/手动加入的用户已有安装）一律禁止删除，避免误删用户全局
     // 环境或绕过 UI 的 `dsh:remove` 调用。唯一例外：该可执行已不存在（磁盘与 app 不同步）
@@ -223,7 +227,7 @@ export function registerDshIpc(): void {
     }
     logger.info(`dsh removed: ${entry?.name ?? id}${opts?.deleteFiles === true ? ' (delete files)' : ''}`)
     // 先从列表移除（脱管 — 始终执行）。
-    writeDshState(dshes.filter(d => d.id !== id), activeDshId === id ? undefined : activeDshId)
+    writeDshState(dshes.filter(d => d.id !== id))
     // 可选的物理删除：app 管理的版本实例（含其独立 home），其它则删可执行所属目录。
     // await 异步删除，避免同步 rm 阻塞主进程导致 App 未响应。
     if (opts?.deleteFiles === true && entry !== undefined) {
@@ -232,18 +236,9 @@ export function registerDshIpc(): void {
     return { ok: true, value: true }
   })
 
-  handle('dsh:setActive', (_event, id: string): IpcResult<boolean> => {
-    const { dshes } = readDshState()
-    const d = dshes.find(candidate => candidate.id === id)
-    if (d === undefined) return fail(E.dshNotFound)
-    writeDshState(dshes, id)
-    logger.info(`dsh activated: ${d.name}`)
-    return { ok: true, value: true }
-  })
-
   handle('dsh:setHome', (_event, id: string, home: string): IpcResult<boolean> => {
     if (typeof home !== 'string' || home.trim() === '') return fail(E.nameInvalid)
-    const { dshes, activeDshId } = readDshState()
+    const { dshes } = readDshState()
     if (!dshes.some(d => d.id === id)) return fail(E.dshNotFound)
     const target = resolve(home.trim())
     try {
@@ -253,34 +248,16 @@ export function registerDshIpc(): void {
       return fail(E.storeUnusable, { detail: String(error) })
     }
     const next = dshes.map(d => d.id === id ? { ...d, home: target } : d)
-    writeDshState(next, activeDshId)
-    return { ok: true, value: true }
-  })
-
-  handle('dsh:setProfileDir', (_event, id: string, dir: string): IpcResult<boolean> => {
-    const { dshes, activeDshId } = readDshState()
-    if (!dshes.some(d => d.id === id)) return fail(E.dshNotFound)
-    const trimmed = dir.trim()
-    let profilesDir: string | undefined
-    if (trimmed !== '') {
-      const target = resolve(trimmed)
-      if (existsSync(target) && !statSync(target).isDirectory()) {
-        return fail(E.storeNotDir, { path: target })
-      }
-      profilesDir = target
-    }
-    // An empty value clears the override: profile dir follows <home>/profiles again.
-    const next = dshes.map(d => d.id === id ? { ...d, profilesDir } : d)
-    writeDshState(next, activeDshId)
+    writeDshState(next)
     return { ok: true, value: true }
   })
 
   handle('dsh:rename', (_event, id: string, name: string): IpcResult<boolean> => {
     const trimmed = name.trim()
     if (trimmed === '') return fail(E.nameInvalid)
-    const { dshes, activeDshId } = readDshState()
+    const { dshes } = readDshState()
     if (!dshes.some(d => d.id === id)) return fail(E.dshNotFound)
-    writeDshState(dshes.map(d => d.id === id ? { ...d, name: trimmed } : d), activeDshId)
+    writeDshState(dshes.map(d => d.id === id ? { ...d, name: trimmed } : d))
     return { ok: true, value: true }
   })
 

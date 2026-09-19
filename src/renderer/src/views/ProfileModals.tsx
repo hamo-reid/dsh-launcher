@@ -80,6 +80,8 @@ export function ExportProfileModal(p: ExportProfileModalProps): JSX.Element {
 
 interface ImportProfileModalProps {
   open: boolean
+  /** The dsh the profile is imported into (no global active dsh). */
+  dshId: string
   json: string
   defaultName: string
   unpackDir: string
@@ -174,7 +176,7 @@ export function ImportProfileModal(p: ImportProfileModalProps): JSX.Element {
     setRows([])
     setRunning(true)
     setDone(false)
-    const res = await window.api.importProfile(p.json, target, forceImport, p.unpackDir)
+    const res = await window.api.importProfile(p.dshId, p.json, target, forceImport, p.unpackDir)
     setRunning(false)
     if (!res.ok) { setError(apiErrorText(res)); setDone(true); return }
     setResult(res.value)

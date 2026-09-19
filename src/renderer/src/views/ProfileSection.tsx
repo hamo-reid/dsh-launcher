@@ -26,12 +26,16 @@ const OFFICIAL_WEB = 'template:web'
 
 /** Profile 页：Profile 实例 + 垃圾站 两种视图。只负责 profile 的管理
  * （新建/克隆/导入导出/迁移/回收站）；运行与多进程控制台已迁至「运行」页
- * （`RunsSection`），回收站状态在 `useTrash`，弹窗在 `ProfileModals`。 */
+ * （`RunsSection`）。本页有自己的 DSH 选择——不依赖任何全局「当前 DSH」。 */
 export default function ProfileSection() {
   const { t } = useTranslation()
   const { token } = theme.useToken()
-  const trash = useTrash()
   const [view, setView] = useState<View>('profiles')
+
+  // 本页 DSH 选择（默认取第一个已注册的 dsh；不写全局状态）。
+  const [dshes, setDshes] = useState<{ id: string; name: string; version: string }[]>([])
+  const [dshId, setDshId] = useState<string>()
+  const trash = useTrash(dshId)
 
   const [summaries, setSummaries] = useState<ProfileSummary[]>([])
   const [loading, setLoading] = useState(true)
@@ -54,57 +58,45 @@ export default function ProfileSection() {
   const [importUnpack, setImportUnpack] = useState('')
   const [importDshVersion, setImportDshVersion] = useState('')
 
-  // 顶部 DSH 选择：选 active dsh，profiles 随该 dsh 的 home 刷新
-  const [dshes, setDshes] = useState<{ id: string; name: string }[]>([])
-  const [activeDshId, setActiveDshId] = useState<string>()
-  const [activeDshVersion, setActiveDshVersion] = useState('')
-
   useEffect(() => {
     void (async () => {
       const r = await window.api.dsh.list()
-      if (r.ok) {
-        setDshes(r.value.dshes)
-        setActiveDshId(r.value.activeDshId)
-        setActiveDshVersion(r.value.dshes.find(d => d.id === r.value.activeDshId)?.version ?? '')
-      }
+      if (!r.ok) return
+      setDshes(r.value.dshes.map(d => ({ id: d.id, name: d.name, version: d.version })))
+      setDshId(prev => (prev !== undefined && r.value.dshes.some(d => d.id === prev)) ? prev : r.value.dshes[0]?.id)
     })()
   }, [])
 
-  const changeDsh = async (id: string): Promise<void> => {
-    if (id === activeDshId) return
-    const name = dshes.find(d => d.id === id)?.name ?? id
-    const r = await window.api.dsh.setActive(id)
-    if (!r.ok) { void message.error(apiErrorText(r)); return }
-    setActiveDshId(id)
+  const changeDsh = (id: string): void => {
+    if (id === dshId) return
+    setDshId(id)
     setSelected(null) // 换 home 后旧选中的 profile 不再有效
-    const l = await window.api.dsh.list()
-    if (l.ok) setActiveDshVersion(l.value.dshes.find(d => d.id === l.value.activeDshId)?.version ?? '')
-    void message.success(t('profile.switchedDsh', { name }))
-    await refresh()
   }
 
   const refresh = useCallback(async (): Promise<void> => {
-    const res = await window.api.listProfileSummaries()
+    if (dshId === undefined) { setSummaries([]); setLoading(false); return }
+    const res = await window.api.listProfileSummaries(dshId)
     if (res.ok) setSummaries(res.value)
     else void message.error(apiErrorText(res))
     setLoading(false)
-  }, [])
+  }, [dshId])
 
   useEffect(() => { void refresh() }, [refresh])
 
   useEffect(() => {
-    if (selected === null) { setMissing([]); return }
+    if (selected === null || dshId === undefined) { setMissing([]); return }
     let alive = true
-    void window.api.missingBundles(selected).then(result => {
+    void window.api.missingBundles(dshId, selected).then(result => {
       if (result.ok && alive) setMissing(result.value)
     })
     return () => { alive = false }
-  }, [selected])
+  }, [selected, dshId])
 
   const doCreate = async (): Promise<void> => {
+    if (dshId === undefined) return
     const n = createName.trim()
     if (n === '') return
-    const res = await window.api.createProfile(n, createTemplate)
+    const res = await window.api.createProfile(dshId, n, createTemplate)
     if (!res.ok) { void message.error(apiErrorText(res)); return }
     setCreateOpen(false)
     setCreateName('')
@@ -115,10 +107,10 @@ export default function ProfileSection() {
   }
 
   const doClone = async (): Promise<void> => {
-    if (cloneTarget === null) return
+    if (dshId === undefined || cloneTarget === null) return
     const n = cloneName.trim()
     if (n === '') { void message.warning(t('profile.clone.needName')); return }
-    const res = await window.api.cloneProfile(cloneTarget, n)
+    const res = await window.api.cloneProfile(dshId, cloneTarget, n)
     if (!res.ok) { void message.error(apiErrorText(res)); return }
     setCloneTarget(null)
     setCloneName('')
@@ -127,7 +119,8 @@ export default function ProfileSection() {
   }
 
   const doDelete = async (name: string): Promise<void> => {
-    const res = await window.api.deleteProfile(name)
+    if (dshId === undefined) return
+    const res = await window.api.deleteProfile(dshId, name)
     if (!res.ok) { void message.error(apiErrorText(res)); return }
     if (selected === name) setSelected(null)
     void message.success(t('profile.movedToTrash'))
@@ -136,18 +129,19 @@ export default function ProfileSection() {
   }
 
   const doExport = async (name: string): Promise<void> => {
-    const res = await window.api.exportProfile(name)
+    if (dshId === undefined) return
+    const res = await window.api.exportProfile(dshId, name)
     if (!res.ok) { void message.error(apiErrorText(res)); return }
     setExportName(name)
     setExportText(res.value)
   }
 
   const doExportSave = async (name: string): Promise<void> => {
-    if (name === '') return
-    const lb = await window.api.localBundles(name)
+    if (dshId === undefined || name === '') return
+    const lb = await window.api.localBundles(dshId, name)
     if (!lb.ok) { void message.error(lb.error); return }
     const stream = async (zip: boolean): Promise<void> => {
-      const res = await window.api.exportToFile(name, zip ? { zip: true } : undefined)
+      const res = await window.api.exportToFile(dshId, name, zip ? { zip: true } : undefined)
       if (!res.ok) { void message.error(apiErrorText(res)); return }
       if (res.value === '') return // 用户取消保存
       void message.success(t('profile.exportedTo', { path: res.value }))
@@ -194,7 +188,8 @@ export default function ProfileSection() {
   }
 
   const loadMissing = (name: string): void => {
-    void window.api.missingBundles(name).then(result => {
+    if (dshId === undefined) return
+    void window.api.missingBundles(dshId, name).then(result => {
       if (result.ok) setMissing(result.value)
     })
   }
@@ -265,24 +260,26 @@ export default function ProfileSection() {
             />
           </div>
 
-          {view === 'profiles' && (
-            <div style={{ padding: 12 }}>
-              <div style={{ marginBottom: 6, color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>{t('profile.useDsh')}</div>
-              <Select
-                value={activeDshId}
-                onChange={id => void changeDsh(String(id))}
-                style={{ width: '100%' }}
-                placeholder={t('dsh.selectPlaceholder')}
-                options={dshes.map(d => ({ value: d.id, label: d.name }))}
-              />
-              <Button type="primary" block style={{ marginTop: 10 }} disabled={activeDshId === undefined} onClick={() => setCreateOpen(true)}>
-                {t('profile.newProfile')}
-              </Button>
-              <Button block style={{ marginTop: 8 }} disabled={activeDshId === undefined} onClick={() => void doImportFile()}>
-                {t('profile.importFromFile')}
-              </Button>
-            </div>
-          )}
+          <div style={{ padding: 12 }}>
+            <div style={{ marginBottom: 6, color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>{t('profile.useDsh')}</div>
+            <Select
+              value={dshId}
+              onChange={id => changeDsh(String(id))}
+              style={{ width: '100%' }}
+              placeholder={t('dsh.selectPlaceholder')}
+              options={dshes.map(d => ({ value: d.id, label: d.name }))}
+            />
+            {view === 'profiles' && (
+              <>
+                <Button type="primary" block style={{ marginTop: 10 }} disabled={dshId === undefined} onClick={() => setCreateOpen(true)}>
+                  {t('profile.newProfile')}
+                </Button>
+                <Button block style={{ marginTop: 8 }} disabled={dshId === undefined} onClick={() => void doImportFile()}>
+                  {t('profile.importFromFile')}
+                </Button>
+              </>
+            )}
+          </div>
 
           <div style={{ flex: 1, overflowY: 'auto' }}>
             {view === 'profiles' && (
@@ -299,7 +296,7 @@ export default function ProfileSection() {
                   <EmptyState
                     title={t('profile.empty.noProfiles')}
                     description={t('profile.empty.noProfilesDesc')}
-                    action={<Button type="primary" disabled={activeDshId === undefined} onClick={() => setCreateOpen(true)}>{t('profile.newProfile')}</Button>}
+                    action={<Button type="primary" disabled={dshId === undefined} onClick={() => setCreateOpen(true)}>{t('profile.newProfile')}</Button>}
                   />
                 }
               />
@@ -346,8 +343,8 @@ export default function ProfileSection() {
               description={t('profile.missingDesc', { profile: selected })}
             />
           )}
-          {selected !== null
-            ? <ProfileDetailView name={selected} onChanged={() => { if (selected !== null) loadMissing(selected); void refresh() }} />
+          {selected !== null && dshId !== undefined
+            ? <ProfileDetailView dshId={dshId} name={selected} onChanged={() => { if (selected !== null) loadMissing(selected); void refresh() }} />
             : <EmptyState title={t('profile.selectProfile')} description={t('profile.selectProfileDesc')} />}
         </div>
       </div>
@@ -394,17 +391,18 @@ export default function ProfileSection() {
     />
     <ImportProfileModal
       open={importOpen}
+      dshId={dshId ?? ''}
       json={importJson}
       defaultName={importDefaultName}
       unpackDir={importUnpack}
       importDshVersion={importDshVersion}
-      activeDshVersion={activeDshVersion}
+      activeDshVersion={dshes.find(d => d.id === dshId)?.version ?? ''}
       onClose={() => setImportOpen(false)}
       onImported={onImported}
     />
     <MirrorProfileModal
       open={mirrorTarget !== null}
-      sourceDshId={activeDshId ?? ''}
+      sourceDshId={dshId ?? ''}
       profileName={mirrorTarget ?? ''}
       onClose={() => setMirrorTarget(null)}
       onMirrored={async () => { await refresh(); await trash.load() }}

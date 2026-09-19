@@ -19,16 +19,17 @@ export interface UseTrash {
   emptyAll: () => Promise<void>
 }
 
-export function useTrash(): UseTrash {
+export function useTrash(dshId: string | undefined): UseTrash {
   const { t } = useTranslation()
   const [items, setItems] = useState<TrashItem[]>([])
   const [selected, setSelected] = useState<string>()
 
   const load = useCallback(async (): Promise<void> => {
-    const r = await window.api.trash.list()
+    if (dshId === undefined) { setItems([]); return }
+    const r = await window.api.trash.list(dshId)
     if (r.ok) setItems(r.value)
     else void message.error(apiErrorText(r))
-  }, [])
+  }, [dshId])
 
   useEffect(() => { void load() }, [load])
 
@@ -38,7 +39,8 @@ export function useTrash(): UseTrash {
   }, [items, selected])
 
   const restore = async (name: string): Promise<boolean> => {
-    const r = await window.api.trash.restore(name)
+    if (dshId === undefined) return false
+    const r = await window.api.trash.restore(dshId, name)
     if (!r.ok) { void message.error(apiErrorText(r)); return false }
     setSelected(undefined)
     void message.success(t('trash.restored', { name }))
@@ -47,7 +49,8 @@ export function useTrash(): UseTrash {
   }
 
   const remove = async (name: string): Promise<boolean> => {
-    const r = await window.api.trash.delete(name)
+    if (dshId === undefined) return false
+    const r = await window.api.trash.delete(dshId, name)
     if (!r.ok) { void message.error(apiErrorText(r)); return false }
     setSelected(undefined)
     void message.success(t('trash.deleted', { name }))
@@ -56,7 +59,8 @@ export function useTrash(): UseTrash {
   }
 
   const emptyAll = async (): Promise<void> => {
-    const r = await window.api.trash.empty()
+    if (dshId === undefined) return
+    const r = await window.api.trash.empty(dshId)
     if (!r.ok) { void message.error(apiErrorText(r)); return }
     setSelected(undefined)
     if (r.value > 0) void message.success(t('trash.emptied', { count: r.value }))

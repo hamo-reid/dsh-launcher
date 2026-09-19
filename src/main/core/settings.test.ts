@@ -55,11 +55,11 @@ describe('loadSettings / saveSettings', () => {
   })
 
   it('flushes to disk so a reloaded db sees the value', async () => {
-    saveSettings({ activeDshId: 'd1' })
+    saveSettings({ uiLanguage: 'zh' })
     const dir = dirs[dirs.length - 1]
     // Re-open the same file from disk.
     await openDatabase(join(dir, 'app.sqlite'))
-    expect(loadSettings()).toEqual({ activeDshId: 'd1' })
+    expect(loadSettings()).toEqual({ uiLanguage: 'zh' })
   })
 
   it('replaces the db atomically, leaving no temp file behind', () => {

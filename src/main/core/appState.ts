@@ -2,22 +2,23 @@
  * Application-level state aggregated from persisted settings — the single
  * dependency source for the IPC layer.
  *
- * dsh selection, the active install, effective directories and the plugin-store
- * location all live here, derived from `AppSettings` (never module globals that
- * drift out of sync). The only injected piece is the Electron `userData` path
+ * The dsh registry, effective directories and the plugin-store location all
+ * live here, derived from `AppSettings` (never module globals that drift out of
+ * sync). The only injected piece is the Electron `userData` path
  * (via {@link configureAppState}); `core` itself stays free of Electron imports.
  */
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { loadSettings, saveSettings, type AppSettings } from './settings.ts'
 import type { DshEntry, LaunchOptions, RunMode } from '../../shared/types.ts'
 
-/** The dsh shape a scope carries through plugin-scoped scans. */
+/** The dsh shape a scope carries through plugin-scoped scans. The profiles
+ * directory is always `<home>/profiles` — the same path the host reads from
+ * `$DSH_HOME/profiles` — so a scope carries no separate override. */
 export interface DshScope {
   id: string
   name: string
   version?: string
   home: string
-  profilesDir?: string
 }
 
 /** Electron `userData` dir, injected from the main entry before any IPC. */
@@ -28,61 +29,68 @@ export function configureAppState(dataDir: string): void {
   userData = dataDir
 }
 
-// ── dsh selection ───────────────────────────────────────────────────────────
+// ── dsh registry ────────────────────────────────────────────────────────────
 
-/** Registered dsh installs + the active id, from settings. */
-export function readDshState(): { dshes: DshEntry[]; activeDshId?: string } {
-  const s = loadSettings()
-  return { dshes: s.dshes ?? [], activeDshId: s.activeDshId }
+/** Registered dsh installs, from settings. There is no global "active" dsh:
+ * every operation targets an explicit dsh chosen by its caller. */
+export function readDshState(): { dshes: DshEntry[] } {
+  return { dshes: loadSettings().dshes ?? [] }
 }
 
-/** Persist the registered dsh list + active id. */
-export function writeDshState(dshes: DshEntry[], activeDshId?: string): void {
-  saveSettings({ ...loadSettings(), dshes, activeDshId })
+/** Persist the registered dsh list. */
+export function writeDshState(dshes: DshEntry[]): void {
+  saveSettings({ ...loadSettings(), dshes })
 }
 
-/** The active dsh entry, or `undefined` when none is selected. */
-export function activeDshEntry(): DshEntry | undefined {
-  const { dshes, activeDshId } = readDshState()
-  return dshes.find(d => d.id === activeDshId)
+/** The registered dsh with this id, or `undefined`. */
+export function dshEntryById(id: string | undefined): DshEntry | undefined {
+  if (id === undefined || id === '') return undefined
+  return readDshState().dshes.find(d => d.id === id)
 }
 
-/** The configured profiles dir for a dsh: its override, else `<home>/profiles`. */
+/** The profiles directory for a dsh: ALWAYS `<home>/profiles`, matching the
+ * host's `$DSH_HOME/profiles`. Changing it means changing the home (which is the
+ * `DSH_HOME` a direct `dsh` launch uses too), never a second path. */
 export function effectiveProfileDir(entry: DshEntry): string {
-  const dir = entry.profilesDir
-  return typeof dir === 'string' && dir.trim() !== '' ? dir : join(entry.home, 'profiles')
+  return join(entry.home, 'profiles')
 }
 
-/** The dsh context a profile/data operation targets — normally the active dsh,
- * but version migration / data export can target an explicit dsh. Carries just
- * the fields core functions need, so they don't depend on the full entry. */
+/** The dsh context a profile/data operation targets. Carries just the fields
+ * core functions need, so they don't depend on the full entry. */
 export interface DshContext {
+  /** The dsh executable (for install-anchor / bundle resolution). */
+  execPath: string
+  /** The harness home (`DSH_HOME`); profiles live at `<home>/profiles`. */
   home: string
-  /** Override for the profiles dir (default `<home>/profiles`). */
-  profilesDirOverride?: string
   /** The dsh version, for export version-tagging and cross-version gates. */
   version: string
 }
 
 /** Build a DshContext from a dsh entry. */
 export function contextForEntry(entry: DshEntry): DshContext {
-  return {
-    home: entry.home,
-    profilesDirOverride: entry.profilesDir,
-    version: entry.version,
-  }
+  return { execPath: entry.execPath, home: entry.home, version: entry.version }
 }
 
-/** The profiles root a context operates on: its override, else `<home>/profiles`. */
+/** The profiles root a context operates on: always `<home>/profiles`. */
 export function profilesRootFor(ctx: DshContext): string {
-  const dir = ctx.profilesDirOverride
-  return typeof dir === 'string' && dir.trim() !== '' ? dir : join(ctx.home, 'profiles')
+  return join(ctx.home, 'profiles')
+}
+
+/** A legacy per-dsh profiles-dir override still persisted in settings. It is
+ * IGNORED — profiles always live at `<home>/profiles` — but surfaced so the DSH
+ * page can point the user at data that predates the fix. Returns the configured
+ * path only when it differs from the canonical one. */
+export function legacyProfilesDir(entry: DshEntry): string | undefined {
+  const raw = (entry as { profilesDir?: unknown }).profilesDir
+  if (typeof raw !== 'string' || raw.trim() === '') return undefined
+  const configured = resolve(raw)
+  return configured === resolve(effectiveProfileDir(entry)) ? undefined : configured
 }
 
 /** The plugin-scan scopes derived from every registered dsh. */
 export function dshScopes(): DshScope[] {
   return readDshState().dshes.map(d => ({
-    id: d.id, name: d.name, version: d.version, home: d.home, profilesDir: d.profilesDir,
+    id: d.id, name: d.name, version: d.version, home: d.home,
   }))
 }
 

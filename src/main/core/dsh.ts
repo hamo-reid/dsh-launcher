@@ -441,9 +441,8 @@ export async function installOfficialDsh(
 }
 
 /** Register a freshly installed official dsh in the app's dsh list (replacing
- * any same-id stale entry) and make it active. Extracted from the IPC handler so
- * the background install session and any direct registry path share one
- * registration step. */
+ * any same-id stale entry). Extracted from the IPC handler so the background
+ * install session and any direct registry path share one registration step. */
 export function registerInstalledDsh(versionDir: string, name: string, info: DshInstallResult): DshEntry {
   const { dshes } = readDshState()
   const entry: DshEntry = {
@@ -457,7 +456,7 @@ export function registerInstalledDsh(versionDir: string, name: string, info: Dsh
     // The version-repo root this install actually landed in — cleanup anchors here.
     versionDir,
   }
-  writeDshState([...dshes.filter(d => d.id !== entry.id), entry], entry.id)
+  writeDshState([...dshes.filter(d => d.id !== entry.id), entry])
   return entry
 }
 

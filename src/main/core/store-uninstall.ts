@@ -91,7 +91,7 @@ function pruneEmptyScopes(from: string): void {
 export async function removePluginFromProfiles(dshes: DshScope[], pkg: string): Promise<PluginUsagePoint[]> {
   const affected: PluginUsagePoint[] = []
   for (const dsh of dshes) {
-    const dir = dsh.profilesDir ?? join(dsh.home, 'profiles')
+    const dir = join(dsh.home, 'profiles')
     if (!existsSync(dir)) continue
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue

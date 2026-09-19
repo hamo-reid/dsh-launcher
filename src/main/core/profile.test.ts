@@ -1,7 +1,7 @@
 /**
  * Profile lifecycle: create/clone/soft-delete, bundle reorder/remove, export
  * classification and import. `runPnpm` + the plugin-store install helpers are
- * mocked; FS helpers run against a disposable tree with a fake active dsh.
+ * mocked; FS helpers run against a disposable tree with an explicit dsh context.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -25,8 +25,9 @@ vi.mock('./plugins.ts', async (importActual) => {
 import { runPnpm } from './pnpm.ts'
 import { addLocalPlugin, addPlugin, installIntoProfile } from './plugins.ts'
 import { openDatabase, saveSettings } from './settings.ts'
+import { contextForEntry } from './appState.ts'
 import {
-  activeDshVersion, cloneProfile, createProfile, exportProfile, importProfile,
+  cloneProfile, createProfile, exportProfile, importProfile,
   listLocalBundles, listProfileSummaries, removeBundle, reorderBundle, softDeleteProfile,
 } from './profile.ts'
 
@@ -34,15 +35,12 @@ let root: string
 const home = (): string => join(root, 'home')
 const profiles = (): string => join(home(), 'profiles')
 const store = (): string => join(root, 'store')
+const ctx = (): ReturnType<typeof contextForEntry> =>
+  contextForEntry({ id: 'a', name: 'dsh@a', execPath: '/fake/a', version: '1.0.0', home: home() })
 
 beforeAll(async () => {
   root = mkdtempSync(join(tmpdir(), 'pm-profile-'))
   await openDatabase(join(root, 'app.sqlite'))
-  saveSettings({
-    activeDshId: 'a',
-    dshes: [{ id: 'a', name: 'dsh@a', execPath: '/fake/a', version: '1.0.0', home: home() }],
-    pluginDir: store(),
-  })
 })
 
 afterAll(() => rmSync(root, { recursive: true, force: true }))
@@ -60,16 +58,12 @@ beforeEach(() => {
   vi.mocked(installIntoProfile).mockReset()
   vi.mocked(installIntoProfile).mockResolvedValue({ ok: true, text: 'linked', activated: true })
   // Reset the persisted settings baseline so mutations in prior tests never leak.
-  saveSettings({
-    activeDshId: 'a',
-    dshes: [{ id: 'a', name: 'dsh@a', execPath: '/fake/a', version: '1.0.0', home: home() }],
-    pluginDir: store(),
-  })
+  saveSettings({ dshes: [], pluginDir: store() })
 })
 
 describe('createProfile', () => {
   it('writes a base manifest, patch and pnpm workspace', () => {
-    createProfile('base')
+    createProfile(ctx(), 'base')
     const m = JSON.parse(readFileSync(join(profiles(), 'base', 'package.json'), 'utf8'))
     expect(m.dsh.profile.bundles).toEqual(['@deepseek-ai/dsh-base'])
     expect(existsSync(join(profiles(), 'base', 'cordis.patch.yml'))).toBe(true)
@@ -77,52 +71,52 @@ describe('createProfile', () => {
   })
 
   it('accepts a custom bundle template and rejects bad names / duplicates', () => {
-    createProfile('web', ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'])
-    expect(() => createProfile('Bad Name')).toThrow(/kebab-case/)
-    expect(() => createProfile('web')).toThrow(/already exists/)
+    createProfile(ctx(), 'web', ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'])
+    expect(() => createProfile(ctx(), 'Bad Name')).toThrow(/kebab-case/)
+    expect(() => createProfile(ctx(), 'web')).toThrow(/already exists/)
   })
 })
 
 describe('cloneProfile', () => {
   it('copies config without node_modules', () => {
-    createProfile('src')
+    createProfile(ctx(), 'src')
     const nm = join(profiles(), 'src', 'node_modules')
     mkdirSync(join(nm, 'x'), { recursive: true })
     writeFileSync(join(nm, 'x', 'f'), '')
-    cloneProfile('src', 'dst')
+    cloneProfile(ctx(), 'src', 'dst')
     expect(existsSync(join(profiles(), 'dst', 'package.json'))).toBe(true)
     expect(existsSync(join(profiles(), 'dst', 'node_modules'))).toBe(false)
   })
 
   it('rejects missing source and invalid target', () => {
-    expect(() => cloneProfile('ghost', 'dst')).toThrow(/not found/)
-    expect(() => cloneProfile('src', 'Bad')).toThrow(/kebab-case/)
+    expect(() => cloneProfile(ctx(), 'ghost', 'dst')).toThrow(/not found/)
+    expect(() => cloneProfile(ctx(), 'src', 'Bad')).toThrow(/kebab-case/)
   })
 })
 
 describe('softDeleteProfile', () => {
   it('moves the profile into .trash', () => {
-    createProfile('gone')
-    softDeleteProfile('gone')
+    createProfile(ctx(), 'gone')
+    softDeleteProfile(ctx(), 'gone')
     expect(existsSync(join(profiles(), 'gone'))).toBe(false)
     expect(existsSync(join(profiles(), '.trash', 'gone'))).toBe(true)
   })
 
   it('auto-numbers a colliding trash name', () => {
-    createProfile('dup')
-    softDeleteProfile('dup')
-    createProfile('dup')
-    softDeleteProfile('dup')
+    createProfile(ctx(), 'dup')
+    softDeleteProfile(ctx(), 'dup')
+    createProfile(ctx(), 'dup')
+    softDeleteProfile(ctx(), 'dup')
     expect(existsSync(join(profiles(), '.trash', 'dup (2)'))).toBe(true)
   })
 })
 
 describe('removeBundle / reorderBundle', () => {
   it('removeBundle drops the layer and prunes with pnpm install', async () => {
-    createProfile('p')
+    createProfile(ctx(), 'p')
     const mp = join(profiles(), 'p', 'package.json')
     writeFileSync(mp, JSON.stringify({ dsh: { profile: { bundles: ['a', 'b'] } }, dependencies: { a: 'link:/x' } }))
-    await removeBundle('p', 'a')
+    await removeBundle(ctx(), 'p', 'a')
     const m = JSON.parse(readFileSync(mp, 'utf8'))
     expect(m.dsh.profile.bundles).toEqual(['b'])
     expect(m.dependencies).toEqual({})
@@ -130,37 +124,32 @@ describe('removeBundle / reorderBundle', () => {
   })
 
   it('removeBundle throws when the bundle is absent', async () => {
-    createProfile('p')
-    await expect(removeBundle('p', 'nope')).rejects.toThrow(/没有 bundle/)
+    createProfile(ctx(), 'p')
+    await expect(removeBundle(ctx(), 'p', 'nope')).rejects.toThrow(/没有 bundle/)
   })
 
   it('reorderBundle moves and clamps the index', () => {
-    createProfile('p')
+    createProfile(ctx(), 'p')
     const mp = join(profiles(), 'p', 'package.json')
     writeFileSync(mp, JSON.stringify({ dsh: { profile: { bundles: ['a', 'b', 'c'] } } }))
-    reorderBundle('p', 'a', 2)
+    reorderBundle(ctx(), 'p', 'a', 2)
     expect(JSON.parse(readFileSync(mp, 'utf8')).dsh.profile.bundles).toEqual(['b', 'c', 'a'])
-    reorderBundle('p', 'c', 99)
+    reorderBundle(ctx(), 'p', 'c', 99)
     expect(JSON.parse(readFileSync(mp, 'utf8')).dsh.profile.bundles).toEqual(['b', 'a', 'c'])
   })
 })
 
-describe('activeDshVersion', () => {
-  it('returns the active version, then "" when none is set', () => {
-    expect(activeDshVersion()).toBe('1.0.0')
-    saveSettings({ dshes: [], activeDshId: undefined })
-    expect(activeDshVersion()).toBe('')
-    saveSettings({
-      activeDshId: 'a',
-      dshes: [{ id: 'a', name: 'a', execPath: '/a', version: '2.0.0', home: home() }],
-    })
-    expect(activeDshVersion()).toBe('2.0.0')
+describe('listProfileSummaries', () => {
+  it('summarizes each profile with its bundle / plugin / patch counts', () => {
+    createProfile(ctx(), 'sum')
+    const list = listProfileSummaries(ctx())
+    expect(list).toEqual([{ name: 'sum', bundles: 1, plugins: 0, patchRows: 0 }])
   })
 })
 
 describe('exportProfile', () => {
   it('classifies bundles by source and strips link/file deps', () => {
-    createProfile('exp')
+    createProfile(ctx(), 'exp')
     writeFileSync(join(profiles(), 'exp', 'package.json'), JSON.stringify({
       name: 'dsh-profile-exp',
       dependencies: { npmA: '^1.0.0', locA: 'link:/x', plain: '^2.0.0' },
@@ -168,7 +157,7 @@ describe('exportProfile', () => {
     }))
     // locA is a real local plugin iff the store records a file:/link: dep for it.
     writeFileSync(join(store(), 'package.json'), JSON.stringify({ dependencies: { locA: 'link:/x' } }))
-    const out = JSON.parse(exportProfile('exp'))
+    const out = JSON.parse(exportProfile(ctx(), 'exp'))
     expect(out.schemaVersion).toBe(2)
     expect(out.bundles).toEqual([
       { name: 'tpl', source: 'dsh' },
@@ -177,12 +166,13 @@ describe('exportProfile', () => {
     ])
     // only non-bundle npm deps survive
     expect(out.dependencies).toEqual({ plain: '^2.0.0' })
+    expect(out.dshVersion).toBe('1.0.0')
   })
 })
 
 describe('listLocalBundles', () => {
   it('returns locally-linked bundles whose store dir exists', () => {
-    createProfile('p')
+    createProfile(ctx(), 'p')
     writeFileSync(join(profiles(), 'p', 'package.json'), JSON.stringify({
       dependencies: { locA: 'link:/x', npmA: '^1.0.0' },
       dsh: { profile: { bundles: ['locA', 'npmA'] } },
@@ -191,23 +181,23 @@ describe('listLocalBundles', () => {
     const locDir = join(store(), 'node_modules', 'locA')
     mkdirSync(locDir, { recursive: true })
     writeFileSync(join(locDir, 'package.json'), '{}')
-    const r = listLocalBundles('p', store())
+    const r = listLocalBundles(ctx(), 'p', store())
     expect(r).toEqual([{ name: 'locA', dir: locDir }])
   })
 })
 
 describe('importProfile', () => {
   it('rejects non-object / invalid input and a fresh-name clash', async () => {
-    await expect(importProfile('null')).rejects.toThrow(/不是对象/)
-    await expect(importProfile('["x"]')).rejects.toThrow(/不是对象/)
-    createProfile('taken')
+    await expect(importProfile(ctx(), 'null')).rejects.toThrow(/不是对象/)
+    await expect(importProfile(ctx(), '["x"]')).rejects.toThrow(/不是对象/)
+    createProfile(ctx(), 'taken')
     const good = JSON.stringify({ name: 'taken', bundles: [], dependencies: {}, userPatch: '' })
-    await expect(importProfile(good)).rejects.toThrow(/already exists/)
+    await expect(importProfile(ctx(), good)).rejects.toThrow(/already exists/)
   })
 
   it('refuses on a dsh major mismatch unless forced', async () => {
     const payload = JSON.stringify({ name: 'nou', dshVersion: '9.0.0', bundles: [], dependencies: {} })
-    const r = await importProfile(payload, { name: 'nou' })
+    const r = await importProfile(ctx(), payload, { name: 'nou' })
     expect(r.ok).toBe(false)
     expect('dshMismatch' in r && r.dshMismatch === true).toBe(true)
   })
@@ -216,7 +206,7 @@ describe('importProfile', () => {
     const payload = JSON.stringify({
       dshVersion: '1.0.0', bundles: [{ name: 'tpl', source: 'dsh' }], dependencies: {}, userPatch: '',
     })
-    const r = await importProfile(payload, { name: 'baseonly' })
+    const r = await importProfile(ctx(), payload, { name: 'baseonly' })
     expect(r.ok).toBe(true)
     expect('installed' in r && r.installed).toEqual([])
     expect(runPnpm).toHaveBeenCalledWith(join(profiles(), 'baseonly'), ['install', '--config.confirmModulesPurge=false'])
@@ -229,9 +219,9 @@ describe('importProfile', () => {
     const payload = JSON.stringify({
       dshVersion: '1.0.0', bundles: [{ name: 'npmA', source: 'npm', spec: '^1.0.0' }], dependencies: {},
     })
-    const r = await importProfile(payload, { name: 'reuse' })
+    const r = await importProfile(ctx(), payload, { name: 'reuse' })
     expect(addPlugin).not.toHaveBeenCalled()
-    expect(installIntoProfile).toHaveBeenCalledWith('reuse', 'npmA', store())
+    expect(installIntoProfile).toHaveBeenCalledWith(profiles(), 'reuse', 'npmA', store())
     expect('installed' in r && r.installed).toEqual(['npmA'])
   })
 
@@ -239,7 +229,7 @@ describe('importProfile', () => {
     const payload = JSON.stringify({
       dshVersion: '1.0.0', bundles: [{ name: 'fresh', source: 'npm', spec: '^3.0.0' }], dependencies: {},
     })
-    const r = await importProfile(payload, { name: 'dl' })
+    const r = await importProfile(ctx(), payload, { name: 'dl' })
     expect(addPlugin).toHaveBeenCalledWith(store(), 'fresh@^3.0.0')
     expect('ok' in r && r.ok).toBe(true)
   })
@@ -251,7 +241,7 @@ describe('importProfile', () => {
     const payload = JSON.stringify({
       dshVersion: '1.0.0', bundles: [{ name: 'locB', source: 'local' }], dependencies: {},
     })
-    const r = await importProfile(payload, { name: 'offline', localSource: join(root, 'bundle-src') })
+    const r = await importProfile(ctx(), payload, { name: 'offline', localSource: join(root, 'bundle-src') })
     expect(addLocalPlugin).toHaveBeenCalled()
     expect('ok' in r && r.ok).toBe(true)
   })
@@ -261,7 +251,7 @@ describe('importProfile', () => {
     const payload = JSON.stringify({
       dshVersion: '1.0.0', bundles: [{ name: 'flake', source: 'npm', spec: '^1.0.0' }], dependencies: {},
     })
-    const r = await importProfile(payload, { name: 'flakey' })
+    const r = await importProfile(ctx(), payload, { name: 'flakey' })
     expect(r).toMatchObject({ ok: true, installed: [], missing: ['flake'] })
   })
 })

@@ -12,7 +12,7 @@ import { listComboPlugins } from '../core/combo.ts'
 import {
   cancelPluginDownload, cleanupPluginDownloads, listPluginDownloads, onDownloadsChange, startPluginDownload,
 } from '../core/pluginDownloads.ts'
-import { dshScopes, pluginDir, readDshState } from '../core/appState.ts'
+import { contextForEntry, dshEntryById, dshScopes, pluginDir, profilesRootFor, type DshContext } from '../core/appState.ts'
 import { loadSettings, saveSettings } from '../core/settings.ts'
 import { inlineRelativeImages } from '../core/app-util.ts'
 import { fetchPackageVersions, npmSearch } from '../core/npm.ts'
@@ -54,6 +54,13 @@ export function setPluginStoreDir(dir: string): IpcResult<boolean> {
   } catch (error) {
     return fail(E.storeUnusable, { detail: String(error) })
   }
+}
+
+/** Resolve an explicit dsh id to its context, or `null` when unknown. */
+function ctxOf(dshId: unknown): DshContext | null {
+  if (typeof dshId !== 'string') return null
+  const entry = dshEntryById(dshId)
+  return entry === undefined ? null : contextForEntry(entry)
 }
 
 export function registerPluginsIpc(): void {
@@ -116,16 +123,14 @@ export function registerPluginsIpc(): void {
     }
   })
 
-  // Point a profile (under a chosen dsh) at a locally-downloaded plugin.
-  handle('plugins:installToProfile', async (_event, profile: string, pkg: string, version?: string, dshId?: string): Promise<IpcResult<string>> => {
+  // Point a profile (under an explicit dsh) at a locally-downloaded plugin.
+  handle('plugins:installToProfile', async (_event, dshId: string, profile: string, pkg: string, version?: string): Promise<IpcResult<string>> => {
     try {
+      const ctx = ctxOf(dshId)
+      if (ctx === null) return fail(E.dshNotFound)
       if (pathIdentifierInvalid(profile) || pathIdentifierInvalid(pkg)) return fail(E.nameInvalid)
       if (version !== undefined && versionInvalid(version)) return fail(E.nameInvalid)
-      const entry = dshId !== undefined ? readDshState().dshes.find(d => d.id === dshId) : undefined
-      const base = entry !== undefined && entry.profilesDir !== undefined
-        ? entry.profilesDir
-        : entry !== undefined ? join(entry.home, 'profiles') : undefined
-      const result = await installIntoProfile(profile, pkg, pluginDir(), base, { version })
+      const result = await installIntoProfile(profilesRootFor(ctx), profile, pkg, pluginDir(), { version })
       return result.ok ? { ok: true, value: result.text } : fail(E.storeOperationFailed, { detail: result.text })
     } catch (error) {
       return failFromError(error)
@@ -176,9 +181,11 @@ export function registerPluginsIpc(): void {
     }
   })
 
-  handle('plugins:listCombo', (_event, profile: string): IpcResult<ComboPlugin[]> => {
+  handle('plugins:listCombo', (_event, dshId: string, profile: string): IpcResult<ComboPlugin[]> => {
     try {
-      return { ok: true, value: listComboPlugins(profile) }
+      const ctx = ctxOf(dshId)
+      if (ctx === null) return fail(E.dshNotFound)
+      return { ok: true, value: listComboPlugins(ctx, profile) }
     } catch (error) {
       return failFromError(error)
     }

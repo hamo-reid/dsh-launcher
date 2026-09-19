@@ -22,8 +22,6 @@ export interface AppSettings {
   dshVersionDir?: string
   /** Registered dsh installs. */
   dshes?: DshEntry[]
-  /** The currently selected dsh entry id. */
-  activeDshId?: string
   /** Persisted UI language (`'zh'`/`'en'` …). */
   uiLanguage?: string
   /** Whether clicking close minimizes to the system tray instead of quitting.

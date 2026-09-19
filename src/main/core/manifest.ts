@@ -3,6 +3,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { profileDir } from './home.ts'
+import type { DshContext } from './appState.ts'
 
 interface ManifestShape {
   dependencies?: Record<string, string>
@@ -11,8 +12,8 @@ interface ManifestShape {
 }
 
 /** Read the manifest's ordered bundles and dependency names. */
-export function readManifest(name: string): { bundles: string[]; dependencies: string[]; displayName: string } {
-  const manifest = JSON.parse(readFileSync(join(profileDir(name), 'package.json'), 'utf8')) as ManifestShape
+export function readManifest(ctx: DshContext, name: string): { bundles: string[]; dependencies: string[]; displayName: string } {
+  const manifest = JSON.parse(readFileSync(join(profileDir(ctx, name), 'package.json'), 'utf8')) as ManifestShape
   return {
     bundles: manifest.dsh?.profile?.bundles ?? [],
     dependencies: Object.keys(manifest.dependencies ?? {}),

@@ -139,7 +139,7 @@ export default function RunsSection(): JSX.Element {
       if (!alive) return
       if (result.ok) {
         setDshes(result.value.dshes.map(d => ({ id: d.id, name: d.name })))
-        setDshId(result.value.activeDshId)
+        setDshId(prev => (prev !== undefined && result.value.dshes.some(d => d.id === prev)) ? prev : result.value.dshes[0]?.id)
       }
       setDshLoading(false)
     })

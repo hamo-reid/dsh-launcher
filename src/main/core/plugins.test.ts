@@ -26,8 +26,7 @@ import type { DshScope } from './appState.ts'
 
 let root: string
 const store = (): string => join(root, 'store')
-const scope = (id: string, home: string, profilesDir?: string): DshScope =>
-  ({ id, name: `dsh@${id}`, home, ...(profilesDir !== undefined ? { profilesDir } : {}) })
+const scope = (id: string, home: string): DshScope => ({ id, name: `dsh@${id}`, home })
 
 beforeAll(() => { root = mkdtempSync(join(tmpdir(), 'pm-plugins-')) })
 afterAll(() => rmSync(root, { recursive: true, force: true }))
@@ -379,9 +378,9 @@ describe('installSource (cancellation)', () => {
 
 describe('installIntoProfile', () => {
   it('rejects without a store or a missing profile', async () => {
-    const r1 = await installIntoProfile('prof', 'pkg', '')
+    const r1 = await installIntoProfile(join(root, 'profs'), 'prof', 'pkg', '')
     expect(r1.ok).toBe(false)
-    const r2 = await installIntoProfile('missing', 'pkg', store(), join(root, 'profs'))
+    const r2 = await installIntoProfile(join(root, 'profs'), 'missing', 'pkg', store())
     expect(r2.ok).toBe(false)
   })
 
@@ -390,7 +389,7 @@ describe('installIntoProfile', () => {
     seedVersion('pkg-a', '1.0.0')
     mkProfile(base, 'prof', {})
     vi.mocked(runPnpm).mockResolvedValueOnce({ ok: false, text: 'boom' })
-    const r = await installIntoProfile('prof', 'pkg-a', store(), base)
+    const r = await installIntoProfile(base, 'prof', 'pkg-a', store())
     expect(r.ok).toBe(false)
     expect(r.text).toContain('pnpm install 失败')
     const m = JSON.parse(readFileSync(join(base, 'prof', 'package.json'), 'utf8'))
@@ -401,7 +400,7 @@ describe('installIntoProfile', () => {
     const base = join(root, 'profs-2')
     seedVersion('orphan', '1.0.0')
     mkProfile(base, 'prof', {})
-    const r = await installIntoProfile('prof', 'orphan', store(), base)
+    const r = await installIntoProfile(base, 'prof', 'orphan', store())
     expect(r.ok).toBe(true)
     expect(r.activated).toBe(false)
     expect(r.text).toContain('file 依赖安装')
@@ -411,7 +410,7 @@ describe('installIntoProfile', () => {
     const base = join(root, 'profs-3')
     mkProfile(base, 'prof', { dsh: { profile: { bundles: [] } } })
     seedVersion('pkg-b', '1.0.0', { dsh: { bundle: { patch: 'x' } } })
-    const r = await installIntoProfile('prof', 'pkg-b', store(), base)
+    const r = await installIntoProfile(base, 'prof', 'pkg-b', store())
     expect(r.ok).toBe(true)
     expect(r.activated).toBe(true)
     const m = JSON.parse(readFileSync(join(base, 'prof', 'package.json'), 'utf8'))
@@ -422,7 +421,7 @@ describe('installIntoProfile', () => {
     const base = join(root, 'profs-4')
     mkProfile(base, 'prof', { dsh: { profile: { bundles: ['pkg-c'] } } })
     seedVersion('pkg-c', '1.0.0', { dsh: { bundle: { patch: 'x' } } })
-    const r = await installIntoProfile('prof', 'pkg-c', store(), base)
+    const r = await installIntoProfile(base, 'prof', 'pkg-c', store())
     expect(r.text).toContain('已在 bundle 层')
     expect(r.activated).toBe(true)
   })
@@ -442,7 +441,7 @@ describe('installIntoProfile', () => {
     const base = join(root, 'profs-aggr')
     mkProfile(base, 'prof', { dsh: { profile: { bundles: [] } } })
     seedAggr('- insert:\n    - id: a\n      name: \'sub-a\'\n- insert:\n    - id: b\n      name: \'sub-b\'\n', ['sub-a', 'sub-b'])
-    const r = await installIntoProfile('prof', 'aggr', store(), base)
+    const r = await installIntoProfile(base, 'prof', 'aggr', store())
     expect(r.ok).toBe(true)
     expect(r.activated).toBe(true)
     const m = JSON.parse(readFileSync(join(base, 'prof', 'package.json'), 'utf8'))
@@ -461,7 +460,7 @@ describe('installIntoProfile', () => {
       dependencies: { aggr: 'link:/old/store/aggr', 'sub-x': 'link:/old/store/sub-x' }, // simulated link-based install
       dsh: { profile: { bundles: ['aggr'] } },
     })
-    const r = await installIntoProfile('prof', 'aggr', store(), base)
+    const r = await installIntoProfile(base, 'prof', 'aggr', store())
     expect(r.text).toContain('已在 bundle 层')
     const m = JSON.parse(readFileSync(join(base, 'prof', 'package.json'), 'utf8'))
     expect(m.dependencies['aggr']).toBe(`file:${aggrDir()}`)
@@ -472,7 +471,7 @@ describe('installIntoProfile', () => {
     const base = join(root, 'profs-plain')
     mkProfile(base, 'prof', { dsh: { profile: { bundles: [] } } })
     seedVersion('pkg-d', '1.0.0', { dsh: { bundle: { patch: 'x' } } })
-    const r = await installIntoProfile('prof', 'pkg-d', store(), base)
+    const r = await installIntoProfile(base, 'prof', 'pkg-d', store())
     expect(r.activated).toBe(true)
     const m = JSON.parse(readFileSync(join(base, 'prof', 'package.json'), 'utf8'))
     expect(Object.keys(m.dependencies)).toEqual(['pkg-d']) // no sub-deps added
@@ -505,7 +504,7 @@ describe('legacy migration', () => {
     const profDir = join(home, 'profiles')
     mkProfile(profDir, 'prof', { dependencies: { app: `link:${join(store(), 'node_modules', 'app')}` } })
 
-    const spy = vi.spyOn(appStateModule, 'dshScopes').mockReturnValue([{ id: 'p', name: 'dsh@p', home, profilesDir: profDir } as DshScope])
+    const spy = vi.spyOn(appStateModule, 'dshScopes').mockReturnValue([{ id: 'p', name: 'dsh@p', home } as DshScope])
     try {
       mockSourceInstall()
       await addPlugin(store(), 'fresh@^0')

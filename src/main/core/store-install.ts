@@ -9,7 +9,6 @@ import { basename, dirname, join } from 'node:path'
 import AdmZip from 'adm-zip'
 import { runPnpm, type PnpmResult } from './pnpm.ts'
 import { logger } from './logger.ts'
-import { profilesDir } from './home.ts'
 import {
   archivedPluginNames, initStore, latestStoreVersion, pluginVersionDir, readVersion, storeVersions,
   versionStagingDir, versionsRoot, type ProfileManifestShape,
@@ -265,7 +264,7 @@ function targetVersionedPkgDir(storeDir: string, pkg: string, opts: { version?: 
  * would resolve those peers up the store tree and fail.
  */
 export async function installIntoProfile(
-  profile: string, pkg: string, storeDir: string, baseProfilesDir?: string,
+  profilesRoot: string, profile: string, pkg: string, storeDir: string,
   opts: { version?: string } = {},
 ): Promise<{ ok: boolean; text: string; activated: boolean }> {
   if (storeDir === '') return { ok: false, text: '未配置插件保存位置 —— 请在「设置」中指定', activated: false }
@@ -278,7 +277,7 @@ export async function installIntoProfile(
   if (pkgDir === null) {
     return { ok: false, text: `${pkg} 尚未在插件库中，请先下载再安装`, activated: false }
   }
-  const dir = join(baseProfilesDir ?? profilesDir(), profile)
+  const dir = join(profilesRoot, profile)
   const manifestPath = join(dir, 'package.json')
   if (!existsSync(manifestPath)) return { ok: false, text: `profile "${profile}" 不存在`, activated: false }
 

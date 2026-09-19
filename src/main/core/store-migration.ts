@@ -134,7 +134,7 @@ async function rewriteProfileLinks(storeDir: string, moves: { old: string; next:
   }
   const affected: string[] = []
   for (const dsh of scopes) {
-    const base = dsh.profilesDir ?? join(dsh.home, 'profiles')
+    const base = join(dsh.home, 'profiles')
     if (!existsSync(base)) continue
     for (const entry of readdirSync(base, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue

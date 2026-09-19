@@ -1,20 +1,22 @@
 /**
- * The soft-delete trash: `<profilesDir>/.trash`. Soft-deleted profiles land
+ * The soft-delete trash: `<home>/profiles/.trash`. Soft-deleted profiles land
  * here (see `softDeleteProfile`); this module lists them and provides the
  * recovery / permanent-delete / empty operations.
  *
- * Only the active dsh's trash is touched — it lives under its own `profilesDir`.
+ * Every operation is scoped to an explicit {@link DshContext} — there is no
+ * global active dsh, so a trash entry can never be recovered into the wrong one.
  */
 import { existsSync, readdirSync, readFileSync, rmSync, renameSync, statSync, utimesSync } from 'node:fs'
 import { join } from 'node:path'
 import { profilesDir } from './home.ts'
 import { parsePatchRows } from './patch.ts'
 import { logger } from './logger.ts'
+import type { DshContext } from './appState.ts'
 import type { TrashItem } from '../../shared/types.ts'
 
-/** The trash root for the active dsh. */
-export function trashDir(): string {
-  return join(profilesDir(), '.trash')
+/** The trash root for a dsh. */
+export function trashDir(ctx: DshContext): string {
+  return join(profilesDir(ctx), '.trash')
 }
 
 /** Recursively sum the byte size of a directory tree. */
@@ -36,13 +38,13 @@ interface ManifestShape {
 }
 
 /** One soft-deleted profile's on-disk directory. */
-function trashItemDir(name: string): string {
-  return join(trashDir(), name)
+function trashItemDir(ctx: DshContext, name: string): string {
+  return join(trashDir(ctx), name)
 }
 
 /** List every soft-deleted profile in the trash, newest-deleted first. */
-export function listTrashItems(): TrashItem[] {
-  const dir = trashDir()
+export function listTrashItems(ctx: DshContext): TrashItem[] {
+  const dir = trashDir(ctx)
   if (!existsSync(dir)) return []
   const items: TrashItem[] = []
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -89,11 +91,11 @@ function baseTrashName(name: string): string {
 /** Reserve a non-colliding trash name for a delete: `name` when free, else
  * `name (2)`, `name (3)`, … — so a delete always succeeds even when the trash
  * already holds a same-named profile. Throws only on pathological exhaustion. */
-export function uniqueTrashName(name: string): string {
-  if (!existsSync(trashItemDir(name))) return name
+export function uniqueTrashName(ctx: DshContext, name: string): string {
+  if (!existsSync(trashItemDir(ctx, name))) return name
   for (let i = 2; i <= 10000; i++) {
     const candidate = `${name} (${i})`
-    if (!existsSync(trashItemDir(candidate))) return candidate
+    if (!existsSync(trashItemDir(ctx, candidate))) return candidate
   }
   throw new Error(`回收站中同名项过多，无法为「${name}」分配编号。`)
 }
@@ -102,11 +104,11 @@ export function uniqueTrashName(name: string): string {
  * ` (n)`-suffixed trash entry is returned to its original kebab name so no
  * numbered folder leaks into the active list). Refuses when the base name is
  * already taken there (never overwrites). */
-export function restoreTrashItem(name: string): void {
-  const src = trashItemDir(name)
+export function restoreTrashItem(ctx: DshContext, name: string): void {
+  const src = trashItemDir(ctx, name)
   if (!existsSync(src)) throw new Error(`回收站中没有「${name}」`)
   const base = baseTrashName(name)
-  const dst = join(profilesDir(), base)
+  const dst = join(profilesDir(ctx), base)
   if (existsSync(dst)) throw new Error(`已有同名 profile「${base}」，请先处理再恢复。`)
   renameSync(src, dst)
   // Keep a consistent mtime after restore (a rotate/imported marker, not needed,
@@ -117,15 +119,15 @@ export function restoreTrashItem(name: string): void {
 }
 
 /** Permanently delete one soft-deleted profile from the trash. */
-export function deleteTrashItem(name: string): void {
-  rmSync(trashItemDir(name), { recursive: true, force: true })
+export function deleteTrashItem(ctx: DshContext, name: string): void {
+  rmSync(trashItemDir(ctx, name), { recursive: true, force: true })
   logger.info(`trash delete (permanent): ${name}`)
 }
 
 /** Permanently delete every entry in the trash; keeps the `.trash` dir itself.
  * Returns how many entries were removed. */
-export function emptyTrash(): number {
-  const dir = trashDir()
+export function emptyTrash(ctx: DshContext): number {
+  const dir = trashDir(ctx)
   if (!existsSync(dir)) return 0
   const names = readdirSync(dir, { withFileTypes: true })
     .filter(entry => entry.name !== '.' && entry.name !== '..')

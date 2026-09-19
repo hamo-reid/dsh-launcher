@@ -9,6 +9,7 @@ import { dshHome, homePatchPath, installAnchor, profileDir, profilesDir } from '
 import { readManifest } from './manifest.ts'
 import { extractKeyValue, parseClassifiedRows, parseNamedRows, parsePatchRows } from './patch.ts'
 import { child } from './logger.ts'
+import type { DshContext } from './appState.ts'
 import type { ComboPlugin, ProfileLayer } from '../../shared/types.ts'
 
 /** Domain-tagged logger for profile-composition work. */
@@ -20,13 +21,13 @@ export type { ComboPlugin } from '../../shared/types.ts'
 /** Locate a bundle package's `cordis.patch.yml`. Installation anchor comes
  * first — mirrors dsh's two-anchor resolution so in-box bundles are composed
  * from the same install the running dsh loads — then profile / shared fallback. */
-export function resolveBundlePatch(bundle: string, profile: string): string | undefined {
-  const anchor = installAnchor()
+export function resolveBundlePatch(ctx: DshContext, bundle: string, profile: string): string | undefined {
+  const anchor = installAnchor(ctx)
   const candidates = [
     ...(anchor !== undefined ? [join(anchor, 'node_modules', bundle, 'cordis.patch.yml')] : []),
-    join(profileDir(profile), 'node_modules', bundle, 'cordis.patch.yml'),
-    join(profilesDir(), 'node_modules', bundle, 'cordis.patch.yml'),
-    join(dshHome(), 'node_modules', bundle, 'cordis.patch.yml'),
+    join(profileDir(ctx, profile), 'node_modules', bundle, 'cordis.patch.yml'),
+    join(profilesDir(ctx), 'node_modules', bundle, 'cordis.patch.yml'),
+    join(dshHome(ctx), 'node_modules', bundle, 'cordis.patch.yml'),
   ]
   for (const path of candidates) {
     if (existsSync(path)) return path
@@ -35,8 +36,8 @@ export function resolveBundlePatch(bundle: string, profile: string): string | un
 }
 
 /** Read the profile's user patch rows (webapp on-disk or `[]`). */
-function readUserPatch(profile: string): string {
-  const path = join(profileDir(profile), 'cordis.patch.yml')
+function readUserPatch(ctx: DshContext, profile: string): string {
+  const path = join(profileDir(ctx, profile), 'cordis.patch.yml')
   return existsSync(path) ? readFileSync(path, 'utf8') : ''
 }
 
@@ -44,18 +45,18 @@ function readUserPatch(profile: string): string {
  * List every plugin the profile composes: its bundle rows in layer order, with
  * the effective disabled state resolved against the user patch overrides.
  */
-export function listComboPlugins(profile: string): ComboPlugin[] {
-  const { bundles } = readManifest(profile)
+export function listComboPlugins(ctx: DshContext, profile: string): ComboPlugin[] {
+  const { bundles } = readManifest(ctx, profile)
   const rows: ComboPlugin[] = []
   for (const bundle of bundles) {
-    const path = resolveBundlePatch(bundle, profile)
+    const path = resolveBundlePatch(ctx, bundle, profile)
     if (path === undefined) { cplog.debug('combo: bundle patch not found', { bundle, profile }); continue }
     for (const row of parseNamedRows(readFileSync(path, 'utf8'))) {
       rows.push({ id: row.id, name: row.name ?? '', bundle, disabled: row.disabled })
     }
   }
   const userDisabled = new Map(
-    parsePatchRows(readUserPatch(profile)).map(row => [row.id, row.disabled]),
+    parsePatchRows(readUserPatch(ctx, profile)).map(row => [row.id, row.disabled]),
   )
   for (const row of rows) {
     const override = userDisabled.get(row.id)
@@ -69,11 +70,11 @@ export function listComboPlugins(profile: string): ComboPlugin[] {
  * layer (in `dsh.profile.bundles` order), then the profile's own layer, then
  * the machine-level home layer. Used to render the layer-stack and trace which
  * source contributed (and possibly overrode) a given row id. */
-export function composeProfileLayers(profile: string): ProfileLayer[] {
+export function composeProfileLayers(ctx: DshContext, profile: string): ProfileLayer[] {
   const layers: ProfileLayer[] = []
-  const { bundles } = readManifest(profile)
+  const { bundles } = readManifest(ctx, profile)
   for (const bundle of bundles) {
-    const patchPath = resolveBundlePatch(bundle, profile)
+    const patchPath = resolveBundlePatch(ctx, bundle, profile)
     if (patchPath === undefined) continue
     layers.push({
       source: 'bundle',
@@ -81,11 +82,11 @@ export function composeProfileLayers(profile: string): ProfileLayer[] {
       rows: parseClassifiedRows(readFileSync(patchPath, 'utf8')),
     })
   }
-  const userText = readUserPatch(profile)
+  const userText = readUserPatch(ctx, profile)
   if (userText.trim() !== '') {
     layers.push({ source: 'profile', label: profile, rows: parseClassifiedRows(userText) })
   }
-  const homePath = homePatchPath()
+  const homePath = homePatchPath(ctx)
   if (existsSync(homePath)) {
     layers.push({ source: 'home', rows: parseClassifiedRows(readFileSync(homePath, 'utf8')) })
   }
@@ -93,13 +94,13 @@ export function composeProfileLayers(profile: string): ProfileLayer[] {
 }
 
 /** Whether a package (resolved from any node_modules root) declares `dsh.bundle`. */
-function declaresBundle(pkgName: string, profile: string): boolean {
+function declaresBundle(ctx: DshContext, pkgName: string, profile: string): boolean {
   const roots: string[] = []
-  const anchor = installAnchor()
+  const anchor = installAnchor(ctx)
   if (anchor !== undefined) roots.push(join(anchor, 'node_modules'))
-  roots.push(join(profileDir(profile), 'node_modules'))
-  roots.push(join(profilesDir(), 'node_modules'))
-  roots.push(join(dshHome(), 'node_modules'))
+  roots.push(join(profileDir(ctx, profile), 'node_modules'))
+  roots.push(join(profilesDir(ctx), 'node_modules'))
+  roots.push(join(dshHome(ctx), 'node_modules'))
   for (const root of roots) {
     const manifestPath = join(root, pkgName, 'package.json')
     if (!existsSync(manifestPath)) continue
@@ -120,8 +121,8 @@ function declaresBundle(pkgName: string, profile: string): boolean {
  * one. In-box template bundles are never dependencies, so they are untouched.
  * Mirrors the semantic of `dsh plugin`'s reconcile.
  */
-export function reconcileBundles(profile: string): { added: string[]; removed: string[] } {
-  const manifestPath = join(profileDir(profile), 'package.json')
+export function reconcileBundles(ctx: DshContext, profile: string): { added: string[]; removed: string[] } {
+  const manifestPath = join(profileDir(ctx, profile), 'package.json')
   if (!existsSync(manifestPath)) throw new Error(`profile "${profile}" 不存在`)
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
     dependencies?: Record<string, string>
@@ -134,14 +135,14 @@ export function reconcileBundles(profile: string): { added: string[]; removed: s
   for (const name of next) {
     // Only dependency-managed bundles can be dropped; in-box template bundles
     // are not dependencies and are never touched.
-    if (deps.includes(name) && !declaresBundle(name, profile)) {
+    if (deps.includes(name) && !declaresBundle(ctx, name, profile)) {
       next.splice(next.indexOf(name), 1)
       removed.push(name)
     }
   }
   const added: string[] = []
   for (const name of deps) {
-    if (!next.includes(name) && declaresBundle(name, profile)) {
+    if (!next.includes(name) && declaresBundle(ctx, name, profile)) {
       next.push(name)
       added.push(name)
     }
@@ -155,10 +156,10 @@ export function reconcileBundles(profile: string): { added: string[]; removed: s
 
 /** The `config` value a row id ships with, from the first bundle layer that
  * defines it. Empty string when no bundle declares that row's config. */
-export function defaultConfigText(profile: string, id: string): string {
-  const { bundles } = readManifest(profile)
+export function defaultConfigText(ctx: DshContext, profile: string, id: string): string {
+  const { bundles } = readManifest(ctx, profile)
   for (const bundle of bundles) {
-    const patchPath = resolveBundlePatch(bundle, profile)
+    const patchPath = resolveBundlePatch(ctx, bundle, profile)
     if (patchPath === undefined) continue
     const value = extractKeyValue(readFileSync(patchPath, 'utf8'), id, 'config')
     if (value !== undefined) return value
@@ -166,13 +167,13 @@ export function defaultConfigText(profile: string, id: string): string {
   return ''
 }
 
-export function listUnclaimedBundles(profile: string): string[] {
+export function listUnclaimedBundles(ctx: DshContext, profile: string): string[] {
   // Only packages actually declared as dependencies can be "installed but not
   // activated". A leftover link in node_modules with no dependency entry is a
   // prune concern, not an activation prompt — so it must not be reported.
-  const { bundles, dependencies } = readManifest(profile)
+  const { bundles, dependencies } = readManifest(ctx, profile)
   const claimed = new Set(bundles)
   return dependencies
-    .filter(dep => !claimed.has(dep) && declaresBundle(dep, profile))
+    .filter(dep => !claimed.has(dep) && declaresBundle(ctx, dep, profile))
     .sort()
 }

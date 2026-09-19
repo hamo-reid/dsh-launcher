@@ -31,7 +31,7 @@ export interface UseRuns {
   select: (id: string) => void
   /** Buffered console output for one run. */
   logsOf: (id: string) => string
-  start: (profile: string, mode?: RunMode, options?: LaunchOptions, dshId?: string, select?: boolean) => Promise<boolean>
+  start: (profile: string, mode: RunMode | undefined, options: LaunchOptions | undefined, dshId: string, select?: boolean) => Promise<boolean>
   /** Relaunch an exited run with its own dsh + mode and saved parameters. */
   restart: (run: RunInfo) => Promise<void>
   /** Return to the launcher view (no run selected). */
@@ -119,7 +119,7 @@ export function useRuns(): UseRuns {
     return () => { alive = false }
   }, [selectedId])
 
-  const start = async (profile: string, mode?: RunMode, options?: LaunchOptions, dshId?: string, select = true): Promise<boolean> => {
+  const start = async (profile: string, mode: RunMode | undefined, options: LaunchOptions | undefined, dshId: string, select = true): Promise<boolean> => {
     if (profile.trim() === '') return false
     const result = await window.api.run.start(profile, mode, options, dshId)
     if (!result.ok) { void message.error(apiErrorText(result)); return false }

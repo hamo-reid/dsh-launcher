@@ -43,26 +43,26 @@ import type {
 import type { WindowApi } from '../shared/api.ts'
 
 const api = {
-  listProfiles: (): Promise<IpcResult<string[]>> => ipcRenderer.invoke('profile:list'),
-  loadProfile: (name: string): Promise<IpcResult<ProfileDetail>> =>
-    ipcRenderer.invoke('profile:load', name),
-  setDisabled: (name: string, id: string, disabled: boolean): Promise<IpcResult<boolean>> =>
-    ipcRenderer.invoke('profile:setDisabled', name, id, disabled),
+  listProfiles: (dshId: string): Promise<IpcResult<string[]>> => ipcRenderer.invoke('profile:list', dshId),
+  loadProfile: (dshId: string, name: string): Promise<IpcResult<ProfileDetail>> =>
+    ipcRenderer.invoke('profile:load', dshId, name),
+  setDisabled: (dshId: string, name: string, id: string, disabled: boolean): Promise<IpcResult<boolean>> =>
+    ipcRenderer.invoke('profile:setDisabled', dshId, name, id, disabled),
 
-  listProfileSummaries: (): Promise<IpcResult<ProfileSummary[]>> => ipcRenderer.invoke('profile:summaries'),
-  createProfile: (name: string, template?: string): Promise<IpcResult<boolean>> =>
-    ipcRenderer.invoke('profile:create', name, template),
-  cloneProfile: (name: string, newName: string): Promise<IpcResult<boolean>> =>
-    ipcRenderer.invoke('profile:clone', name, newName),
-  deleteProfile: (name: string): Promise<IpcResult<boolean>> => ipcRenderer.invoke('profile:delete', name),
-  exportProfile: (name: string): Promise<IpcResult<string>> => ipcRenderer.invoke('profile:export', name),
-  exportToFile: (name: string, opts?: { zip?: boolean }): Promise<IpcResult<string>> =>
-    ipcRenderer.invoke('profile:exportToFile', name, opts),
-  localBundles: (name: string): Promise<IpcResult<string[]>> => ipcRenderer.invoke('profile:localBundles', name),
+  listProfileSummaries: (dshId: string): Promise<IpcResult<ProfileSummary[]>> => ipcRenderer.invoke('profile:summaries', dshId),
+  createProfile: (dshId: string, name: string, template?: string): Promise<IpcResult<boolean>> =>
+    ipcRenderer.invoke('profile:create', dshId, name, template),
+  cloneProfile: (dshId: string, name: string, newName: string): Promise<IpcResult<boolean>> =>
+    ipcRenderer.invoke('profile:clone', dshId, name, newName),
+  deleteProfile: (dshId: string, name: string): Promise<IpcResult<boolean>> => ipcRenderer.invoke('profile:delete', dshId, name),
+  exportProfile: (dshId: string, name: string): Promise<IpcResult<string>> => ipcRenderer.invoke('profile:export', dshId, name),
+  exportToFile: (dshId: string, name: string, opts?: { zip?: boolean }): Promise<IpcResult<string>> =>
+    ipcRenderer.invoke('profile:exportToFile', dshId, name, opts),
+  localBundles: (dshId: string, name: string): Promise<IpcResult<string[]>> => ipcRenderer.invoke('profile:localBundles', dshId, name),
   importFromFile: (): Promise<IpcResult<{ json: string; name: string; dshVersion: string; unpackDir: string }>> =>
     ipcRenderer.invoke('profile:importFromFile'),
-  importProfile: (json: string, name?: string, forceDsh?: boolean, localSource?: string): Promise<IpcResult<ImportProfileResult>> =>
-    ipcRenderer.invoke('profile:import', json, name, forceDsh, localSource),
+  importProfile: (dshId: string, json: string, name?: string, forceDsh?: boolean, localSource?: string): Promise<IpcResult<ImportProfileResult>> =>
+    ipcRenderer.invoke('profile:import', dshId, json, name, forceDsh, localSource),
   mirrorProfile: (sourceDshId: string, targetDshId: string, profileName: string): Promise<IpcResult<ImportProfileResult>> =>
     ipcRenderer.invoke('profile:mirror', sourceDshId, targetDshId, profileName),
   onImportEvent: (callback: (step: ImportStep) => void): (() => void) => {
@@ -70,36 +70,36 @@ const api = {
     ipcRenderer.on('import:event', handler)
     return () => { ipcRenderer.removeListener('import:event', handler) }
   },
-  missingBundles: (name: string): Promise<IpcResult<string[]>> =>
-    ipcRenderer.invoke('profile:missingBundles', name),
-  layers: (name: string): Promise<IpcResult<ProfileLayer[]>> =>
-    ipcRenderer.invoke('profile:layers', name),
-  addRow: (name: string, row: RowCreateInput): Promise<IpcResult<boolean>> =>
-    ipcRenderer.invoke('profile:addRow', name, row),
-  setRowConfig: (name: string, id: string, configText: string): Promise<IpcResult<boolean>> =>
-    ipcRenderer.invoke('profile:setRowConfig', name, id, configText),
-  removeRow: (name: string, id: string): Promise<IpcResult<boolean>> =>
-    ipcRenderer.invoke('profile:removeRow', name, id),
-  copyRow: (name: string, bundle: string, id: string): Promise<IpcResult<boolean>> =>
-    ipcRenderer.invoke('profile:copyRow', name, bundle, id),
-  removeBundle: (name: string, bundle: string): Promise<IpcResult<boolean>> =>
-    ipcRenderer.invoke('profile:removeBundle', name, bundle),
-  reorderBundles: (name: string, bundle: string, toIndex: number): Promise<IpcResult<boolean>> =>
-    ipcRenderer.invoke('profile:reorderBundle', name, bundle, toIndex),
-  reconcileBundles: (name: string): Promise<IpcResult<{ added: string[]; removed: string[] }>> =>
-    ipcRenderer.invoke('profile:reconcile', name),
-  configInfo: (name: string, id: string): Promise<IpcResult<{ default: string; current: string }>> =>
-    ipcRenderer.invoke('profile:configInfo', name, id),
-  openPatchSource: (name: string): Promise<IpcResult<boolean>> =>
-    ipcRenderer.invoke('profile:openPatchSource', name),
+  missingBundles: (dshId: string, name: string): Promise<IpcResult<string[]>> =>
+    ipcRenderer.invoke('profile:missingBundles', dshId, name),
+  layers: (dshId: string, name: string): Promise<IpcResult<ProfileLayer[]>> =>
+    ipcRenderer.invoke('profile:layers', dshId, name),
+  addRow: (dshId: string, name: string, row: RowCreateInput): Promise<IpcResult<boolean>> =>
+    ipcRenderer.invoke('profile:addRow', dshId, name, row),
+  setRowConfig: (dshId: string, name: string, id: string, configText: string): Promise<IpcResult<boolean>> =>
+    ipcRenderer.invoke('profile:setRowConfig', dshId, name, id, configText),
+  removeRow: (dshId: string, name: string, id: string): Promise<IpcResult<boolean>> =>
+    ipcRenderer.invoke('profile:removeRow', dshId, name, id),
+  copyRow: (dshId: string, name: string, bundle: string, id: string): Promise<IpcResult<boolean>> =>
+    ipcRenderer.invoke('profile:copyRow', dshId, name, bundle, id),
+  removeBundle: (dshId: string, name: string, bundle: string): Promise<IpcResult<boolean>> =>
+    ipcRenderer.invoke('profile:removeBundle', dshId, name, bundle),
+  reorderBundles: (dshId: string, name: string, bundle: string, toIndex: number): Promise<IpcResult<boolean>> =>
+    ipcRenderer.invoke('profile:reorderBundle', dshId, name, bundle, toIndex),
+  reconcileBundles: (dshId: string, name: string): Promise<IpcResult<{ added: string[]; removed: string[] }>> =>
+    ipcRenderer.invoke('profile:reconcile', dshId, name),
+  configInfo: (dshId: string, name: string, id: string): Promise<IpcResult<{ default: string; current: string }>> =>
+    ipcRenderer.invoke('profile:configInfo', dshId, name, id),
+  openPatchSource: (dshId: string, name: string): Promise<IpcResult<boolean>> =>
+    ipcRenderer.invoke('profile:openPatchSource', dshId, name),
 
   home: {
-    setDisabled: (id: string, disabled: boolean): Promise<IpcResult<boolean>> =>
-      ipcRenderer.invoke('home:setDisabled', id, disabled),
+    setDisabled: (dshId: string, id: string, disabled: boolean): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('home:setDisabled', dshId, id, disabled),
   },
 
   run: {
-    start: (profile: string, mode?: RunMode, options?: LaunchOptions, dshId?: string): Promise<IpcResult<{ id: string }>> =>
+    start: (profile: string, mode: RunMode | undefined, options: LaunchOptions | undefined, dshId: string): Promise<IpcResult<{ id: string }>> =>
       ipcRenderer.invoke('run:start', profile, mode, options, dshId),
     stop: (id: string): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('run:stop', id),
@@ -135,16 +135,16 @@ const api = {
       ipcRenderer.invoke('plugins:add', source, name),
     addLocal: (kind: 'folder' | 'zip'): Promise<IpcResult<string>> =>
       ipcRenderer.invoke('plugins:addLocal', kind),
-    installToProfile: (profile: string, pkg: string, version?: string, dshId?: string): Promise<IpcResult<string>> =>
-      ipcRenderer.invoke('plugins:installToProfile', profile, pkg, version, dshId),
+    installToProfile: (dshId: string, profile: string, pkg: string, version?: string): Promise<IpcResult<string>> =>
+      ipcRenderer.invoke('plugins:installToProfile', dshId, profile, pkg, version),
     installOptions: (): Promise<IpcResult<{ id: string; name: string; version?: string; profiles: string[] }[]>> =>
       ipcRenderer.invoke('plugins:installOptions'),
     remove: (name: string, version?: string): Promise<IpcResult<string>> =>
       ipcRenderer.invoke('plugins:remove', name, version),
     uninstall: (name: string): Promise<IpcResult<{ removed: PluginUsagePoint[] }>> =>
       ipcRenderer.invoke('plugins:uninstall', name),
-    listCombo: (profile: string): Promise<IpcResult<ComboPlugin[]>> =>
-      ipcRenderer.invoke('plugins:listCombo', profile),
+    listCombo: (dshId: string, profile: string): Promise<IpcResult<ComboPlugin[]>> =>
+      ipcRenderer.invoke('plugins:listCombo', dshId, profile),
     overview: (): Promise<IpcResult<InstalledOverviewRow[]>> =>
       ipcRenderer.invoke('plugins:overview'),
     calcSizes: (): Promise<IpcResult<Record<string, number>>> =>
@@ -212,18 +212,18 @@ const api = {
   },
 
   trash: {
-    list: (): Promise<IpcResult<TrashItem[]>> =>
-      ipcRenderer.invoke('trash:list'),
-    restore: (name: string): Promise<IpcResult<boolean>> =>
-      ipcRenderer.invoke('trash:restore', name),
-    delete: (name: string): Promise<IpcResult<boolean>> =>
-      ipcRenderer.invoke('trash:delete', name),
-    empty: (): Promise<IpcResult<number>> =>
-      ipcRenderer.invoke('trash:empty'),
+    list: (dshId: string): Promise<IpcResult<TrashItem[]>> =>
+      ipcRenderer.invoke('trash:list', dshId),
+    restore: (dshId: string, name: string): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('trash:restore', dshId, name),
+    delete: (dshId: string, name: string): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('trash:delete', dshId, name),
+    empty: (dshId: string): Promise<IpcResult<number>> =>
+      ipcRenderer.invoke('trash:empty', dshId),
   },
 
   dsh: {
-    list: (): Promise<IpcResult<{ dshes: DshEntry[]; activeDshId?: string }>> =>
+    list: (): Promise<IpcResult<{ dshes: DshEntry[] }>> =>
       ipcRenderer.invoke('dsh:list'),
     profiles: (id: string): Promise<IpcResult<DshProfileInfo[]>> =>
       ipcRenderer.invoke('dsh:profiles', id),
@@ -231,12 +231,8 @@ const api = {
       ipcRenderer.invoke('dsh:add', path),
     remove: (id: string, opts?: { deleteFiles?: boolean }): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('dsh:remove', id, opts),
-    setActive: (id: string): Promise<IpcResult<boolean>> =>
-      ipcRenderer.invoke('dsh:setActive', id),
     setHome: (id: string, home: string): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('dsh:setHome', id, home),
-    setProfileDir: (id: string, dir: string): Promise<IpcResult<boolean>> =>
-      ipcRenderer.invoke('dsh:setProfileDir', id, dir),
     installOfficial: (options?: { versionDir?: string; name?: string; version?: string; force?: boolean }): Promise<IpcResult<{ id: string }>> =>
       ipcRenderer.invoke('dsh:installOfficial', options),
     pkgVersions: (): Promise<IpcResult<PackageVersionInfo>> =>

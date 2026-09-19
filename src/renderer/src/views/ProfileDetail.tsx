@@ -18,6 +18,8 @@ import StatusTag from '../components/StatusTag.tsx'
 import { MODAL } from '../theme.ts'
 
 interface Props {
+  /** The dsh this profile belongs to (no global active dsh). */
+  dshId: string
   name: string
   /** Called after this view mutates profile config, so the owner can refresh
    * aggregate state (e.g. the "missing bundles" hint). */
@@ -32,7 +34,7 @@ interface Editor {
   overlap: string | null
 }
 
-export default function ProfileDetailView({ name, onChanged }: Props) {
+export default function ProfileDetailView({ dshId, name, onChanged }: Props) {
   const { t } = useTranslation()
   const { token } = theme.useToken()
 
@@ -72,8 +74,8 @@ const loadSeq = useRef(0)
     if (name === '') { setDetail(null); setLayers(null); setLoading(false); return }
     setLoading(true)
     const [detailRes, layersRes] = await Promise.all([
-      window.api.loadProfile(name),
-      window.api.layers(name),
+      window.api.loadProfile(dshId, name),
+      window.api.layers(dshId, name),
     ])
     if (seq !== loadSeq.current) return // a newer load superseded this one
     if (detailRes.ok) setDetail(detailRes.value)
@@ -87,7 +89,7 @@ const loadSeq = useRef(0)
     setLoading(true)
     if (name === '') { setLoading(false); return undefined }
     void load()
-  }, [name])
+  }, [name, dshId])
 
   const lastSeen = useMemo(() => {
     const map = new Map<string, string>()
@@ -100,13 +102,13 @@ const loadSeq = useRef(0)
   }, [layers, layerLabel])
 
   const toggleProfile = async (id: string, disabled: boolean): Promise<void> => {
-    const result = await window.api.setDisabled(name, id, disabled)
+    const result = await window.api.setDisabled(dshId, name, id, disabled)
     if (!result.ok) { void message.error(apiErrorText(result)); return }
     void load()
     onChanged?.()
   }
   const toggleHome = async (id: string, disabled: boolean): Promise<void> => {
-    const result = await window.api.home.setDisabled(id, disabled)
+    const result = await window.api.home.setDisabled(dshId, id, disabled)
     if (!result.ok) { void message.error(apiErrorText(result)); return }
     void load()
     onChanged?.()
@@ -120,7 +122,7 @@ const loadSeq = useRef(0)
     setCfgDefault('')
     setEditor({ id, kind, overlap })
     if (kind === 'config') {
-      void window.api.configInfo(name, id).then(result => {
+      void window.api.configInfo(dshId, name, id).then(result => {
         if (result.ok) {
           setCfgDefault(result.value.default)
           setEditText(result.value.current)
@@ -135,11 +137,11 @@ const loadSeq = useRef(0)
     let result
     if (editor.kind === 'config') {
       if (editText.trim() === '') { void message.warning(t('profile.detail.configEmpty')); setSaving(false); return }
-      result = await window.api.setRowConfig(name, editor.id, editText)
+      result = await window.api.setRowConfig(dshId, name, editor.id, editText)
     } else {
       const items = editText.split('\n').map(line => line.trim()).filter(Boolean)
       if (items.length === 0) { void message.warning(t('profile.detail.insertEmpty')); setSaving(false); return }
-      result = await window.api.addRow(name, { id: editor.id, insert: items })
+      result = await window.api.addRow(dshId, name, { id: editor.id, insert: items })
     }
     setSaving(false)
     if (!result.ok) { void message.error(apiErrorText(result)); return }
@@ -157,7 +159,7 @@ const loadSeq = useRef(0)
     const ins = newRowInsert.split('\n').map(line => line.trim()).filter(Boolean)
     if (cfg !== '') row.config = cfg
     else if (ins.length > 0) row.insert = ins
-    const result = await window.api.addRow(name, row)
+    const result = await window.api.addRow(dshId, name, row)
     if (!result.ok) { void message.error(apiErrorText(result)); return }
     setNewRowOpen(false)
     setNewRowId('')
@@ -175,7 +177,7 @@ const loadSeq = useRef(0)
       content: t('profile.detail.copyFromBundlePrompt', { id }),
       okText: t('profile.create.create'),
       onOk: async () => {
-        const result = await window.api.copyRow(name, bundle, id)
+        const result = await window.api.copyRow(dshId, name, bundle, id)
         if (!result.ok) return void message.error(apiErrorText(result))
         void load()
         void message.success(t('profile.detail.coverCreated'))
@@ -190,7 +192,7 @@ const loadSeq = useRef(0)
       okText: t('profile.detail.remove'),
       okButtonProps: { danger: true },
       onOk: async () => {
-        const result = await window.api.removeRow(name, id)
+        const result = await window.api.removeRow(dshId, name, id)
         if (!result.ok) return void message.error(apiErrorText(result))
         void load()
         void message.success(t('profile.detail.coverRemoved'))
@@ -201,7 +203,7 @@ const loadSeq = useRef(0)
 
   const reconcileNow = async (): Promise<void> => {
     setReconciling(true)
-    const result = await window.api.reconcileBundles(name)
+    const result = await window.api.reconcileBundles(dshId, name)
     setReconciling(false)
     if (!result.ok) { void message.error(apiErrorText(result)); return }
     const { added, removed } = result.value
@@ -213,7 +215,7 @@ const loadSeq = useRef(0)
 
   // Open this profile's cordis.patch.yml in the OS default editor (for hand-editing / repair).
   const openPatchSource = async (): Promise<void> => {
-    const result = await window.api.openPatchSource(name)
+    const result = await window.api.openPatchSource(dshId, name)
     if (!result.ok) void message.error(apiErrorText(result))
   }
 
@@ -224,7 +226,7 @@ const loadSeq = useRef(0)
       okText: t('profile.detail.remove'),
       okButtonProps: { danger: true },
       onOk: async () => {
-        const result = await window.api.removeBundle(name, bundle)
+        const result = await window.api.removeBundle(dshId, name, bundle)
         if (!result.ok) return void message.error(apiErrorText(result))
         void load()
         onChanged?.()
@@ -248,7 +250,7 @@ const loadSeq = useRef(0)
     // the profile summary is unchanged by a reorder.
     setDetail(prev => (prev !== null ? { ...prev, bundles: next } : prev))
     void (async () => {
-      const result = await window.api.reorderBundles(name, String(active.id), to)
+      const result = await window.api.reorderBundles(dshId, name, String(active.id), to)
       if (result.ok) return
       void message.error(apiErrorText(result))
       void load()
