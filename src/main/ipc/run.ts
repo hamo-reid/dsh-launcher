@@ -78,6 +78,11 @@ function toInfo(run: RuntimeState): RunInfo {
 }
 
 /** Snapshot of every live run (serializable; no child handles, no logs). */
+/** Whether a (dsh, profile) currently has a live runtime — a rename guard. */
+export function isProfileRunning(dshId: string, profile: string): boolean {
+  return hasRun([...runs.values()], dshId, profile)
+}
+
 export function listRuns(): RunInfo[] {
   return [...runs.values()].map(toInfo)
 }

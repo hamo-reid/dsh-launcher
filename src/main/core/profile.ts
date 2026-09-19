@@ -212,6 +212,25 @@ export function addBundle(ctx: DshContext, profile: string, pkg: string): void {
   logger.info(`bundle activated: ${profile} · ${pkg}`)
 }
 
+/** Rename a profile's directory. Refuses a reserved or colliding name; keeps the
+ * conventional `dsh-profile-<name>` manifest name in step. Callers must refuse a
+ * profile with a live runtime (a rename would invalidate its launch). */
+export function renameProfile(ctx: DshContext, oldName: string, newName: string): void {
+  assertCustomProfileName(newName)
+  const root = profilesRootFor(ctx)
+  const src = join(root, oldName)
+  const dst = join(root, newName)
+  if (!existsSync(src)) throw new Error(`profile "${oldName}" not found`)
+  if (existsSync(dst)) throw new Error(`profile "${newName}" already exists`)
+  renameSync(src, dst)
+  const manifest = readRawManifest(dst)
+  if (manifest.name === `dsh-profile-${oldName}`) {
+    manifest.name = `dsh-profile-${newName}`
+    writeRawManifest(dst, manifest)
+  }
+  logger.info(`profile renamed: ${oldName} → ${newName}`)
+}
+
 /** Official profile templates offered by the "create from template" dialog. */
 export const PROFILE_TEMPLATES: Record<string, string[]> = {
   base: ['@deepseek-ai/dsh-base'],

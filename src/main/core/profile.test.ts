@@ -28,8 +28,8 @@ import { openDatabase, saveSettings } from './settings.ts'
 import { contextForEntry } from './appState.ts'
 import {
   addBundle, cloneProfile, createProfile, exportProfile, importProfile,
-  listLocalBundles, listProfileSummaries, readProfileFile, removeBundle, removeDependency, reorderBundle,
-  setDependency, setManifestMeta, softDeleteProfile, writeProfileFile,
+  listLocalBundles, listProfileSummaries, readProfileFile, removeBundle, removeDependency, renameProfile,
+  reorderBundle, setDependency, setManifestMeta, softDeleteProfile, writeProfileFile,
 } from './profile.ts'
 
 let root: string
@@ -226,6 +226,23 @@ describe('addBundle', () => {
   it('refuses a package with no resolvable patch', () => {
     createProfile(ctx(), 'p')
     expect(() => addBundle(ctx(), 'p', 'ghost')).toThrow(/找不到/)
+  })
+})
+
+describe('renameProfile', () => {
+  it('renames the directory and keeps the conventional manifest name', () => {
+    createProfile(ctx(), 'old')
+    renameProfile(ctx(), 'old', 'new')
+    expect(existsSync(join(profiles(), 'old'))).toBe(false)
+    const manifest = JSON.parse(readFileSync(join(profiles(), 'new', 'package.json'), 'utf8'))
+    expect(manifest.name).toBe('dsh-profile-new')
+  })
+
+  it('refuses a reserved name or a collision', () => {
+    createProfile(ctx(), 'old')
+    createProfile(ctx(), 'taken')
+    expect(() => renameProfile(ctx(), 'old', 'web')).toThrow(/reserved/)
+    expect(() => renameProfile(ctx(), 'old', 'taken')).toThrow(/already exists/)
   })
 })
 

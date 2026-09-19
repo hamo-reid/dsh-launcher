@@ -19,13 +19,14 @@ import {
 } from '../core/combo.ts'
 import {
   addBundle, cloneProfile, createProfile, exportProfile, importProfile, listLocalBundles, listProfileSummaries,
-  mirrorProfile, PROFILE_TEMPLATES, readProfileFile, removeBundle, removeDependency, reorderBundle,
+  mirrorProfile, PROFILE_TEMPLATES, readProfileFile, removeBundle, removeDependency, renameProfile, reorderBundle,
   setDependency, setManifestMeta, softDeleteProfile, writeProfileFile, type ProfileSummary,
 } from '../core/profile.ts'
 import { contextForEntry, dshEntryById, pluginDir, type DshContext } from '../core/appState.ts'
 import { addDirToZip, dedentRowBlock, verifyDisabledState } from '../core/app-util.ts'
 import { fail, E } from '../core/errors.ts'
 import { handle } from './handle.ts'
+import { isProfileRunning } from './run.ts'
 import { pathIdentifierInvalid, pathOutsideRoot, rowIdInvalid } from './validate.ts'
 import type {
   ImportProfileResult, InsertConflict, IpcResult, ProfileDetail, ProfileFileKind, ProfileLayer,
@@ -383,6 +384,16 @@ export function registerProfileIpc(): void {
     if (ctx === null) return fail(E.dshNotFound)
     if (invalidName(name) || invalidName(pkg)) return fail(E.nameInvalid)
     addBundle(ctx, name, pkg)
+    return { ok: true, value: true }
+  })
+
+  // Rename a profile's directory (refused while its runtime is live).
+  handle('profile:rename', (_event, dshId: string, oldName: string, newName: string): IpcResult<boolean> => {
+    const ctx = ctxOf(dshId)
+    if (ctx === null) return fail(E.dshNotFound)
+    if (invalidName(oldName) || invalidName(newName)) return fail(E.nameInvalid)
+    if (isProfileRunning(dshId, oldName)) return fail(E.runAlreadyRunning, { profile: oldName })
+    renameProfile(ctx, oldName, newName)
     return { ok: true, value: true }
   })
 

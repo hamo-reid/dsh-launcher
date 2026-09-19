@@ -344,7 +344,7 @@ export default function ProfileSection() {
             />
           )}
           {selected !== null && dshId !== undefined
-            ? <ProfileDetailView dshId={dshId} name={selected} onChanged={() => { if (selected !== null) loadMissing(selected); void refresh() }} />
+            ? <ProfileDetailView dshId={dshId} name={selected} onRenamed={newName => { setSelected(newName); void refresh() }} onChanged={() => { if (selected !== null) loadMissing(selected); void refresh() }} />
             : <EmptyState title={t('profile.selectProfile')} description={t('profile.selectProfileDesc')} />}
         </div>
       </div>

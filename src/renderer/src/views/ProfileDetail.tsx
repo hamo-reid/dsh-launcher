@@ -27,6 +27,8 @@ interface Props {
   /** Called after this view mutates profile config, so the owner can refresh
    * aggregate state (e.g. the "missing bundles" hint). */
   onChanged?: () => void
+  /** Called after a successful directory rename, with the new profile name. */
+  onRenamed?: (newName: string) => void
 }
 
 type EditKind = 'config' | 'insert'
@@ -40,7 +42,7 @@ interface Editor {
   overlap: string | null
 }
 
-export default function ProfileDetailView({ dshId, name, onChanged }: Props) {
+export default function ProfileDetailView({ dshId, name, onChanged, onRenamed }: Props) {
   const { t } = useTranslation()
   const { token } = theme.useToken()
 
@@ -85,6 +87,11 @@ export default function ProfileDetailView({ dshId, name, onChanged }: Props) {
   // Bundle activation: installed-but-inactive bundles offered for activation.
   const [candidates, setCandidates] = useState<string[]>([])
   const [addBundlePkg, setAddBundlePkg] = useState<string>()
+
+  // Rename.
+  const [renameOpen, setRenameOpen] = useState(false)
+  const [renameValue, setRenameValue] = useState('')
+  const [renaming, setRenaming] = useState(false)
 
   const [newRowOpen, setNewRowOpen] = useState(false)
   const [newRowId, setNewRowId] = useState('')
@@ -426,6 +433,18 @@ const loadSeq = useRef(0)
     onChanged?.()
   }
 
+  const doRename = async (): Promise<void> => {
+    const target = renameValue.trim()
+    if (target === '' || target === name) { setRenameOpen(false); return }
+    setRenaming(true)
+    const result = await window.api.rename(dshId, name, target)
+    setRenaming(false)
+    if (!result.ok) { void message.error(apiErrorText(result)); return }
+    setRenameOpen(false)
+    void message.success(t('profile.workspace.renamed', { name: target }))
+    onRenamed?.(target)
+  }
+
   const removeBundleRow = (bundle: string): void => {
     Modal.confirm({
       title: t('profile.detail.removeBundle'),
@@ -544,6 +563,7 @@ const loadSeq = useRef(0)
       <SectionHeading title={t('profile.detail.overview')} extra={(
         <Space size={8}>
           <Button size="small" onClick={revalidate} loading={validating}>{t('profile.workspace.validate')}</Button>
+          <Button size="small" onClick={() => { setRenameValue(name); setRenameOpen(true) }}>{t('profile.workspace.rename')}</Button>
           <Button size="small" icon={<CodeOutlined />} onClick={() => void openSource()}>{t('profile.detail.sourceEdit')}</Button>
           <Button size="small" icon={<FileTextOutlined />} onClick={() => void openPatchSource()}>{t('profile.detail.openPatchSource')}</Button>
           <Button size="small" onClick={() => void reconcileNow()} loading={reconciling}>{t('profile.detail.reconcile')}</Button>
@@ -790,6 +810,11 @@ const loadSeq = useRef(0)
               <CodeEditor value={sourceText} language="yaml" onChange={setSourceText} height={420} />
             </Suspense>
           )}
+      </Modal>
+
+      <Modal title={t('profile.workspace.renameTitle')} open={renameOpen} okText={t('common.save')} onOk={() => void doRename()} onCancel={() => setRenameOpen(false)} confirmLoading={renaming} width={MODAL.narrow} destroyOnHidden>
+        <FieldLabel>{t('profile.workspace.renameLabel')}</FieldLabel>
+        <Input value={renameValue} onChange={e => setRenameValue(e.target.value)} onPressEnter={() => void doRename()} placeholder={t('profile.create.namePlaceholder')} />
       </Modal>
     </div>
     </Loadable>
