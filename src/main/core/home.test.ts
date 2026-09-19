@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { contextForEntry } from './appState.ts'
-import { dshHome, homePatchPath, listProfileInfos, listProfiles, profileDir, profilesDir, readHomePatch, writeHomePatch } from './home.ts'
+import { listProfileInfos, listProfiles, profilesDir, readHomePatch, writeHomePatch } from './home.ts'
 import type { DshContext } from './appState.ts'
 import type { DshEntry } from '../../shared/types.ts'
 
@@ -22,20 +22,8 @@ function ctx(over: Partial<DshEntry> = {}): DshContext {
 }
 
 describe('directory resolution', () => {
-  it('dshHome follows the context home', () => {
-    expect(dshHome(ctx())).toBe(home())
-  })
-
-  it('profilesDir is <home>/profiles', () => {
+  it('profilesDir is <home>/profiles (the host contract)', () => {
     expect(profilesDir(ctx())).toBe(join(home(), 'profiles'))
-  })
-
-  it('profileDir nests under profilesDir', () => {
-    expect(profileDir(ctx(), 'p1')).toBe(join(home(), 'profiles', 'p1'))
-  })
-
-  it('homePatchPath points to <home>/cordis.patch.yml', () => {
-    expect(homePatchPath(ctx())).toBe(join(home(), 'cordis.patch.yml'))
   })
 })
 

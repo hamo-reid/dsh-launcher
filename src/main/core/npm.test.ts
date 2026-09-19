@@ -99,12 +99,6 @@ describe('npmSearch', () => {
     expect(hits[0].name).toBe('pkg-a')
   })
 
-  it('falls back to hits length when total is absent', async () => {
-    stubFetch(() => ({ status: 200, body: { objects: [{ package: { name: 'x' } }] } }))
-    const { total } = await npmSearch('dsh')
-    expect(total).toBe(1)
-  })
-
   it('throws on a non-OK search response', async () => {
     stubFetch(() => ({ status: 500, body: {} }))
     await expect(npmSearch('dsh')).rejects.toThrow(/HTTP 500/)

@@ -1,7 +1,7 @@
 /**
- * Size statistics for the installed-plugin overview: `dirUniqueBytes` dedupes hard
- * links (same inode counted once) and skips symlink/junction entries, so the
- * figure reflects real on-disk usage, not the inflated logical sum.
+ * Installed-plugin overview: `dirUniqueBytes` size statistics (hard-link dedupe,
+ * symlink/junction skip) and the provenance classification
+ * (official / store / local-link / external / sub-bundle).
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { linkSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'

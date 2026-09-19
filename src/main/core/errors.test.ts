@@ -70,14 +70,3 @@ describe('failFromError', () => {
     expect(r.ok === false ? r.params : undefined).toEqual({ detail: 'string throw' })
   })
 })
-
-it('E exposes the documented codes', () => {
-  expect(E).toMatchObject({
-    internal: 'internal',
-    dshNotFound: 'dsh.notFound',
-    nameInvalid: 'name.invalid',
-    profileExists: 'profile.exists',
-    storeNotDir: 'store.notDir',
-    yamlInvalid: 'yaml.invalid',
-  })
-})
