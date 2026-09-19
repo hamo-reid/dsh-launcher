@@ -231,6 +231,7 @@ export default function ProfileSection() {
     <>
     <AppShell
       flush
+      contentBg={token.colorBgContainer}
       sider={
         <>
           <div style={{ padding: '8px 12px' }}>
@@ -313,7 +314,7 @@ export default function ProfileSection() {
       }
     >
       {view === 'profiles' && (
-      <div style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: LAYOUT.pagePaddingLG }}>
+      <div style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: LAYOUT.pagePaddingLG, background: token.colorBgContainer }}>
         {/* Detail only — running a profile and its console now live on the Run
             page (`RunsSection`); this page is pure profile management. */}
         {selected !== null && dshId !== undefined
