@@ -18,8 +18,20 @@ Built with Electron, React and Ant Design.
   soft-delete to a recoverable trash, and export/import as portable JSON.
   Every profile is a self-contained dsh instance built from *bundle layers*
   plus your own *patch layer*.
+- **Profile workspace** — A three-pane editor per profile: review the composed
+  layer stack, edit the patch source (Monaco), dependencies and manifest
+  metadata, activate installed bundles, and run composition / insert-conflict
+  diagnostics before launch. Rename profiles, and copy or move a patch layer
+  between them.
 - **Plugin store** — Browse and search plugins on the npm registry, pick a
   version, and install into a profile. Local-folder plugins are supported too.
+- **Plugin classification** — Every plugin is classified by role (built-in /
+  bundle / dependency / store-only) and management source (store / official /
+  sub-bundle / local link / external). A card-grid overview with remembered
+  multi-condition filters, sorting and search keeps a growing library navigable.
+- **Plugin updates & maintenance** — Check npm (and GitHub) for newer versions
+  and apply them per profile; migrate a deprecated plugin to its replacement;
+  garbage-collect unused archived versions.
 - **Multi-version store & download center** — Every downloaded plugin version is
   archived in its own versioned directory, so one plugin can keep many versions
   at once; an in-app download center tracks running/cancelled installs.
@@ -35,9 +47,14 @@ Built with Electron, React and Ant Design.
 - **Data export / migration** — Export a dsh's profiles and home data to a zip,
   restore from an archive, or migrate directly between installed versions.
 - **Run, console & tray** — Launch a profile's dsh and watch its output in an
-  embedded terminal console; the tray shows live run status and elapsed time.
-  Closing the window asks whether to minimize to the tray or quit (with a
-  "don't ask again" option) instead of silently killing a running profile.
+  embedded terminal console; several profiles can run in parallel, each with its
+  own saved launch mode and parameters. The tray shows live run status and
+  elapsed time; closing the window asks whether to minimize to the tray or quit
+  (with a "don't ask again" option) instead of silently killing a running
+  profile.
+- **Settings & data safety** — Settings persist atomically (schema-versioned and
+  split across preferences / registry / launch rows) with corruption self-heal
+  and a `.bak` recovery file; export and import your settings from Settings.
 - **Safe trash** — Deleted profiles go to `.trash` (auto-numbered); nothing is
   destroyed until you empty it.
 - **Dual theme & bilingual UI** — Light/dark themes (follows system), and
