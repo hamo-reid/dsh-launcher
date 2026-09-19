@@ -35,6 +35,7 @@ import type {
   ProfileDetail,
   ProfileFileKind,
   ProfileLayer,
+  ProfilePatchReload,
   ProfileSummary,
   ProfileValidation,
   RowCreateInput,
@@ -76,6 +77,11 @@ export interface WindowApi {
   writeFile: (dshId: string, name: string, kind: ProfileFileKind, text: string) => Promise<IpcResult<boolean>>
   /** Pre-launch composition check: parse, layers, conflicts and bundles. */
   validate: (dshId: string, name: string) => Promise<IpcResult<ProfileValidation>>
+  /** Add/update a dependency (installs + reconciles bundle layers). */
+  setDependency: (dshId: string, name: string, pkg: string, spec: string) => Promise<IpcResult<boolean>>
+  removeDependency: (dshId: string, name: string, pkg: string) => Promise<IpcResult<boolean>>
+  /** Update the manifest's display name and/or patch-file lifecycle. */
+  setManifest: (dshId: string, name: string, meta: { displayName?: string; patchReload?: ProfilePatchReload }) => Promise<IpcResult<boolean>>
   addRow: (dshId: string, name: string, row: RowCreateInput) => Promise<IpcResult<boolean>>
   setRowConfig: (dshId: string, name: string, id: string, configText: string) => Promise<IpcResult<boolean>>
   removeRow: (dshId: string, name: string, id: string) => Promise<IpcResult<boolean>>

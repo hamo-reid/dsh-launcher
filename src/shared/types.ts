@@ -163,6 +163,12 @@ export interface ProfileDetail {
   bundles: string[]
   /** Profile manifest `dependencies` (package names). */
   dependencies: string[]
+  /** Manifest `dependencies` with their version/source specs, for editing. */
+  dependencySpecs: Record<string, string>
+  /** Manifest display name (`name`), falling back to the profile name. */
+  displayName: string
+  /** Manifest `dsh.profile.patchReload`, defaulting to `live`. */
+  patchReload: ProfilePatchReload
   /** The profile's own user-patch rows (from its `cordis.patch.yml`). */
   rows: PluginRow[]
   /** The profile's `cordis.patch.yml` content (view-only). */

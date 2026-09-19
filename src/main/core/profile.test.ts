@@ -28,8 +28,8 @@ import { openDatabase, saveSettings } from './settings.ts'
 import { contextForEntry } from './appState.ts'
 import {
   cloneProfile, createProfile, exportProfile, importProfile,
-  listLocalBundles, listProfileSummaries, readProfileFile, removeBundle, reorderBundle, softDeleteProfile,
-  writeProfileFile,
+  listLocalBundles, listProfileSummaries, readProfileFile, removeBundle, removeDependency, reorderBundle,
+  setDependency, setManifestMeta, softDeleteProfile, writeProfileFile,
 } from './profile.ts'
 
 let root: string
@@ -180,6 +180,34 @@ describe('profile files (source mode)', () => {
     writeProfileFile(ctx(), 'p', 'patch', '- id: a\n')
     expect(readProfileFile(ctx(), 'p', 'patch').text).toBe('- id: a\n')
     expect(() => writeProfileFile(ctx(), 'p', 'patch', 'id: a\n')).toThrow(/顶层/)
+  })
+})
+
+describe('dependencies / manifest meta', () => {
+  it('sets and removes a dependency, pruning with pnpm install', async () => {
+    createProfile(ctx(), 'p')
+    await setDependency(ctx(), 'p', 'left-pad', '^1.3.0')
+    let manifest = JSON.parse(readFileSync(join(profiles(), 'p', 'package.json'), 'utf8'))
+    expect(manifest.dependencies['left-pad']).toBe('^1.3.0')
+    expect(runPnpm).toHaveBeenCalledWith(join(profiles(), 'p'), ['install', '--config.confirmModulesPurge=false'])
+
+    await removeDependency(ctx(), 'p', 'left-pad')
+    manifest = JSON.parse(readFileSync(join(profiles(), 'p', 'package.json'), 'utf8'))
+    expect(manifest.dependencies['left-pad']).toBeUndefined()
+  })
+
+  it('rejects a bad package name or an empty spec', async () => {
+    createProfile(ctx(), 'p')
+    await expect(setDependency(ctx(), 'p', 'bad name', '^1')).rejects.toThrow(/包名/)
+    await expect(setDependency(ctx(), 'p', 'ok', '  ')).rejects.toThrow(/来源/)
+  })
+
+  it('updates display name and patchReload', () => {
+    createProfile(ctx(), 'p')
+    setManifestMeta(ctx(), 'p', { displayName: 'My Profile', patchReload: 'startup' })
+    const manifest = JSON.parse(readFileSync(join(profiles(), 'p', 'package.json'), 'utf8'))
+    expect(manifest.name).toBe('My Profile')
+    expect(manifest.dsh.profile.patchReload).toBe('startup')
   })
 })
 

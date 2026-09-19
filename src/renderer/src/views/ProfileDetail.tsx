@@ -1,6 +1,6 @@
 import { cloneElement, lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Alert, Button, Input, List, Modal, Select, Space, Tag, theme, message,
+  Alert, Button, Input, Modal, Select, Space, Tag, theme, message,
 } from 'antd'
 import { FileTextOutlined, CodeOutlined } from '@ant-design/icons'
 import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core'
@@ -73,6 +73,15 @@ export default function ProfileDetailView({ dshId, name, onChanged }: Props) {
   const [validation, setValidation] = useState<ProfileValidation | null>(null)
   const [validating, setValidating] = useState(false)
 
+  // Dependency editing + manifest metadata.
+  const [depEdits, setDepEdits] = useState<Record<string, string>>({})
+  const [newDepPkg, setNewDepPkg] = useState('')
+  const [newDepSpec, setNewDepSpec] = useState('')
+  const [depBusy, setDepBusy] = useState(false)
+  const [metaName, setMetaName] = useState('')
+  const [metaReload, setMetaReload] = useState<'live' | 'startup'>('live')
+  const [metaBusy, setMetaBusy] = useState(false)
+
   const [newRowOpen, setNewRowOpen] = useState(false)
   const [newRowId, setNewRowId] = useState('')
   const [newRowDisabled, setNewRowDisabled] = useState(false)
@@ -107,7 +116,11 @@ const loadSeq = useRef(0)
       window.api.conflicts(dshId, name),
     ])
     if (seq !== loadSeq.current) return // a newer load superseded this one
-    if (detailRes.ok) setDetail(detailRes.value)
+    if (detailRes.ok) {
+      setDetail(detailRes.value)
+      setMetaName(detailRes.value.displayName)
+      setMetaReload(detailRes.value.patchReload)
+    }
     if (layersRes.ok) setLayers(layersRes.value)
     if (conflictsRes.ok) setConflicts(conflictsRes.value)
     setLoading(false)
@@ -339,6 +352,62 @@ const loadSeq = useRef(0)
     })
   }
 
+  const dependencySpecs = detail?.dependencySpecs ?? {}
+
+  const saveDependency = async (pkg: string): Promise<void> => {
+    const spec = (depEdits[pkg] ?? dependencySpecs[pkg] ?? '').trim()
+    if (spec === '') { void message.warning(t('profile.workspace.depSpecRequired')); return }
+    setDepBusy(true)
+    const result = await window.api.setDependency(dshId, name, pkg, spec)
+    setDepBusy(false)
+    if (!result.ok) { void message.error(apiErrorText(result)); return }
+    void message.success(t('profile.workspace.depSaved', { pkg }))
+    setDepEdits(prev => { const next = { ...prev }; delete next[pkg]; return next })
+    void load()
+    onChanged?.()
+  }
+
+  const removeDep = (pkg: string): void => {
+    Modal.confirm({
+      title: t('profile.workspace.depRemove'),
+      content: t('profile.workspace.depRemoveConfirm', { pkg }),
+      okText: t('profile.detail.remove'),
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setDepBusy(true)
+        const result = await window.api.removeDependency(dshId, name, pkg)
+        setDepBusy(false)
+        if (!result.ok) return void message.error(apiErrorText(result))
+        void load()
+        onChanged?.()
+      },
+    })
+  }
+
+  const addDep = async (): Promise<void> => {
+    const pkg = newDepPkg.trim()
+    const spec = newDepSpec.trim()
+    if (pkg === '' || spec === '') { void message.warning(t('profile.workspace.depBothRequired')); return }
+    setDepBusy(true)
+    const result = await window.api.setDependency(dshId, name, pkg, spec)
+    setDepBusy(false)
+    if (!result.ok) { void message.error(apiErrorText(result)); return }
+    setNewDepPkg('')
+    setNewDepSpec('')
+    void load()
+    onChanged?.()
+  }
+
+  const saveMeta = async (): Promise<void> => {
+    setMetaBusy(true)
+    const result = await window.api.setManifest(dshId, name, { displayName: metaName, patchReload: metaReload })
+    setMetaBusy(false)
+    if (!result.ok) { void message.error(apiErrorText(result)); return }
+    void message.success(t('profile.detail.fileSaved'))
+    void load()
+    onChanged?.()
+  }
+
   const removeBundleRow = (bundle: string): void => {
     Modal.confirm({
       title: t('profile.detail.removeBundle'),
@@ -486,6 +555,17 @@ const loadSeq = useRef(0)
       )}
       {section === 'manifest' && (
         <div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: token.paddingSM, flexWrap: 'wrap' }}>
+            <div style={{ flex: '0 0 320px' }}>
+              <FieldLabel>{t('profile.workspace.displayName')}</FieldLabel>
+              <Input value={metaName} onChange={e => setMetaName(e.target.value)} />
+            </div>
+            <div style={{ flex: '0 0 200px' }}>
+              <FieldLabel>{t('profile.workspace.patchReload')}</FieldLabel>
+              <Select value={metaReload} onChange={v => setMetaReload(v)} style={{ width: '100%' }} options={[{ value: 'live', label: 'live' }, { value: 'startup', label: 'startup' }]} />
+            </div>
+            <Button type="primary" loading={metaBusy} onClick={() => void saveMeta()}>{t('common.save')}</Button>
+          </div>
           <div style={{ marginBottom: 6, color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>{t('profile.workspace.manifestHint')}</div>
           {fileLoading
             ? <div style={{ height: 420, display: 'flex', alignItems: 'center', justifyContent: 'center', color: token.colorTextTertiary }}>{t('common.loading')}</div>
@@ -501,9 +581,26 @@ const loadSeq = useRef(0)
       )}
 
       {section === 'deps' && (
-        dependencies.length === 0
-          ? <div style={{ color: token.colorTextTertiary }}>{t('common.none')}</div>
-          : <List size="small" dataSource={dependencies} renderItem={dependency => <List.Item key={dependency}>{dependency}</List.Item>} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: token.paddingSM }}>
+          <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>{t('profile.workspace.depsHint')}</div>
+          {dependencies.length === 0 && <div style={{ color: token.colorTextTertiary }}>{t('common.none')}</div>}
+          {dependencies.map(dep => {
+            const draft = depEdits[dep] ?? dependencySpecs[dep] ?? ''
+            return (
+              <div key={dep} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ flex: '0 0 38%', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: token.fontSizeSM }}>{dep}</span>
+                <Input size="small" value={draft} onChange={e => setDepEdits(prev => ({ ...prev, [dep]: e.target.value }))} style={{ flex: 1 }} />
+                <Button size="small" disabled={depBusy} onClick={() => void saveDependency(dep)}>{t('common.save')}</Button>
+                <Button size="small" danger type="text" disabled={depBusy} onClick={() => removeDep(dep)}>{t('profile.detail.remove')}</Button>
+              </div>
+            )
+          })}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: token.paddingSM }}>
+            <Input size="small" value={newDepPkg} onChange={e => setNewDepPkg(e.target.value)} placeholder={t('profile.workspace.depPkg')} style={{ flex: '0 0 38%' }} />
+            <Input size="small" value={newDepSpec} onChange={e => setNewDepSpec(e.target.value)} placeholder={t('profile.workspace.depSpec')} style={{ flex: 1 }} onPressEnter={() => void addDep()} />
+            <Button size="small" type="primary" loading={depBusy} onClick={() => void addDep()}>{t('profile.workspace.depAdd')}</Button>
+          </div>
+        </div>
       )}
 
       {section === 'bundles' && (

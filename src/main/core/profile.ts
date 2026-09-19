@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { listProfiles, profileDir, profilesDir } from './home.ts'
 import { pluginDir, profilesRootFor, type DshContext } from './appState.ts'
 import { readManifest } from './manifest.ts'
-import { listComboPlugins } from './combo.ts'
+import { listComboPlugins, reconcileBundles } from './combo.ts'
 import { parsePatchRows, assertPatchDocValid } from './patch.ts'
 import { runPnpm, type PnpmResult } from './pnpm.ts'
 import { addLocalPlugin, addPlugin, installIntoProfile, installedStoreVersion } from './plugins.ts'
@@ -127,6 +127,74 @@ export function writeProfileFile(ctx: DshContext, name: string, kind: ProfileFil
   const path = profileFilePath(ctx, name, kind)
   writeFileSync(path, text)
   if (readFileSync(path, 'utf8') !== text) throw new Error('write verify failed')
+}
+
+// ── structured manifest edits ───────────────────────────────────────────────
+
+/** The raw manifest shape the launcher reads/writes. */
+interface RawManifest {
+  name?: string
+  private?: boolean
+  dependencies?: Record<string, string>
+  dsh?: { profile?: { bundles?: string[]; patchReload?: ProfilePatchReload } }
+}
+
+function readRawManifest(dir: string): RawManifest {
+  const path = join(dir, 'package.json')
+  if (!existsSync(path)) throw new Error(`profile 不存在：${dir}`)
+  return JSON.parse(readFileSync(path, 'utf8')) as RawManifest
+}
+
+function writeRawManifest(dir: string, manifest: RawManifest): void {
+  writeFileSync(join(dir, 'package.json'), JSON.stringify(manifest, null, 2) + '\n')
+}
+
+/** A package name accepted as a dependency target. */
+const PACKAGE_NAME_RE = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/i
+
+/** Add or update one dependency and install it. A dependency that declares a
+ * bundle patch is activated as a layer by the reconcile step (mirrors `dsh
+ * plugin install`). */
+export async function setDependency(ctx: DshContext, profile: string, pkg: string, spec: string): Promise<void> {
+  if (!PACKAGE_NAME_RE.test(pkg)) throw new Error(`包名不合法：${pkg}`)
+  const trimmed = spec.trim()
+  if (trimmed === '') throw new Error('版本 / 来源不能为空')
+  const dir = profileDir(ctx, profile)
+  const manifest = readRawManifest(dir)
+  manifest.dependencies = { ...(manifest.dependencies ?? {}), [pkg]: trimmed }
+  writeRawManifest(dir, manifest)
+  await runPnpm(dir, ['install', '--config.confirmModulesPurge=false'])
+  reconcileBundles(ctx, profile)
+  logger.info(`dependency set: ${profile} · ${pkg}@${trimmed}`)
+}
+
+/** Remove one dependency and prune it. */
+export async function removeDependency(ctx: DshContext, profile: string, pkg: string): Promise<void> {
+  const dir = profileDir(ctx, profile)
+  const manifest = readRawManifest(dir)
+  if (manifest.dependencies?.[pkg] === undefined) return
+  delete manifest.dependencies[pkg]
+  writeRawManifest(dir, manifest)
+  await runPnpm(dir, ['install', '--config.confirmModulesPurge=false'])
+  reconcileBundles(ctx, profile)
+  logger.info(`dependency removed: ${profile} · ${pkg}`)
+}
+
+/** Update the manifest's display name and/or patch-file lifecycle. */
+export function setManifestMeta(
+  ctx: DshContext, profile: string, meta: { displayName?: string; patchReload?: ProfilePatchReload },
+): void {
+  const dir = profileDir(ctx, profile)
+  const manifest = readRawManifest(dir)
+  if (meta.displayName !== undefined) {
+    const displayName = meta.displayName.trim()
+    if (displayName === '') throw new Error('显示名不能为空')
+    manifest.name = displayName
+  }
+  if (meta.patchReload !== undefined) {
+    manifest.dsh = { ...manifest.dsh, profile: { ...manifest.dsh?.profile, patchReload: meta.patchReload } }
+  }
+  writeRawManifest(dir, manifest)
 }
 
 /** Official profile templates offered by the "create from template" dialog. */

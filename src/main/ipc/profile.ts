@@ -19,8 +19,8 @@ import {
 } from '../core/combo.ts'
 import {
   cloneProfile, createProfile, exportProfile, importProfile, listLocalBundles, listProfileSummaries,
-  mirrorProfile, PROFILE_TEMPLATES, readProfileFile, removeBundle, reorderBundle, softDeleteProfile,
-  writeProfileFile, type ProfileSummary,
+  mirrorProfile, PROFILE_TEMPLATES, readProfileFile, removeBundle, removeDependency, reorderBundle,
+  setDependency, setManifestMeta, softDeleteProfile, writeProfileFile, type ProfileSummary,
 } from '../core/profile.ts'
 import { contextForEntry, dshEntryById, pluginDir, type DshContext } from '../core/appState.ts'
 import { addDirToZip, dedentRowBlock, verifyDisabledState } from '../core/app-util.ts'
@@ -29,7 +29,7 @@ import { handle } from './handle.ts'
 import { pathIdentifierInvalid, pathOutsideRoot, rowIdInvalid } from './validate.ts'
 import type {
   ImportProfileResult, InsertConflict, IpcResult, ProfileDetail, ProfileFileKind, ProfileLayer,
-  ProfileValidation, RowCreateInput,
+  ProfilePatchReload, ProfileValidation, RowCreateInput,
 } from '../../shared/types.ts'
 
 /** Validate a config value is a YAML mapping (FAILSAFE: structure only, so
@@ -84,9 +84,25 @@ const writeUserPatch = (ctx: DshContext, name: string, next: string): void => {
 /** Read a profile's detail (manifest + user-patch rows). */
 function loadProfileDetail(ctx: DshContext, name: string): ProfileDetail {
   const { bundles, dependencies } = readManifest(ctx, name)
+  // Read the raw manifest for the fields the manifest reader does not expose.
+  let dependencySpecs: Record<string, string> = {}
+  let displayName = name
+  let patchReload: ProfilePatchReload = 'live'
+  try {
+    const raw = JSON.parse(readFileSync(join(profileDir(ctx, name), 'package.json'), 'utf8')) as {
+      name?: string
+      dependencies?: Record<string, string>
+      dsh?: { profile?: { patchReload?: ProfilePatchReload } }
+    }
+    dependencySpecs = raw.dependencies ?? {}
+    if (typeof raw.name === 'string' && raw.name !== '') displayName = raw.name
+    if (raw.dsh?.profile?.patchReload === 'startup') patchReload = 'startup'
+  } catch {
+    // A malformed manifest still yields a detail; the source editor surfaces it.
+  }
   // The raw view keeps `''` (not `[]`) for a missing layer, unlike the write path.
   const patchText = existsSync(patchPathOf(ctx, name)) ? readFileSync(patchPathOf(ctx, name), 'utf8') : ''
-  return { bundles, dependencies, rows: parsePatchRows(patchText), patchText }
+  return { bundles, dependencies, dependencySpecs, displayName, patchReload, rows: parsePatchRows(patchText), patchText }
 }
 
 /** A profile/bundle name from IPC must be a safe path token: it feeds
@@ -334,6 +350,31 @@ export function registerProfileIpc(): void {
     if (ctx === null) return fail(E.dshNotFound)
     if (invalidName(name)) return fail(E.nameInvalid)
     return { ok: true, value: validateComposition(ctx, name) }
+  })
+
+  // ── structured manifest edits ───────────────────────────────────────────
+  handle('profile:setDependency', async (_event, dshId: string, name: string, pkg: string, spec: string): Promise<IpcResult<boolean>> => {
+    const ctx = ctxOf(dshId)
+    if (ctx === null) return fail(E.dshNotFound)
+    if (invalidName(name)) return fail(E.nameInvalid)
+    await setDependency(ctx, name, pkg, spec)
+    return { ok: true, value: true }
+  })
+
+  handle('profile:removeDependency', async (_event, dshId: string, name: string, pkg: string): Promise<IpcResult<boolean>> => {
+    const ctx = ctxOf(dshId)
+    if (ctx === null) return fail(E.dshNotFound)
+    if (invalidName(name)) return fail(E.nameInvalid)
+    await removeDependency(ctx, name, pkg)
+    return { ok: true, value: true }
+  })
+
+  handle('profile:setManifest', (_event, dshId: string, name: string, meta: { displayName?: string; patchReload?: ProfilePatchReload }): IpcResult<boolean> => {
+    const ctx = ctxOf(dshId)
+    if (ctx === null) return fail(E.dshNotFound)
+    if (invalidName(name)) return fail(E.nameInvalid)
+    setManifestMeta(ctx, name, meta)
+    return { ok: true, value: true }
   })
 
   // Create / update a row (pure id, disabled, config override, or insert) on the

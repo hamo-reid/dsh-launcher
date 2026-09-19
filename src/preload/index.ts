@@ -33,6 +33,7 @@ import type {
   ProfileDetail,
   ProfileFileKind,
   ProfileLayer,
+  ProfilePatchReload,
   ProfileSummary,
   ProfileValidation,
   RowCreateInput,
@@ -85,6 +86,12 @@ const api = {
     ipcRenderer.invoke('profile:writeFile', dshId, name, kind, text),
   validate: (dshId: string, name: string): Promise<IpcResult<ProfileValidation>> =>
     ipcRenderer.invoke('profile:validate', dshId, name),
+  setDependency: (dshId: string, name: string, pkg: string, spec: string): Promise<IpcResult<boolean>> =>
+    ipcRenderer.invoke('profile:setDependency', dshId, name, pkg, spec),
+  removeDependency: (dshId: string, name: string, pkg: string): Promise<IpcResult<boolean>> =>
+    ipcRenderer.invoke('profile:removeDependency', dshId, name, pkg),
+  setManifest: (dshId: string, name: string, meta: { displayName?: string; patchReload?: ProfilePatchReload }): Promise<IpcResult<boolean>> =>
+    ipcRenderer.invoke('profile:setManifest', dshId, name, meta),
   addRow: (dshId: string, name: string, row: RowCreateInput): Promise<IpcResult<boolean>> =>
     ipcRenderer.invoke('profile:addRow', dshId, name, row),
   setRowConfig: (dshId: string, name: string, id: string, configText: string): Promise<IpcResult<boolean>> =>
