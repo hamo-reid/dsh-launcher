@@ -10,6 +10,9 @@ interface PanelProps {
   children: ReactNode
   /** Body padding; set false for flush content (e.g. a full-bleed Table). */
   pad?: boolean
+  /** Fill the available height as a flex column (body flexes), for panels whose
+   * child owns its own scroll — e.g. a code editor. */
+  fill?: boolean
 }
 
 /**
@@ -18,7 +21,7 @@ interface PanelProps {
  * into panels so a view reads as a stack of distinguishable blocks rather than
  * one flat plane.
  */
-export default function Panel({ title, description, extra, children, pad = true }: PanelProps) {
+export default function Panel({ title, description, extra, children, pad = true, fill = false }: PanelProps) {
   const { token } = theme.useToken()
   const header = title !== undefined || extra !== undefined
   return (
@@ -28,6 +31,10 @@ export default function Panel({ title, description, extra, children, pad = true 
         borderRadius: token.borderRadiusLG,
         border: `1px solid ${token.colorBorder}`,
         overflow: 'hidden',
+        display: fill ? 'flex' : undefined,
+        flexDirection: fill ? 'column' : undefined,
+        flex: fill ? 1 : undefined,
+        minHeight: fill ? 0 : undefined,
       }}
     >
       {header && (
@@ -52,7 +59,13 @@ export default function Panel({ title, description, extra, children, pad = true 
           {extra !== undefined && <div style={{ flex: '0 0 auto' }}>{extra}</div>}
         </div>
       )}
-      <div style={{ padding: pad ? `${token.paddingSM}px ${token.padding}px ${token.padding}px` : 0 }}>
+      <div style={{
+        padding: pad ? `${token.paddingSM}px ${token.padding}px ${token.padding}px` : 0,
+        display: fill ? 'flex' : undefined,
+        flexDirection: fill ? 'column' : undefined,
+        flex: fill ? 1 : undefined,
+        minHeight: fill ? 0 : undefined,
+      }}>
         {children}
       </div>
     </div>

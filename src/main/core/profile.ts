@@ -72,6 +72,11 @@ export function listProfileSummaries(ctx: DshContext): ProfileSummary[] {
 
 // ── raw file access (source mode) ───────────────────────────────────────────
 
+/** Absolute directory of one profile. */
+export function profileDirPath(ctx: DshContext, name: string): string {
+  return join(profilesRootFor(ctx), name)
+}
+
 /** Absolute path of one editable profile file. */
 export function profileFilePath(ctx: DshContext, name: string, kind: ProfileFileKind): string {
   return kind === 'manifest'

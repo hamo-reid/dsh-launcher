@@ -1,6 +1,6 @@
 import { lazy, useCallback, useEffect, useState } from 'react'
 import {
-  Alert, Button, Modal, Segmented, Select, theme, message,
+  Button, Modal, Segmented, Select, theme, message,
 } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
@@ -40,7 +40,6 @@ export default function ProfileSection() {
   const [summaries, setSummaries] = useState<ProfileSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<string | null>(null)
-  const [missing, setMissing] = useState<string[]>([])
 
   const [createOpen, setCreateOpen] = useState(false)
   const [createName, setCreateName] = useState('')
@@ -82,15 +81,6 @@ export default function ProfileSection() {
   }, [dshId])
 
   useEffect(() => { void refresh() }, [refresh])
-
-  useEffect(() => {
-    if (selected === null || dshId === undefined) { setMissing([]); return }
-    let alive = true
-    void window.api.missingBundles(dshId, selected).then(result => {
-      if (result.ok && alive) setMissing(result.value)
-    })
-    return () => { alive = false }
-  }, [selected, dshId])
 
   const doCreate = async (): Promise<void> => {
     if (dshId === undefined) return
@@ -185,13 +175,6 @@ export default function ProfileSection() {
     setSelected(name)
     void refresh()
     if (view !== 'profiles') setView('profiles')
-  }
-
-  const loadMissing = (name: string): void => {
-    if (dshId === undefined) return
-    void window.api.missingBundles(dshId, name).then(result => {
-      if (result.ok) setMissing(result.value)
-    })
   }
 
   const handleAction = (summary: ProfileSummary, key: string): void => {
@@ -330,23 +313,12 @@ export default function ProfileSection() {
       }
     >
       {view === 'profiles' && (
-      <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 8, padding: LAYOUT.pagePaddingLG }}>
+      <div style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: LAYOUT.pagePaddingLG }}>
         {/* Detail only — running a profile and its console now live on the Run
             page (`RunsSection`); this page is pure profile management. */}
-        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-          {missing.length > 0 && selected !== null && (
-            <Alert
-              type="warning"
-              showIcon
-              style={{ marginBottom: 16 }}
-              title={t('profile.missingTitle', { list: missing.join('、') })}
-              description={t('profile.missingDesc', { profile: selected })}
-            />
-          )}
-          {selected !== null && dshId !== undefined
-            ? <ProfileDetailView dshId={dshId} name={selected} onRenamed={newName => { setSelected(newName); void refresh() }} onChanged={() => { if (selected !== null) loadMissing(selected); void refresh() }} />
-            : <EmptyState title={t('profile.selectProfile')} description={t('profile.selectProfileDesc')} />}
-        </div>
+        {selected !== null && dshId !== undefined
+          ? <ProfileDetailView dshId={dshId} name={selected} onRenamed={newName => { setSelected(newName); void refresh() }} onChanged={() => void refresh()} />
+          : <EmptyState title={t('profile.selectProfile')} description={t('profile.selectProfileDesc')} />}
       </div>
       )}
 

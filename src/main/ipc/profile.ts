@@ -19,8 +19,9 @@ import {
 } from '../core/combo.ts'
 import {
   addBundle, cloneProfile, createProfile, exportProfile, importProfile, listLocalBundles, listProfileSummaries,
-  mirrorProfile, PROFILE_TEMPLATES, readProfileFile, removeBundle, removeDependency, renameProfile, reorderBundle,
-  setDependency, setManifestMeta, softDeleteProfile, transferProfilePatch, writeProfileFile, type ProfileSummary,
+  mirrorProfile, PROFILE_TEMPLATES, profileDirPath, readProfileFile, removeBundle, removeDependency, renameProfile,
+  reorderBundle, setDependency, setManifestMeta, softDeleteProfile, transferProfilePatch, writeProfileFile,
+  type ProfileSummary,
 } from '../core/profile.ts'
 import { contextForEntry, dshEntryById, pluginDir, type DshContext } from '../core/appState.ts'
 import { addDirToZip, dedentRowBlock, verifyDisabledState } from '../core/app-util.ts'
@@ -405,6 +406,17 @@ export function registerProfileIpc(): void {
     if (invalidName(sourceName) || invalidName(targetName)) return fail(E.nameInvalid)
     transferProfilePatch(source, sourceName, target, targetName, move === true)
     return { ok: true, value: true }
+  })
+
+  // Reveal a profile's directory in the OS file explorer.
+  handle('profile:reveal', async (_event, dshId: string, name: string): Promise<IpcResult<boolean>> => {
+    const ctx = ctxOf(dshId)
+    if (ctx === null) return fail(E.dshNotFound)
+    if (invalidName(name)) return fail(E.nameInvalid)
+    const dir = profileDirPath(ctx, name)
+    if (!existsSync(dir)) return fail(E.profileNotFound, { profile: name })
+    const error = await shell.openPath(dir)
+    return error === '' ? { ok: true, value: true } : fail(E.shellOpenPath, { detail: error })
   })
 
   // Create / update a row (pure id, disabled, config override, or insert) on the

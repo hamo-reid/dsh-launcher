@@ -1,8 +1,12 @@
-import { cloneElement, lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { cloneElement, lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
-  Alert, Button, Input, Modal, Select, Space, Tag, theme, message,
+  Alert, Badge, Button, Input, Modal, Select, Space, Tag, theme, message,
 } from 'antd'
-import { FileTextOutlined, CodeOutlined } from '@ant-design/icons'
+import {
+  ApartmentOutlined, AppstoreOutlined, CheckCircleFilled, CodeOutlined, FileTextOutlined,
+  FolderOpenOutlined, HomeOutlined, PlusOutlined, ProfileOutlined, ReloadOutlined,
+  SafetyCertificateOutlined, SwapOutlined,
+} from '@ant-design/icons'
 import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -12,6 +16,8 @@ import type { InsertConflict, InsertConflictLayer, ProfileDetail, ProfileLayer, 
 import ActionCard from '../components/ActionCard.tsx'
 import FieldLabel from '../components/FieldLabel.tsx'
 import Loadable from '../components/Loadable.tsx'
+import NavList from '../components/NavList.tsx'
+import Panel from '../components/Panel.tsx'
 import ScrollModal from '../components/ScrollModal.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
 import StatusTag from '../components/StatusTag.tsx'
@@ -101,6 +107,11 @@ export default function ProfileDetailView({ dshId, name, onChanged, onRenamed }:
   const [transferTargets, setTransferTargets] = useState<string[]>([])
   const [transferTarget, setTransferTarget] = useState<string>()
   const [transferBusy, setTransferBusy] = useState(false)
+
+  // Workspace chrome.
+  const [inspectorOpen, setInspectorOpen] = useState(true)
+  const [depsAddOpen, setDepsAddOpen] = useState(false)
+  const [bundleActivateOpen, setBundleActivateOpen] = useState(false)
 
   const [newRowOpen, setNewRowOpen] = useState(false)
   const [newRowId, setNewRowId] = useState('')
@@ -475,6 +486,11 @@ const loadSeq = useRef(0)
     if (move) { void load(); onChanged?.() }
   }
 
+  const revealProfile = async (): Promise<void> => {
+    const result = await window.api.reveal(dshId, name)
+    if (!result.ok) void message.error(apiErrorText(result))
+  }
+
   const removeBundleRow = (bundle: string): void => {
     Modal.confirm({
       title: t('profile.detail.removeBundle'),
@@ -572,65 +588,114 @@ const loadSeq = useRef(0)
 
   if (name === '') return null
 
-  const navItems: { key: SectionKey; label: string; meta: string }[] = [
-    { key: 'manifest', label: t('profile.workspace.manifest'), meta: '' },
-    { key: 'deps', label: t('profile.workspace.deps'), meta: t('profile.detail.nDepsMeta', { count: dependencies.length }) },
-    { key: 'bundles', label: t('profile.workspace.bundles'), meta: t('profile.detail.nBundlesMeta', { count: bundles.length }) },
-    { key: 'patch', label: t('profile.workspace.patch'), meta: t('profile.detail.layerMetaEditable', { count: profileLayer?.rows.length ?? 0 }) },
-    { key: 'home', label: t('profile.workspace.home'), meta: '' },
-    { key: 'diagnostics', label: t('profile.workspace.diagnostics'), meta: validation?.ok === false ? '!' : '' },
+  const issueCount = conflicts.length
+    + (validation?.manifestError !== undefined ? 1 : 0)
+    + (validation?.patchError !== undefined ? 1 : 0)
+    + (validation?.missingBundles.length ?? 0)
+    + (validation?.unclaimedBundles.length ?? 0)
+
+  const navItems: { key: SectionKey; icon: ReactNode; label: string; meta: ReactNode }[] = [
+    { key: 'manifest', icon: <ProfileOutlined />, label: t('profile.workspace.manifest'), meta: null },
+    { key: 'deps', icon: <ApartmentOutlined />, label: t('profile.workspace.deps'), meta: dependencies.length || null },
+    { key: 'bundles', icon: <AppstoreOutlined />, label: t('profile.workspace.bundles'), meta: bundles.length || null },
+    { key: 'patch', icon: <CodeOutlined />, label: t('profile.workspace.patch'), meta: (profileLayer?.rows.length ?? 0) || null },
+    { key: 'home', icon: <HomeOutlined />, label: t('profile.workspace.home'), meta: null },
+    {
+      key: 'diagnostics',
+      icon: <SafetyCertificateOutlined />,
+      label: t('profile.workspace.diagnostics'),
+      meta: validation === null
+        ? null
+        : validation.ok
+          ? <CheckCircleFilled style={{ color: token.colorSuccess }} />
+          : <Badge count={issueCount} size="small" />,
+    },
   ]
+
+  // Section-local actions live in the panel header; the page header keeps only
+  // the global ones (validate / rename / reveal / inspector).
+  const sectionActions = (): ReactNode => {
+    if (section === 'deps') {
+      return <Button size="small" icon={<PlusOutlined />} onClick={() => setDepsAddOpen(v => !v)}>{t('profile.workspace.depAdd')}</Button>
+    }
+    if (section === 'bundles') {
+      return (
+        <Space size={8}>
+          <Button size="small" icon={<ReloadOutlined />} loading={reconciling} onClick={() => void reconcileNow()}>{t('profile.detail.reconcile')}</Button>
+          {candidates.length > 0 && (
+            <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => setBundleActivateOpen(v => !v)}>{t('profile.workspace.bundleActivate')}</Button>
+          )}
+        </Space>
+      )
+    }
+    if (section === 'patch') {
+      return (
+        <Space size={8}>
+          <Button size="small" icon={<CodeOutlined />} onClick={() => void openSource()}>{t('profile.detail.sourceEdit')}</Button>
+          <Button size="small" icon={<FileTextOutlined />} onClick={() => void openPatchSource()}>{t('profile.detail.openPatchSource')}</Button>
+          <Button size="small" icon={<SwapOutlined />} onClick={() => void openTransfer()}>{t('profile.workspace.transfer')}</Button>
+        </Space>
+      )
+    }
+    if (section === 'diagnostics') {
+      return <Button size="small" onClick={revalidate} loading={validating}>{t('profile.workspace.validate')}</Button>
+    }
+    return null
+  }
+
+  const issueRow = (label: string, count: number | undefined, onClick: () => void): ReactNode => (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onClick() } }}
+      style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+        cursor: 'pointer', padding: '6px 8px', borderRadius: token.borderRadius, background: token.colorFillQuaternary,
+      }}
+    >
+      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+      {count !== undefined && <Badge count={count} size="small" />}
+    </div>
+  )
 
   return (
     <Loadable loading={loading}>
-    <div style={{ display: 'flex', gap: token.paddingSM, height: '100%', minHeight: 0 }}>
-      <div style={{ width: 200, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto' }}>
-        {navItems.map(item => (
-          <ActionCard key={item.key} title={item.label} meta={item.meta} selected={section === item.key} hoverable onClick={() => setSection(item.key)} />
-        ))}
-      </div>
-      <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', paddingRight: 4 }}>
-      <SectionHeading title={name} extra={(
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, gap: token.paddingSM }}>
+      <SectionHeading title={(
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          {name}
+          {conflicts.length > 0 && <Badge count={conflicts.length} />}
+        </span>
+      )} extra={(
         <Space size={8}>
           <Button size="small" onClick={revalidate} loading={validating}>{t('profile.workspace.validate')}</Button>
           <Button size="small" onClick={() => { setRenameValue(name); setRenameOpen(true) }}>{t('profile.workspace.rename')}</Button>
-          <Button size="small" icon={<CodeOutlined />} onClick={() => void openSource()}>{t('profile.detail.sourceEdit')}</Button>
-          <Button size="small" icon={<FileTextOutlined />} onClick={() => void openPatchSource()}>{t('profile.detail.openPatchSource')}</Button>
-          <Button size="small" onClick={() => void reconcileNow()} loading={reconciling}>{t('profile.detail.reconcile')}</Button>
+          <Button size="small" icon={<FolderOpenOutlined />} onClick={() => void revealProfile()}>{t('profile.workspace.reveal')}</Button>
+          <Button size="small" type={inspectorOpen ? 'primary' : 'default'} onClick={() => setInspectorOpen(v => !v)}>{t('profile.workspace.inspector')}</Button>
         </Space>
       )} />
-      {conflicts.length > 0 && (
-        <Alert
-          type="error"
-          showIcon
-          style={{ marginBottom: token.paddingSM }}
-          title={(
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-              {t('profile.detail.insertConflictTitle')}（{conflicts.length}）
-              <Button type="link" size="small" style={{ padding: 0 }} onClick={() => setConflictsOpen(open => !open)}>
-                {conflictsOpen ? t('common.collapse') : t('common.expand')}
-              </Button>
-            </span>
-          )}
-          description={conflictsOpen ? (
-            <div>
-              <div>{t('profile.detail.insertConflictDesc')}</div>
-              <ul style={{ margin: '6px 0 0', paddingInlineStart: 18, maxHeight: 240, overflowY: 'auto' }}>
-                {conflicts.map(c => (
-                  <li key={c.id}>
-                    <code>{c.id}</code>
-                    {' — '}
-                    {c.layers.map(conflictLayerLabel).join(' + ')}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : undefined}
-        />
-      )}
+
+      <div style={{ display: 'flex', gap: token.paddingSM, flex: 1, minHeight: 0 }}>
+        <div style={{ width: 208, flexShrink: 0, minHeight: 0, overflowY: 'auto' }}>
+          <NavList
+            items={navItems}
+            keyOf={item => item.key}
+            selectedKey={section}
+            onSelect={item => setSection(item.key)}
+            renderTitle={item => (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>{item.icon}{item.label}</span>
+            )}
+            renderMeta={item => item.meta}
+          />
+        </div>
+
+        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex' }}>
+          <Panel fill pad={false} title={t(`profile.workspace.${section}`)} extra={sectionActions()}>
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: token.padding }}>
       {section === 'manifest' && (
-        <div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: token.paddingSM, flexWrap: 'wrap' }}>
+        <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: token.paddingSM }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
             <div style={{ flex: '0 0 320px' }}>
               <FieldLabel>{t('profile.workspace.displayName')}</FieldLabel>
               <Input value={metaName} onChange={e => setMetaName(e.target.value)} />
@@ -641,15 +706,17 @@ const loadSeq = useRef(0)
             </div>
             <Button type="primary" loading={metaBusy} onClick={() => void saveMeta()}>{t('common.save')}</Button>
           </div>
-          <div style={{ marginBottom: 6, color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>{t('profile.workspace.manifestHint')}</div>
-          {fileLoading
-            ? <div style={{ height: 420, display: 'flex', alignItems: 'center', justifyContent: 'center', color: token.colorTextTertiary }}>{t('common.loading')}</div>
-            : (
-              <Suspense fallback={<div style={{ height: 420, display: 'flex', alignItems: 'center', justifyContent: 'center', color: token.colorTextTertiary }}>{t('common.loading')}</div>}>
-                <CodeEditor value={manifestText} language="json" onChange={setManifestText} height={420} />
-              </Suspense>
-            )}
-          <div style={{ marginTop: 8 }}>
+          <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>{t('profile.workspace.manifestHint')}</div>
+          <div style={{ flex: 1, minHeight: 0 }}>
+            {fileLoading
+              ? <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: token.colorTextTertiary }}>{t('common.loading')}</div>
+              : (
+                <Suspense fallback={<div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: token.colorTextTertiary }}>{t('common.loading')}</div>}>
+                  <CodeEditor value={manifestText} language="json" onChange={setManifestText} height="100%" />
+                </Suspense>
+              )}
+          </div>
+          <div>
             <Button type="primary" loading={fileSaving} onClick={() => void saveManifest()}>{t('common.save')}</Button>
           </div>
         </div>
@@ -683,11 +750,13 @@ const loadSeq = useRef(0)
               </div>
             )
           })}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: token.paddingSM }}>
-            <Input size="small" value={newDepPkg} onChange={e => setNewDepPkg(e.target.value)} placeholder={t('profile.workspace.depPkg')} style={{ flex: '0 0 34%' }} />
-            <Input size="small" value={newDepSpec} onChange={e => setNewDepSpec(e.target.value)} placeholder={t('profile.workspace.depSpec')} style={{ flex: 1 }} onPressEnter={() => void addDep()} />
-            <Button size="small" type="primary" loading={depBusy} onClick={() => void addDep()}>{t('profile.workspace.depAdd')}</Button>
-          </div>
+          {depsAddOpen && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: token.paddingSM }}>
+              <Input size="small" value={newDepPkg} onChange={e => setNewDepPkg(e.target.value)} placeholder={t('profile.workspace.depPkg')} style={{ flex: '0 0 34%' }} />
+              <Input size="small" value={newDepSpec} onChange={e => setNewDepSpec(e.target.value)} placeholder={t('profile.workspace.depSpec')} style={{ flex: 1 }} onPressEnter={() => void addDep()} />
+              <Button size="small" type="primary" loading={depBusy} onClick={() => void addDep()}>{t('profile.workspace.depAdd')}</Button>
+            </div>
+          )}
         </div>
       )}
 
@@ -702,7 +771,7 @@ const loadSeq = useRef(0)
                 </SortableContext>
               </DndContext>
             )}
-          {candidates.length > 0 && (
+          {candidates.length > 0 && bundleActivateOpen && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: token.paddingSM }}>
               <Select
                 size="small"
@@ -740,16 +809,18 @@ const loadSeq = useRef(0)
       )}
 
       {section === 'home' && (
-        <div>
-          <div style={{ marginBottom: 6, color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>{t('profile.workspace.homeHint')}</div>
-          {fileLoading
-            ? <div style={{ height: 420, display: 'flex', alignItems: 'center', justifyContent: 'center', color: token.colorTextTertiary }}>{t('common.loading')}</div>
-            : (
-              <Suspense fallback={<div style={{ height: 420, display: 'flex', alignItems: 'center', justifyContent: 'center', color: token.colorTextTertiary }}>{t('common.loading')}</div>}>
-                <CodeEditor value={homeText} language="yaml" onChange={setHomeText} height={420} />
-              </Suspense>
-            )}
-          <div style={{ marginTop: 8 }}>
+        <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: token.paddingSM }}>
+          <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>{t('profile.workspace.homeHint')}</div>
+          <div style={{ flex: 1, minHeight: 0 }}>
+            {fileLoading
+              ? <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: token.colorTextTertiary }}>{t('common.loading')}</div>
+              : (
+                <Suspense fallback={<div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: token.colorTextTertiary }}>{t('common.loading')}</div>}>
+                  <CodeEditor value={homeText} language="yaml" onChange={setHomeText} height="100%" />
+                </Suspense>
+              )}
+          </div>
+          <div>
             <Button type="primary" loading={fileSaving} onClick={() => void saveHome()}>{t('common.save')}</Button>
           </div>
         </div>
@@ -795,21 +866,38 @@ const loadSeq = useRef(0)
             )}
         </div>
       )}
-      </div>
+            </div>
+          </Panel>
+        </div>
 
-      {/* inspector: always-on composition summary for the current profile */}
-      <div style={{ width: 280, flexShrink: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: token.paddingSM }}>
-        <div style={{ fontSize: token.fontSizeLG, fontWeight: 600, color: token.colorText }}>{t('profile.workspace.inspector')}</div>
-        {validation === null
-          ? <div style={{ color: token.colorTextTertiary, fontSize: token.fontSizeSM }}>{validating ? t('common.loading') : t('profile.workspace.noReport')}</div>
-          : (
-            <>
-              <Alert type={validation.ok ? 'success' : 'error'} showIcon title={validation.ok ? t('profile.workspace.ok') : t('profile.workspace.problems')} />
-              {validation.conflicts.length > 0 && <div style={{ fontSize: token.fontSizeSM }}>{t('profile.detail.insertConflictTitle')}：{validation.conflicts.length}</div>}
-              {validation.missingBundles.length > 0 && <div style={{ fontSize: token.fontSizeSM }}>{t('profile.workspace.missingBundles')}：{validation.missingBundles.length}</div>}
-              {validation.unclaimedBundles.length > 0 && <div style={{ fontSize: token.fontSizeSM }}>{t('profile.workspace.unclaimedBundles')}：{validation.unclaimedBundles.length}</div>}
-            </>
-          )}
+        {inspectorOpen && (
+          <div style={{ width: 280, flexShrink: 0, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: token.paddingSM }}>
+            <div style={{ fontWeight: 600, color: token.colorText }}>{t('profile.workspace.inspector')}</div>
+            {validation === null
+              ? <div style={{ color: token.colorTextTertiary, fontSize: token.fontSizeSM }}>{validating ? t('common.loading') : t('profile.workspace.noReport')}</div>
+              : (
+                <>
+                  <Alert type={validation.ok ? 'success' : 'error'} showIcon title={validation.ok ? t('profile.workspace.ok') : t('profile.workspace.problems')} />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: token.fontSizeSM, color: token.colorTextSecondary }}>
+                    <span>{t('profile.workspace.summaryBundles', { count: bundles.length })}</span>
+                    <span>{t('profile.workspace.summaryPatchRows', { count: profileLayer?.rows.length ?? 0 })}</span>
+                    <span>{t('profile.workspace.summaryDeps', { count: dependencies.length })}</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: token.fontSizeSM }}>
+                    {validation.manifestError !== undefined && issueRow(t('profile.workspace.manifestError'), undefined, () => setSection('manifest'))}
+                    {validation.patchError !== undefined && issueRow(t('profile.workspace.patchError'), undefined, () => setSection('patch'))}
+                    {validation.conflicts.length > 0 && issueRow(t('profile.detail.insertConflictTitle'), validation.conflicts.length, () => { setSection('diagnostics'); setConflictsOpen(true) })}
+                    {validation.missingBundles.length > 0 && issueRow(t('profile.workspace.missingBundles'), validation.missingBundles.length, () => setSection('bundles'))}
+                    {validation.unclaimedBundles.length > 0 && issueRow(t('profile.workspace.unclaimedBundles'), validation.unclaimedBundles.length, () => setSection('bundles'))}
+                  </div>
+                  <Space size={8}>
+                    <Button size="small" onClick={revalidate} loading={validating}>{t('profile.workspace.validate')}</Button>
+                    <Button size="small" icon={<FolderOpenOutlined />} onClick={() => void revealProfile()}>{t('profile.workspace.reveal')}</Button>
+                  </Space>
+                </>
+              )}
+          </div>
+        )}
       </div>
 
       <ScrollModal title={activeLayer !== undefined ? layerLabel(activeLayer) : ''} open={openLayer !== null} footer={null} onCancel={() => setOpenLayer(null)} width={MODAL.wide} bodyMax={440}>
