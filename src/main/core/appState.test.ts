@@ -56,8 +56,8 @@ describe('dsh state', () => {
       { ...ENTRY_A, id: 'b', name: 'dsh@b', home: '/home/b' },
     ])
     expect(dshScopes()).toEqual([
-      { id: 'a', name: 'dsh@a', version: 'a', home: '/home/a' },
-      { id: 'b', name: 'dsh@b', version: 'a', home: '/home/b' },
+      { id: 'a', name: 'dsh@a', version: 'a', home: '/home/a', execPath: '/a' },
+      { id: 'b', name: 'dsh@b', version: 'a', home: '/home/b', execPath: '/a' },
     ])
   })
 })

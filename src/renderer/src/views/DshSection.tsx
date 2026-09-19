@@ -3,7 +3,7 @@ import {
   Alert, Button, Descriptions, Divider, Modal, Space, Tag, theme, Typography, message,
 } from 'antd'
 import { useTranslation } from 'react-i18next'
-import { apiErrorText } from '../lib/ipc.ts'
+import { apiErrorText, requestHealthRefresh } from '../lib/ipc.ts'
 import AppShell from '../components/AppShell.tsx'
 import EmptyState from '../components/EmptyState.tsx'
 import NavList from '../components/NavList.tsx'
@@ -32,6 +32,8 @@ export default function DshSection() {
   const [stalePaths, setStalePaths] = useState<Set<string>>(new Set())
   // Exec paths whose launch entry is unresolvable (incomplete install → repairable).
   const [brokenPaths, setBrokenPaths] = useState<Set<string>>(new Set())
+  // dsh ids that currently have at least one live run (remove/update are gated).
+  const [runningDshIds, setRunningDshIds] = useState<Set<string>>(new Set())
 
   const [officialOpen, setOfficialOpen] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
@@ -61,9 +63,22 @@ export default function DshSection() {
       setStalePaths(new Set(h.value.filter(x => x.kind === 'dsh-exec').map(x => x.path ?? '')))
       setBrokenPaths(new Set(h.value.filter(x => x.kind === 'dsh-broken').map(x => x.path ?? '')))
     }
+    // Keep the app-level health banner in sync with this page's mutations.
+    requestHealthRefresh()
   }
 
   useEffect(() => { void refresh() }, [])
+
+  // Which dsh currently have a live run, so destructive actions stay disabled.
+  // Refreshed on mount and whenever a run starts/exits.
+  useEffect(() => {
+    const refreshRuns = async (): Promise<void> => {
+      const r = await window.api.run.list()
+      if (r.ok) setRunningDshIds(new Set(r.value.map(x => x.dshId)))
+    }
+    void refreshRuns()
+    return window.api.run.onEvent(() => { void refreshRuns() })
+  }, [])
 
   // 后台的 dsh 下载/更新会话（已在统一下载中心展示）结束后联动刷新列表，
   // 让新版本 / 新安装即时反映到 DSH 页。
@@ -98,25 +113,29 @@ export default function DshSection() {
   const isStale = (d: DshEntry): boolean => d.execPath !== '' && stalePaths.has(d.execPath)
   const isBroken = (d: DshEntry): boolean => d.execPath !== '' && brokenPaths.has(d.execPath)
 
-  const actionsFor = (d: DshEntry): MenuAction[] => [
-    { key: 'rename', label: t('dsh.action.rename') },
-    // app 管理的 dsh 可原地升级版本（checkUpdate / update）。
-    ...(d.managed === true
-      ? [{ key: 'update', label: t('dsh.action.update') } as MenuAction]
-      : []),
-    // 残缺（安装不完整）的 app 托管安装可「重新安装」修复。
-    ...(isBroken(d) && d.managed === true
-      ? [{ key: 'repair', label: t('dsh.action.repair') } as MenuAction]
-      : []),
-    // 失效条目（磁盘上可执行已不存在）允许脱管清理。
-    ...(isStale(d)
-      ? [{ key: 'remove-stale', label: t('dsh.action.removeStale'), danger: true } as MenuAction]
-      : []),
-    // 仅 app 管理的（官方安装）可删除；系统级/手动加入的用户全局 dsh 不给删除入口。
-    ...(d.managed === true
-      ? [{ key: 'remove', label: t('dsh.action.remove'), danger: true } as MenuAction]
-      : []),
-  ]
+  const actionsFor = (d: DshEntry): MenuAction[] => {
+    // A dsh with a live runtime must not be updated/removed/repaired underneath it.
+    const running = runningDshIds.has(d.id)
+    return [
+      { key: 'rename', label: t('dsh.action.rename') },
+      // app 管理的 dsh 可原地升级版本（checkUpdate / update）。
+      ...(d.managed === true && !running
+        ? [{ key: 'update', label: t('dsh.action.update') } as MenuAction]
+        : []),
+      // 残缺（安装不完整）的 app 托管安装可「重新安装」修复。
+      ...(isBroken(d) && d.managed === true && !running
+        ? [{ key: 'repair', label: t('dsh.action.repair') } as MenuAction]
+        : []),
+      // 失效条目（磁盘上可执行已不存在）允许脱管清理。
+      ...(isStale(d)
+        ? [{ key: 'remove-stale', label: t('dsh.action.removeStale'), danger: true } as MenuAction]
+        : []),
+      // 仅 app 管理的（官方安装）可删除；系统级/手动加入的用户全局 dsh 不给删除入口。
+      ...(d.managed === true && !running
+        ? [{ key: 'remove', label: t('dsh.action.remove'), danger: true } as MenuAction]
+        : []),
+    ]
+  }
 
   const handleAction = (d: DshEntry, key: string): void => {
     if (key === 'rename') setRenameTarget({ id: d.id, name: d.name })
@@ -210,6 +229,7 @@ export default function DshSection() {
                   {d.dir ?? d.execPath}
                   {isBroken(d) && <Tag color="error" style={{ marginInlineStart: 6 }}>{t('dsh.broken')}</Tag>}
                   {isStale(d) && <Tag color="error" style={{ marginInlineStart: 6 }}>{t('dsh.stale')}</Tag>}
+                  {runningDshIds.has(d.id) && <Tag color="success" style={{ marginInlineStart: 6 }}>{t('run.running')}</Tag>}
                 </span>
               )}
               actions={d => <ConfirmMenu actions={actionsFor(d)} onAction={key => handleAction(d, key)} />}

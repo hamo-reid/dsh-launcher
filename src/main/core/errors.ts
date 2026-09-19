@@ -71,6 +71,7 @@ export const E = {
   dshMajorRisk: 'dsh.majorRisk',
   dshProtected: 'dsh.protected',
   dshVersionExists: 'dsh.versionExists',
+  dshInUse: 'dsh.inUse',
   // profile
   profileExists: 'profile.exists',
   profileNotFound: 'profile.notFound',

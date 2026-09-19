@@ -15,3 +15,13 @@ export function apiErrorText(result: { ok: false; code: string; params?: Params;
   if (typeof params.detail === 'string' && params.detail !== '') return params.detail
   return result.error
 }
+
+/** Window event asking the app shell to re-run its disk-vs-app health check.
+ * Sections that mutate dsh/store state dispatch this so the top banner updates
+ * without waiting for a tab switch. */
+export const HEALTH_DIRTY_EVENT = 'pm:health-dirty'
+
+/** Ask the app shell to refresh its health banner (fire-and-forget). */
+export function requestHealthRefresh(): void {
+  window.dispatchEvent(new Event(HEALTH_DIRTY_EVENT))
+}

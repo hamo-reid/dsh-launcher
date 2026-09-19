@@ -9,7 +9,7 @@
  */
 import { join, resolve } from 'node:path'
 import { loadSettings, saveSettings, type AppSettings } from './settings.ts'
-import type { DshEntry, LaunchOptions, RunMode } from '../../shared/types.ts'
+import type { DshEntry } from '../../shared/types.ts'
 
 /** The dsh shape a scope carries through plugin-scoped scans. The profiles
  * directory is always `<home>/profiles` — the same path the host reads from
@@ -19,6 +19,8 @@ export interface DshScope {
   name: string
   version?: string
   home: string
+  /** The dsh executable path (for install-anchor resolution). */
+  execPath?: string
 }
 
 /** Electron `userData` dir, injected from the main entry before any IPC. */
@@ -90,38 +92,8 @@ export function legacyProfilesDir(entry: DshEntry): string | undefined {
 /** The plugin-scan scopes derived from every registered dsh. */
 export function dshScopes(): DshScope[] {
   return readDshState().dshes.map(d => ({
-    id: d.id, name: d.name, version: d.version, home: d.home,
+    id: d.id, name: d.name, version: d.version, home: d.home, execPath: d.execPath,
   }))
-}
-
-// ── per-profile launch options ──────────────────────────────────────────────
-
-/** Settings key for a profile's saved launch parameters. Keyed by dsh id so the
- * same profile name under two dsh installs keeps independent defaults. */
-export function launchOptionsKey(dshId: string, profile: string): string {
-  return `${dshId}::${profile}`
-}
-
-/** The saved launch parameters for a profile, or `{}` when none were stored. */
-export function readLaunchOptions(dshId: string, profile: string): LaunchOptions {
-  return loadSettings().launchOptions?.[launchOptionsKey(dshId, profile)] ?? {}
-}
-
-/** Persist (replace) a profile's saved launch parameters. */
-export function writeLaunchOptions(dshId: string, profile: string, options: LaunchOptions): void {
-  const s = loadSettings()
-  saveSettings({ ...s, launchOptions: { ...(s.launchOptions ?? {}), [launchOptionsKey(dshId, profile)]: options } })
-}
-
-/** The last run mode for a profile (`'app'` when unset). */
-export function readRunMode(dshId: string, profile: string): RunMode {
-  return loadSettings().runModes?.[launchOptionsKey(dshId, profile)] === 'shell' ? 'shell' : 'app'
-}
-
-/** Persist the last run mode for a profile. */
-export function writeRunMode(dshId: string, profile: string, mode: RunMode): void {
-  const s = loadSettings()
-  saveSettings({ ...s, runModes: { ...(s.runModes ?? {}), [launchOptionsKey(dshId, profile)]: mode } })
 }
 
 // ── directory defaults ──────────────────────────────────────────────────────

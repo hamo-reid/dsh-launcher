@@ -15,6 +15,8 @@ import {
 } from '../core/appState.ts'
 import { listProfileInfos } from '../core/home.ts'
 import { startDshDownload } from '../core/pluginDownloads.ts'
+import { clearDshLaunchConfig } from '../core/launch-config.ts'
+import { listRuns } from './run.ts'
 import { loadSettings, saveSettings } from '../core/settings.ts'
 import { fetchPackageVersions } from '../core/npm.ts'
 import { majorOfVersion } from '../core/version.ts'
@@ -168,6 +170,9 @@ export function registerDshIpc(): void {
     const { dshes } = readDshState()
     const entry = dshes.find(d => d.id === id)
     if (entry === undefined) return fail(E.dshNotFound)
+    // Replacing the install files out from under a live runtime breaks it.
+    const active = listRuns().filter(r => r.dshId === id)
+    if (active.length > 0) return fail(E.dshInUse, { profiles: active.map(r => r.profile).join('、') })
     if (!isDeletableDsh(entry, entry.versionDir ?? dshVersionDir())) return fail(E.dshNotManaged)
     // Resolve the target version: explicit, else the latest stable release.
     let target = opts?.version?.trim()
@@ -225,9 +230,15 @@ export function registerDshIpc(): void {
     if (entry !== undefined && !stale && !isDeletableDsh(entry, entry.versionDir ?? dshVersionDir())) {
       return fail(E.dshProtected)
     }
+    // A dsh with live profiles must not have its install removed underneath.
+    const active = listRuns().filter(r => r.dshId === id)
+    if (active.length > 0) return fail(E.dshInUse, { profiles: active.map(r => r.profile).join('、') })
     logger.info(`dsh removed: ${entry?.name ?? id}${opts?.deleteFiles === true ? ' (delete files)' : ''}`)
     // 先从列表移除（脱管 — 始终执行）。
     writeDshState(dshes.filter(d => d.id !== id))
+    // Drop the removed dsh's per-profile launch configs while its profile dirs
+    // (which hold the stable ids) still exist.
+    if (entry !== undefined) clearDshLaunchConfig(id, contextForEntry(entry))
     // 可选的物理删除：app 管理的版本实例（含其独立 home），其它则删可执行所属目录。
     // await 异步删除，避免同步 rm 阻塞主进程导致 App 未响应。
     if (opts?.deleteFiles === true && entry !== undefined) {

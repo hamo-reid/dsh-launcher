@@ -14,8 +14,9 @@ import { runPnpm, type PnpmResult } from './pnpm.ts'
 import { addLocalPlugin, addPlugin, installIntoProfile, installedStoreVersion } from './plugins.ts'
 import { satisfiesRange } from './version.ts'
 import { uniqueTrashName } from './trash.ts'
+import { writeNewProfileId } from './launch-config.ts'
 import { listBundleSubdepNames } from './bundle-subdeps.ts'
-import { isReservedProfileName, PROFILE_NAME_RE, RESERVED_PROFILE_NAMES } from '../../shared/profile-name.ts'
+import { isReservedProfileName, PROFILE_NAME_RE, RESERVED_PROFILE_NAMES, SHIPPED_BUNDLE_NAMES } from '../../shared/profile-name.ts'
 import type { ImportBundleSource, ImportProfileResult, ImportStep, ProfileFileKind, ProfilePatchReload, ProfileSummary } from '../../shared/types.ts'
 import { logger } from './logger.ts'
 
@@ -277,8 +278,8 @@ export function renameProfile(ctx: DshContext, oldName: string, newName: string)
 
 /** Official profile templates offered by the "create from template" dialog. */
 export const PROFILE_TEMPLATES: Record<string, string[]> = {
-  base: ['@deepseek-ai/dsh-base'],
-  web: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'],
+  base: [SHIPPED_BUNDLE_NAMES[0]],
+  web: [...SHIPPED_BUNDLE_NAMES],
 }
 
 /** Create a fresh profile instance from an ordered bundle-array template. */
@@ -296,6 +297,7 @@ export function createProfile(ctx: DshContext, name: string, bundles: string[] =
   writeFileSync(join(dir, 'package.json'), JSON.stringify(manifest, null, 2) + '\n')
   writeFileSync(join(dir, 'cordis.patch.yml'), PATCH_TEMPLATE)
   writeFileSync(join(dir, 'pnpm-workspace.yaml'), PROFILE_PNPM_WORKSPACE)
+  writeNewProfileId(dir)
   logger.info(`profile created: ${name} (${bundles.length} bundles)`)
 }
 
@@ -311,6 +313,9 @@ export function cloneProfile(ctx: DshContext, name: string, newName: string): vo
     recursive: true,
     filter: source => !source.includes('node_modules'),
   })
+  // The clone is a distinct profile: give it its own id so it does not inherit
+  // the source's saved launch mode/parameters.
+  writeNewProfileId(dst)
   logger.info(`profile cloned: ${name} → ${newName}`)
 }
 
@@ -626,6 +631,9 @@ export async function importProfile(
   }, null, 2) + '\n')
   writeFileSync(join(dir, 'cordis.patch.yml'), userPatch || '[]')
   writeFileSync(join(dir, 'pnpm-workspace.yaml'), PROFILE_PNPM_WORKSPACE)
+  // A freshly imported/mirrored profile is a new identity — never inherit the
+  // exported profile's launch defaults.
+  writeNewProfileId(dir)
   emit({ kind: 'create' })
 
   const installed: string[] = []

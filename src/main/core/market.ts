@@ -14,7 +14,7 @@
 
 import { loadSettings, saveSettings } from './settings.ts'
 import { child, logger } from './logger.ts'
-import type { MarketCatalog, MarketPage, MarketPlugin, MarketSort, MarketSource, MarketSourceState } from '../../shared/types.ts'
+import type { MarketAnnotations, MarketCatalog, MarketPage, MarketPlugin, MarketSort, MarketSource, MarketSourceState } from '../../shared/types.ts'
 
 /** Domain-tagged logger for market-catalog traffic. */
 const mlog = child('market')
@@ -284,4 +284,25 @@ function parseGitHubUrl(url: string): { repo: string; subpath: string | null } |
 function validSubpath(subpath: string): boolean {
   if (!/^[A-Za-z0-9_./-]+$/.test(subpath)) return false
   return !subpath.split('/').some(seg => seg === '' || seg === '.' || seg === '..')
+}
+
+// ── installed-overview annotations ───────────────────────────────────────────
+
+/**
+ * Project a catalog down to just the fields the installed-plugin overview needs:
+ * category + deprecation, keyed by npm name (falling back to the catalog entry
+ * name). Pure, so the overview join is testable without a network load.
+ */
+export function annotationsFor(catalog: MarketCatalog): MarketAnnotations {
+  const plugins: MarketAnnotations['plugins'] = {}
+  for (const p of catalog.plugins) {
+    const key = typeof p.npm === 'string' && p.npm !== '' ? p.npm : p.name
+    plugins[key] = {
+      category: p.category,
+      ...(p.name !== '' ? { name: p.name } : {}),
+      ...(p.deprecated === true ? { deprecated: true } : {}),
+      ...(p.replacement !== undefined && p.replacement !== '' ? { replacement: p.replacement } : {}),
+    }
+  }
+  return { categories: catalog.categories ?? {}, plugins }
 }

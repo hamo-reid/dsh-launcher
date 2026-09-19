@@ -20,3 +20,11 @@ export function isReservedProfileName(name: string): boolean {
 
 /** The kebab-case rule the launcher enforces for custom profile names. */
 export const PROFILE_NAME_RE = /^[a-z0-9][a-z0-9-]*$/
+
+/** Bundles shipped by the dsh install itself (the union of the official profile
+ * templates' bundle lists). Used as a fallback to mark a used-but-unstored
+ * package as official when the install anchor cannot be resolved. */
+export const SHIPPED_BUNDLE_NAMES: readonly string[] = [
+  '@deepseek-ai/dsh-base',
+  '@deepseek-ai/dsh-web-app',
+]

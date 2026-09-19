@@ -3,9 +3,9 @@
  * this file only wires the channels and reports failures the launcher way. */
 
 import { handle } from './handle.ts'
-import { installSpecFor, marketSourceState, pageCatalog, resolveMarket, setMarketSourceState } from '../core/market.ts'
+import { annotationsFor, installSpecFor, marketSourceState, pageCatalog, resolveMarket, setMarketSourceState } from '../core/market.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
-import type { IpcResult, MarketCatalog, MarketListOpts, MarketPage, MarketSourceState } from '../../shared/types.ts'
+import type { IpcResult, MarketAnnotations, MarketCatalog, MarketListOpts, MarketPage, MarketSourceState } from '../../shared/types.ts'
 
 /**
  * The catalog the renderer was most recently served, keyed so a route switch
@@ -15,6 +15,12 @@ import type { IpcResult, MarketCatalog, MarketListOpts, MarketPage, MarketSource
  * revalidates); this is purely resolve-side.
  */
 let catalog: MarketCatalog | null = null
+
+/** Annotation result cache — success is held long, a failure only briefly, so an
+ * unreachable market never stalls every plugin-page entry. */
+let annotationsCache: { at: number; ttl: number; value: MarketAnnotations } | null = null
+const ANNOTATIONS_OK_TTL_MS = 10 * 60_000
+const ANNOTATIONS_FAIL_TTL_MS = 60_000
 
 export function registerMarketIpc(): void {
   handle('market:list', async (_event, opts: MarketListOpts = {}): Promise<IpcResult<MarketPage>> => {
@@ -45,7 +51,7 @@ export function registerMarketIpc(): void {
     try {
       const ok = setMarketSourceState(next)
       // A persisted route change invalidates whatever catalog we held.
-      if (ok) catalog = null
+      if (ok) { catalog = null; annotationsCache = null }
       return { ok: true, value: ok }
     } catch (error) {
       return failFromError(error)
@@ -60,6 +66,27 @@ export function registerMarketIpc(): void {
       return { ok: true, value: { spec: installSpecFor(plugin), plugin } }
     } catch (error) {
       return failFromError(error)
+    }
+  })
+
+  // Category / deprecation annotations for the installed-plugin overview. Served
+  // from the memoized catalog when warm; a first call loads (and caches) it. A
+  // load failure degrades to empty annotations — the overview must never depend
+  // on the market being reachable.
+  handle('market:annotations', async (): Promise<IpcResult<MarketAnnotations>> => {
+    if (annotationsCache !== null && Date.now() - annotationsCache.at < annotationsCache.ttl) {
+      return { ok: true, value: annotationsCache.value }
+    }
+    try {
+      const data = await resolveMarket(marketSourceState())
+      catalog = data
+      const value = annotationsFor(data)
+      annotationsCache = { at: Date.now(), ttl: ANNOTATIONS_OK_TTL_MS, value }
+      return { ok: true, value }
+    } catch {
+      const value: MarketAnnotations = { categories: {}, plugins: {} }
+      annotationsCache = { at: Date.now(), ttl: ANNOTATIONS_FAIL_TTL_MS, value }
+      return { ok: true, value }
     }
   })
 }

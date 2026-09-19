@@ -84,7 +84,7 @@ export function listTrashItems(ctx: DshContext): TrashItem[] {
 /** The base profile name, stripping any ` (n)` suffix the trash assigned when a
  * colliding delete landed next to a same-named entry. Profile names are always
  * kebab-case, so a ` (\d+)` suffix can only have come from `uniqueTrashName`. */
-function baseTrashName(name: string): string {
+export function baseTrashName(name: string): string {
   return name.replace(/ \(\d+\)$/, '')
 }
 

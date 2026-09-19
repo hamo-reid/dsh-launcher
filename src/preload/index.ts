@@ -20,6 +20,7 @@ import type {
   IpcResult,
   AppUpdateInfo,
   PluginUsagePoint,
+  MarketAnnotations,
   MarketListOpts,
   MarketPage,
   MarketPlugin,
@@ -37,6 +38,8 @@ import type {
   ProfileSummary,
   ProfileValidation,
   RowCreateInput,
+  PluginApplyResult,
+  PluginUpdateInfo,
   RunEvent,
   RunDefaults,
   RunInfo,
@@ -179,6 +182,10 @@ const api = {
       ipcRenderer.invoke('plugins:overview'),
     calcSizes: (): Promise<IpcResult<Record<string, number>>> =>
       ipcRenderer.invoke('plugins:calcSizes'),
+    checkUpdates: (opts?: { refresh?: boolean }): Promise<IpcResult<PluginUpdateInfo[]>> =>
+      ipcRenderer.invoke('plugins:checkUpdates', opts),
+    applyUpdates: (dshId: string, profile: string, updates: { name: string; version: string }[]): Promise<IpcResult<{ results: PluginApplyResult[] }>> =>
+      ipcRenderer.invoke('plugins:applyUpdates', dshId, profile, updates),
     reveal: (name: string): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('plugins:reveal', name),
     readme: (name: string): Promise<IpcResult<{ content: string; dir: string }>> =>
@@ -212,6 +219,8 @@ const api = {
     setSource: (next: MarketSourceState): Promise<IpcResult<boolean>> => ipcRenderer.invoke('market:setSource', next),
     resolve: (url: string): Promise<IpcResult<{ spec: string | null; plugin: MarketPlugin | null }>> =>
       ipcRenderer.invoke('market:resolve', url),
+    annotations: (): Promise<IpcResult<MarketAnnotations>> =>
+      ipcRenderer.invoke('market:annotations'),
   },
 
   settings: {

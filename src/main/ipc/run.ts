@@ -14,11 +14,13 @@ import { buildDshLaunch } from '../core/launch-spec.ts'
 import { findInsertConflicts } from '../core/combo.ts'
 import { nodeEnvironment } from '../core/node-env.ts'
 import { nodePreferenceValue } from '../core/settings.ts'
-import { contextForEntry, dshEntryById, readLaunchOptions, readRunMode, writeLaunchOptions, writeRunMode } from '../core/appState.ts'
+import { contextForEntry, dshEntryById } from '../core/appState.ts'
+import { profileId, readLaunchOptions, readRunMode, writeLaunchOptions, writeRunMode } from '../core/launch-config.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
 import { child, logger } from '../core/logger.ts'
 import { effectiveArgs, sanitizeLaunchOptions } from '../core/launch-options.ts'
 import { hasRun, nextRunId } from '../core/run-registry.ts'
+import { pathIdentifierInvalid } from './validate.ts'
 import type {
   InsertConflict, InsertConflictLayer, IpcResult, LaunchOptions, RunDefaults, RunEvent, RunInfo, RunMode,
 } from '../../shared/types.ts'
@@ -193,17 +195,22 @@ export function registerRunIpc(): void {
     // there is no global active dsh to fall back to.
     const entry = dshEntryById(dshId)
     if (entry === undefined) return fail(E.dshNotFound)
+    if (profile.trim() === '' || pathIdentifierInvalid(profile)) return fail(E.nameInvalid)
     if (hasRun([...runs.values()], entry.id, profile)) return fail(E.runAlreadyRunning, { profile })
     if (!existsExecutable(entry.execPath)) return fail(E.runExecMissing, { path: entry.execPath })
     try {
+      const ctx = contextForEntry(entry)
+      // Saved mode/parameters are keyed by the profile's stable id, so a rename
+      // keeps them and a delete+recreate under the same name cannot inherit them.
+      const pid = profileId(ctx, profile)
       // Resolve mode + launch parameters: explicit ones are validated and saved
       // as this profile's defaults; omitted ones reuse what was saved.
-      const resolvedMode: RunMode = mode ?? readRunMode(entry.id, profile)
+      const resolvedMode: RunMode = mode ?? readRunMode(pid)
       const fromSaved = options === undefined
-      const sanitized = sanitizeLaunchOptions(fromSaved ? readLaunchOptions(entry.id, profile) : options)
-      writeRunMode(entry.id, profile, resolvedMode)
+      const sanitized = sanitizeLaunchOptions(fromSaved ? readLaunchOptions(pid) : options)
+      writeRunMode(pid, resolvedMode)
       if (!fromSaved) {
-        writeLaunchOptions(entry.id, profile, {
+        writeLaunchOptions(pid, {
           args: sanitized.args,
           patches: sanitized.patches,
           env: sanitized.env,
@@ -213,7 +220,7 @@ export function registerRunIpc(): void {
       // Pre-flight the composed patch stack: two layers inserting the same
       // loader entry id make the host abort with a raw "duplicate loader entry
       // id" stack trace; catch it here with the offending layers named.
-      const conflicts = findInsertConflicts(contextForEntry(entry), profile, sanitized.patches)
+      const conflicts = findInsertConflicts(ctx, profile, sanitized.patches)
       if (conflicts.length > 0) {
         // Structured so the renderer can show the offending bundles and the
         // colliding plugin ids as two lists instead of a raw message.
@@ -365,21 +372,29 @@ export function registerRunIpc(): void {
 
   // Saved default mode + launch parameters for a profile of a given dsh.
   handle('run:getDefaults', (_event, dshId: string, profile: string): IpcResult<RunDefaults> => {
-    return { ok: true, value: { mode: readRunMode(dshId, profile), options: readLaunchOptions(dshId, profile) } }
+    const entry = dshEntryById(dshId)
+    if (entry === undefined) return fail(E.dshNotFound)
+    if (profile.trim() === '' || pathIdentifierInvalid(profile)) return fail(E.nameInvalid)
+    const pid = profileId(contextForEntry(entry), profile)
+    return { ok: true, value: { mode: readRunMode(pid), options: readLaunchOptions(pid) } }
   })
 
   // Validate + persist a profile's default mode + launch parameters (also
   // happens on start; this lets the UI save without launching).
   handle('run:setDefaults', (_event, dshId: string, profile: string, defaults: RunDefaults): IpcResult<boolean> => {
+    const entry = dshEntryById(dshId)
+    if (entry === undefined) return fail(E.dshNotFound)
+    if (profile.trim() === '' || pathIdentifierInvalid(profile)) return fail(E.nameInvalid)
     try {
+      const pid = profileId(contextForEntry(entry), profile)
       const sanitized = sanitizeLaunchOptions(defaults.options)
-      writeLaunchOptions(dshId, profile, {
+      writeLaunchOptions(pid, {
         args: sanitized.args,
         patches: sanitized.patches,
         env: sanitized.env,
         ...(sanitized.port !== undefined && { port: sanitized.port }),
       })
-      writeRunMode(dshId, profile, defaults.mode === 'shell' ? 'shell' : 'app')
+      writeRunMode(pid, defaults.mode === 'shell' ? 'shell' : 'app')
       return { ok: true, value: true }
     } catch (error) {
       return failFromError(error)

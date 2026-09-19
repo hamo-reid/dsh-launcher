@@ -22,6 +22,7 @@ import type {
   InsertConflict,
   IpcResult,
   PluginUsagePoint,
+  MarketAnnotations,
   MarketListOpts,
   MarketPage,
   MarketPlugin,
@@ -39,6 +40,8 @@ import type {
   ProfileSummary,
   ProfileValidation,
   RowCreateInput,
+  PluginApplyResult,
+  PluginUpdateInfo,
   RunEvent,
   RunDefaults,
   RunInfo,
@@ -150,6 +153,10 @@ export interface WindowApi {
     overview: () => Promise<IpcResult<InstalledOverviewRow[]>>
     /** Size of each plugin (inode-dedup) — manual, triggered by the calc button. */
     calcSizes: () => Promise<IpcResult<Record<string, number>>>
+    /** Check store-installed plugins for a newer npm release (manual; cached). */
+    checkUpdates: (opts?: { refresh?: boolean }) => Promise<IpcResult<PluginUpdateInfo[]>>
+    /** Apply plugin version updates to a profile (refused while it runs). */
+    applyUpdates: (dshId: string, profile: string, updates: { name: string; version: string }[]) => Promise<IpcResult<{ results: PluginApplyResult[] }>>
     reveal: (name: string) => Promise<IpcResult<boolean>>
     readme: (name: string) => Promise<IpcResult<{ content: string; dir: string }>>
     search: (query: string, opts?: { from?: number; size?: number }) => Promise<IpcResult<{ hits: NpmSearchHit[]; total: number }>>
@@ -182,6 +189,8 @@ export interface WindowApi {
     setSource: (next: MarketSourceState) => Promise<IpcResult<boolean>>
     /** Resolve one catalog entry (by url) to its install spec + meta. */
     resolve: (url: string) => Promise<IpcResult<{ spec: string | null; plugin: MarketPlugin | null }>>
+    /** Category / deprecation annotations for the installed-plugin overview. */
+    annotations: () => Promise<IpcResult<MarketAnnotations>>
   }
 
   trash: {

@@ -1,6 +1,6 @@
 import { lazy, useCallback, useEffect, useState } from 'react'
 import {
-  Button, Modal, Segmented, Select, theme, message,
+  Button, Modal, Segmented, Select, Tag, theme, message,
 } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
@@ -188,7 +188,10 @@ export default function ProfileSection() {
     { key: 'clone', label: t('profile.action.clone') },
     { key: 'migrate', label: t('profile.action.migrate') },
     { key: 'export', label: t('profile.action.export') },
-    { key: 'delete', label: t('profile.action.softDelete'), danger: true, confirmText: t('profile.action.softDeleteConfirm', { name: summary.name }) },
+    // A live profile cannot be soft-deleted (the core refuses it too).
+    ...(summary.running === true
+      ? []
+      : [{ key: 'delete', label: t('profile.action.softDelete'), danger: true, confirmText: t('profile.action.softDeleteConfirm', { name: summary.name }) } as MenuAction]),
   ]
 
   // ── 回收站 ─────────────────────────────────────────────────────────────
@@ -272,7 +275,12 @@ export default function ProfileSection() {
                 keyOf={summary => summary.name}
                 selectedKey={selected ?? undefined}
                 onSelect={summary => setSelected(summary.name)}
-                renderTitle={summary => summary.name}
+                renderTitle={summary => (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    {summary.name}
+                    {summary.running === true && <Tag color="success">{t('run.running')}</Tag>}
+                  </span>
+                )}
                 renderMeta={summary => t('profile.listMeta', { bundles: summary.bundles, plugins: summary.plugins, patch: summary.patchRows })}
                 actions={summary => <ConfirmMenu actions={actionsFor(summary)} onAction={key => handleAction(summary, key)} />}
                 loading={loading}

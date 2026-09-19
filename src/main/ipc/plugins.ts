@@ -6,13 +6,15 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } 
 import { join, resolve } from 'node:path'
 import {
   addLocalPlugin, addPlugin, buildInstalledOverview, findInstalledDir, initStore, installIntoProfile, listPlugins,
-  listProfileScopes, readPluginReadme, removePlugin, removePluginFromProfiles,
+  listProfileScopes, readPluginReadme, removePlugin, removePluginFromProfiles, storeVersions,
 } from '../core/plugins.ts'
 import { listComboPlugins } from '../core/combo.ts'
 import {
   cancelPluginDownload, cleanupPluginDownloads, listPluginDownloads, onDownloadsChange, startPluginDownload,
 } from '../core/pluginDownloads.ts'
+import { checkPluginUpdates } from '../core/plugin-updates.ts'
 import { contextForEntry, dshEntryById, dshScopes, pluginDir, profilesRootFor, type DshContext } from '../core/appState.ts'
+import { isProfileRunning } from './run.ts'
 import { loadSettings, saveSettings } from '../core/settings.ts'
 import { inlineRelativeImages } from '../core/app-util.ts'
 import { fetchPackageVersions, npmSearch } from '../core/npm.ts'
@@ -20,7 +22,7 @@ import { attachPluginSizes } from '../core/store-overview.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
 import { pathIdentifierInvalid, versionInvalid } from './validate.ts'
 import { handle } from './handle.ts'
-import type { ComboPlugin, DownloadSessionInfo, InstalledOverviewRow, IpcResult, NpmSearchHit, PackageVersionInfo, PluginUsagePoint } from '../../shared/types.ts'
+import type { ComboPlugin, DownloadSessionInfo, InstalledOverviewRow, IpcResult, NpmSearchHit, PackageVersionInfo, PluginApplyResult, PluginUpdateInfo, PluginUsagePoint } from '../../shared/types.ts'
 
 /** Validate + persist the plugin-store location (shared by `plugins:setDir`
  * and the onboarding wizard). On success the dir is made usable and saved. */
@@ -209,6 +211,51 @@ export function registerPluginsIpc(): void {
       const sizes: Record<string, number> = {}
       for (const row of rows) if (row.sizeBytes !== undefined) sizes[row.name] = row.sizeBytes
       return { ok: true, value: sizes }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Update detection (manual trigger): compare store-installed plugins against
+  // npm's `latest`. Memoized in the core with a short TTL; `refresh` bypasses it.
+  handle('plugins:checkUpdates', async (_event, opts?: { refresh?: boolean }): Promise<IpcResult<PluginUpdateInfo[]>> => {
+    try {
+      return { ok: true, value: await checkPluginUpdates(dshScopes(), pluginDir(), opts ?? {}) }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Apply one or more plugin version updates to a SPECIFIC profile: ensure each
+  // target version is archived, then re-point the profile's `file:` dependency.
+  // Refused while the profile runs — mutating a live profile's node_modules
+  // would race its runtime (same guard as rename/delete).
+  handle('plugins:applyUpdates', async (
+    _event, dshId: string, profile: string, updates: { name: string; version: string }[],
+  ): Promise<IpcResult<{ results: PluginApplyResult[] }>> => {
+    try {
+      const ctx = ctxOf(dshId)
+      if (ctx === null) return fail(E.dshNotFound)
+      if (pathIdentifierInvalid(profile)) return fail(E.nameInvalid)
+      if (!Array.isArray(updates)) return fail(E.nameInvalid)
+      if (isProfileRunning(dshId, profile)) return fail(E.runAlreadyRunning, { profile })
+      const store = pluginDir()
+      const results: PluginApplyResult[] = []
+      for (const update of updates) {
+        const name = typeof update?.name === 'string' ? update.name : ''
+        const version = typeof update?.version === 'string' ? update.version : ''
+        if (pathIdentifierInvalid(name) || versionInvalid(version)) {
+          results.push({ name, version, ok: false, text: 'invalid update target' })
+          continue
+        }
+        if (!storeVersions(store, name).includes(version)) {
+          const added = await addPlugin(store, `${name}@${version}`, name)
+          if (!added.ok) { results.push({ name, version, ok: false, text: added.text }); continue }
+        }
+        const linked = await installIntoProfile(profilesRootFor(ctx), profile, name, store, { version })
+        results.push({ name, version, ok: linked.ok, text: linked.text })
+      }
+      return { ok: true, value: { results } }
     } catch (error) {
       return failFromError(error)
     }

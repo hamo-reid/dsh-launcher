@@ -2,10 +2,12 @@
  * handler takes an explicit `dshId` — there is no global active dsh. */
 
 import { handle } from './handle.ts'
-import { deleteTrashItem, emptyTrash, listTrashItems, restoreTrashItem } from '../core/trash.ts'
+import { baseTrashName, deleteTrashItem, emptyTrash, listTrashItems, restoreTrashItem, trashDir } from '../core/trash.ts'
 import { contextForEntry, dshEntryById, type DshContext } from '../core/appState.ts'
+import { clearLaunchConfig, readProfileId } from '../core/launch-config.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
 import { pathIdentifierInvalid } from './validate.ts'
+import { join } from 'node:path'
 import type { IpcResult, TrashItem } from '../../shared/types.ts'
 
 function ctxOf(dshId: unknown): DshContext | null {
@@ -44,7 +46,10 @@ export function registerTrashIpc(): void {
       const ctx = ctxOf(dshId)
       if (ctx === null) return fail(E.dshNotFound)
       if (pathIdentifierInvalid(name)) return fail(E.nameInvalid)
+      // Permanently destroying the profile also discards its saved launch config.
+      const id = readProfileId(join(trashDir(ctx), name))
       deleteTrashItem(ctx, name)
+      clearLaunchConfig(id, `${dshId}::${baseTrashName(name)}`)
       return { ok: true, value: true }
     } catch (error) {
       return failFromError(error)
@@ -55,6 +60,10 @@ export function registerTrashIpc(): void {
     try {
       const ctx = ctxOf(dshId)
       if (ctx === null) return fail(E.dshNotFound)
+      // Drop each trashed profile's saved launch config before emptying.
+      for (const item of listTrashItems(ctx)) {
+        clearLaunchConfig(readProfileId(join(trashDir(ctx), item.name)), `${dshId}::${baseTrashName(item.name)}`)
+      }
       return { ok: true, value: emptyTrash(ctx) }
     } catch (error) {
       return failFromError(error)

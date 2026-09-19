@@ -21,6 +21,7 @@ import { registerLogsIpc } from './ipc/logs.ts'
 import { child, initLogger, logger, printBanner } from './core/logger.ts'
 import { askOnCloseEnabled, closeToTrayEnabled, loadSettings, openDatabase, saveSettings } from './core/settings.ts'
 import { configureAppState, pluginDir } from './core/appState.ts'
+import { migrateLaunchConfigKeys } from './core/launch-config.ts'
 import { configurePnpmStore } from './core/pnpm.ts'
 import { repairArchiveLinks } from './core/plugins.ts'
 
@@ -350,6 +351,9 @@ app.whenReady().then(async () => {
   await openDatabase(join(app.getPath('userData'), 'app.sqlite'))
   // Give app-level state the Electron `userData` dir for its defaults.
   configureAppState(app.getPath('userData'))
+  // One-time: re-key saved launch config from the legacy `<dshId>::<name>`
+  // scheme to stable profile ids (idempotent; no-op once migrated).
+  migrateLaunchConfigKeys()
   // Every pnpm invocation that doesn't pass an explicit store shares the plugin
   // library's store (`<pluginDir>/.pnpm-store`), so pnpm never falls back to
   // creating an unmanaged `<drive>\.pnpm-store` at a drive root.

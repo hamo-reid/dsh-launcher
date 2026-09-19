@@ -7,7 +7,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { linkSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { dirUniqueBytes } from './store-overview.ts'
+import { dirUniqueBytes, buildInstalledOverview } from './store-overview.ts'
+import type { DshScope } from './appState.ts'
 
 let root: string
 beforeAll(() => { root = mkdtempSync(join(tmpdir(), 'pm-size-')) })
@@ -43,5 +44,64 @@ describe('dirUniqueBytes', () => {
 
   it('handles a missing dir as zero', () => {
     expect(dirUniqueBytes(join(root, 'nope'))).toBe(0)
+  })
+})
+
+describe('buildInstalledOverview provenance', () => {
+  it('distinguishes official / store / local-link / external', () => {
+    const base = mkdtempSync(join(tmpdir(), 'pm-overview-'))
+    try {
+      const home = join(base, 'home')
+      const profileDir = join(home, 'profiles', 'alpha')
+      const nm = join(profileDir, 'node_modules')
+      const store = join(base, 'store')
+      const storePkg = join(store, 'archive', 'storeplug', '1.0.0', 'node_modules', 'storeplug')
+
+      for (const p of [
+        nm,
+        join(nm, '@deepseek-ai', 'dsh-base'),
+        join(nm, 'linkplug'),
+        join(nm, 'extplug'),
+        join(nm, 'storeplug'),
+        join(nm, 'agg'),
+        join(nm, 'subb'),
+        storePkg,
+      ]) mkdirSync(p, { recursive: true })
+
+      const pkg = (name: string, version: string): string => JSON.stringify({ name, version })
+      writeFileSync(join(nm, '@deepseek-ai', 'dsh-base', 'package.json'), pkg('@deepseek-ai/dsh-base', '0.1.0'))
+      writeFileSync(join(nm, 'linkplug', 'package.json'), pkg('linkplug', '1.0.0'))
+      writeFileSync(join(nm, 'extplug', 'package.json'), pkg('extplug', '2.0.0'))
+      writeFileSync(join(nm, 'storeplug', 'package.json'), pkg('storeplug', '1.0.0'))
+      writeFileSync(join(storePkg, 'package.json'), pkg('storeplug', '1.0.0'))
+      // An aggregate bundle whose patch references a sub-package.
+      writeFileSync(join(nm, 'agg', 'package.json'), JSON.stringify({ name: 'agg', version: '1.0.0', dsh: { bundle: { patch: 'cordis.patch.yml' } } }))
+      writeFileSync(join(nm, 'agg', 'cordis.patch.yml'), '- id: sub-row\n  name: subb\n')
+      writeFileSync(join(nm, 'subb', 'package.json'), pkg('subb', '1.0.0'))
+      writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
+        name: 'dsh-profile-alpha',
+        dependencies: {
+          '@deepseek-ai/dsh-base': '^0.1.0',
+          linkplug: 'link:../linkplug',
+          extplug: '^2.0.0',
+          storeplug: `file:${storePkg}`,
+        },
+        dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', 'storeplug', 'agg'] } },
+      }))
+
+      const dshes: DshScope[] = [{ id: 'd', name: 'dsh', version: '0.1.0', home }]
+      const rows = buildInstalledOverview(dshes, store)
+      const by = (n: string): typeof rows[number] | undefined => rows.find(r => r.name === n)
+
+      expect(by('@deepseek-ai/dsh-base')?.provenances).toEqual(['official'])
+      expect(by('@deepseek-ai/dsh-base')?.kind).toBe('template')
+      expect(by('linkplug')?.provenances).toEqual(['local-link'])
+      expect(by('extplug')?.provenances).toEqual(['external'])
+      expect(by('storeplug')?.provenances).toEqual(['store'])
+      expect(by('storeplug')?.kind).toBe('bundle')
+      expect(by('subb')?.provenances).toEqual(['sub-bundle'])
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
   })
 })

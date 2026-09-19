@@ -104,6 +104,68 @@ export interface PluginUsagePoint {
  * tracking (unresolved). */
 export type PluginSource = 'github' | 'npm' | 'local' | 'dsh' | 'store'
 
+/** The origin dimension, distinct from the kind/role dimension: how a plugin
+ * entered the store. `unknown` = archived before origin tracking existed. */
+export type PluginOrigin = 'npm' | 'github' | 'local' | 'unknown'
+
+/** What role a plugin currently plays for profiles.
+ * - `template`   — a dsh-shipped bundle (used but never in the store)
+ * - `bundle`     — activated as a `dsh.profile.bundles` layer somewhere
+ * - `dependency` — used (installed into a profile) but not a bundle layer
+ * - `store-only` — archived in the store but used by no profile */
+export type PluginKind = 'template' | 'bundle' | 'dependency' | 'store-only'
+
+/** The management/source axis, orthogonal to `PluginKind` (role): how a plugin
+ * is sourced for the profiles that use it.
+ * - `store`      — archived in the launcher plugin store (manageable)
+ * - `official`   — shipped by the dsh install (resolved from its install anchor)
+ * - `sub-bundle` — child package of an aggregate bundle (reserved; not yet detected)
+ * - `local-link` — profile dependency is a link:/file: outside the store
+ * - `external`   — resolved from node_modules but not launcher-managed */
+export type PluginProvenance = 'store' | 'official' | 'sub-bundle' | 'local-link' | 'external'
+
+/** Per-plugin update check result. npm-backed plugins compare against the
+ * registry's `latest` dist-tag; github-only / local origins have no reliable
+ * version source and are reported as `manual`. */
+export interface PluginUpdateInfo {
+  name: string
+  origin: PluginOrigin
+  /** Versions resolved in profiles (unique, non-empty). */
+  applied: string[]
+  /** Versions archived in the store (unique). */
+  archived: string[]
+  /** Latest installable version (npm `latest`), when known. */
+  latest?: string
+  /** True when `latest` is newer than every applied/archived version. */
+  updateAvailable: boolean
+  /** True when the origin cannot be auto-checked (github / local). */
+  manual: boolean
+}
+
+/** Outcome of applying one plugin version update to a profile. */
+export interface PluginApplyResult {
+  name: string
+  version: string
+  ok: boolean
+  text: string
+}
+
+/** One plugin's catalog-derived annotations (category + deprecation). */
+export interface MarketAnnotation {
+  category: string
+  /** Catalog entry name (the repo package name), for display. */
+  name?: string
+  deprecated?: boolean
+  replacement?: string
+}
+
+/** Catalog annotations keyed by npm name (falling back to the catalog name),
+ * for decorating the installed-plugin overview with category / deprecation. */
+export interface MarketAnnotations {
+  categories: Record<string, Record<string, string>>
+  plugins: Record<string, MarketAnnotation>
+}
+
 /** Lifecycle state of a download task. */
 export type DownloadStatus = 'running' | 'done' | 'failed' | 'cancelled'
 
@@ -149,6 +211,13 @@ export interface InstalledOverviewRow {
   /** Distinct origins of the archived versions (GitHub / npm / local folder),
    * plus `dsh` when it is a built-in template. Empty when nothing resolved. */
   sources: PluginSource[]
+  /** The origin dimension derived from the archived versions. */
+  origin?: PluginOrigin
+  /** The role this plugin currently plays for profiles. */
+  kind?: PluginKind
+  /** Every distinct management source observed across usage points + the store,
+   * ordered most-manageable first (see `primary` = `provenances[0]`). */
+  provenances?: PluginProvenance[]
   /** True for a dsh-bundled template (used by a profile but not in the store):
    * shown as built-in, not a manageable plugin. */
   builtin?: boolean
@@ -433,6 +502,8 @@ export interface ProfileSummary {
   bundles: number
   plugins: number
   patchRows: number
+  /** Whether a live runtime currently runs this profile (a delete is refused). */
+  running?: boolean
 }
 
 /** Lightweight profile listing under an explicit dsh (Run page launcher) —

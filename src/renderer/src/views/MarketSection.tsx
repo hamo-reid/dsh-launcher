@@ -9,13 +9,16 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  Alert, Button, Input, List, message, Modal, Pagination, Select, Space, Spin, Tag, theme,
+  Alert, Button, Input, List, message, Modal, Pagination, Popover, Select, Skeleton, Space, Tag, theme,
 } from 'antd'
-import { GithubOutlined, ReloadOutlined } from '@ant-design/icons'
+import { DatabaseOutlined, GithubOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
+import FilterChips from '../components/FilterChips.tsx'
 import Panel from '../components/Panel.tsx'
+import SearchInput from '../components/SearchInput.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
+import Toolbar from '../components/Toolbar.tsx'
 import FieldLabel from '../components/FieldLabel.tsx'
 import { MODAL } from '../theme.ts'
 import { DownloadVersionModal, InstallToProfileModal, toStoreMap } from './PluginsModals.tsx'
@@ -165,37 +168,8 @@ export default function MarketSection(): JSX.Element {
       <SectionHeading
         title={t('plugin.market.title', { count: total })}
         description={t('plugin.market.desc')}
+        extra={<Button icon={<ReloadOutlined />} onClick={() => void load(true)} disabled={loading}>{t('plugin.market.refresh')}</Button>}
       />
-
-      {/* Loading-route picker (user-selectable pipeline). */}
-      <Panel title={t('plugin.market.sourceLabel')}>
-        <Space wrap style={{ width: '100%' }} align="center">
-          <Select
-            value={srcState?.source ?? 'official'}
-            onChange={v => setSrcState(prev => ({ source: v as MarketSourceState['source'], url: prev?.url ?? '' }))}
-            style={{ minWidth: 200 }}
-            options={[
-              { value: 'official', label: t('plugin.market.source.official') },
-              { value: 'custom', label: t('plugin.market.source.custom') },
-            ]}
-          />
-          {srcState?.source === 'custom' && (
-            <Input
-              allowClear
-              value={customUrl}
-              onChange={e => setCustomUrl(e.target.value)}
-              placeholder={t('plugin.market.customUrlPlaceholder')}
-              style={{ minWidth: 320, maxWidth: 480 }}
-            />
-          )}
-          <Button loading={savingSource} onClick={() => void applySource()} disabled={srcState?.source === 'custom' && !customUrl.trim()}>
-            {t('common.save')}
-          </Button>
-          <Button icon={<ReloadOutlined />} onClick={() => void load(true)} disabled={loading}>
-            {t('plugin.market.refresh')}
-          </Button>
-        </Space>
-      </Panel>
 
       {error !== '' && (
         <Alert
@@ -208,19 +182,27 @@ export default function MarketSection(): JSX.Element {
       )}
 
       {srcState !== null && (
-        <Panel>
-          <Space wrap style={{ marginBottom: token.paddingSM }}>
-            <Input
-              allowClear
+        <Panel pad={false}>
+          <Toolbar chips={(category !== '' || q !== '') ? (
+            <FilterChips
+              items={[
+                ...(q !== '' ? [{ key: 'q', label: `${t('plugin.market.colSearch')}: ${q}`, onClose: () => { setQInput(''); setQ('') } }] : []),
+                ...(category !== '' ? [{ key: 'cat', label: `${t('plugin.market.field.category')}: ${catLabel(category)}`, onClose: () => { setCategory(''); setPage(1) } }] : []),
+              ]}
+              onClear={() => { setQInput(''); setQ(''); setCategory(''); setPage(1) }}
+              clearLabel={t('plugin.overview.clearFilters')}
+            />
+          ) : undefined}>
+            <SearchInput
               value={qInput}
-              onChange={e => setQInput(e.target.value)}
+              onChange={setQInput}
               placeholder={t('plugin.market.searchPlaceholder')}
-              style={{ maxWidth: 320 }}
+              ariaLabel={t('plugin.market.searchPlaceholder')}
             />
             <Select
               value={category}
               onChange={v => { setCategory(v); setPage(1) }}
-              style={{ minWidth: 150 }}
+              style={{ minWidth: 160 }}
               options={[
                 { value: '', label: t('plugin.market.categoryAll') },
                 ...categories.map(c => ({ value: c.id, label: c.label })),
@@ -229,17 +211,50 @@ export default function MarketSection(): JSX.Element {
             <Select
               value={sort}
               onChange={v => { setSort(v as MarketSort); setPage(1) }}
-              style={{ minWidth: 150 }}
+              style={{ width: 150 }}
               options={[
                 { value: 'stars', label: t('plugin.market.sort.stars') },
                 { value: 'downloads', label: t('plugin.market.sort.downloads') },
                 { value: 'newest', label: t('plugin.market.sort.newest') },
               ]}
             />
-          </Space>
+            {/* Loading-route picker (user-selectable pipeline), tucked into a popover. */}
+            <Popover
+              trigger="click"
+              placement="bottomRight"
+              content={(
+                <div style={{ width: 320, display: 'flex', flexDirection: 'column', gap: token.padding }}>
+                  <div>
+                    <FieldLabel>{t('plugin.market.sourceLabel')}</FieldLabel>
+                    <Select
+                      value={srcState.source}
+                      onChange={v => setSrcState(prev => ({ source: v as MarketSourceState['source'], url: prev?.url ?? '' }))}
+                      style={{ width: '100%' }}
+                      options={[
+                        { value: 'official', label: t('plugin.market.source.official') },
+                        { value: 'custom', label: t('plugin.market.source.custom') },
+                      ]}
+                    />
+                  </div>
+                  {srcState.source === 'custom' && (
+                    <Input allowClear value={customUrl} onChange={e => setCustomUrl(e.target.value)} placeholder={t('plugin.market.customUrlPlaceholder')} />
+                  )}
+                  <div style={{ color: token.colorTextTertiary, fontSize: token.fontSizeSM }}>{t('plugin.market.sourceHint')}</div>
+                  <Button type="primary" size="small" loading={savingSource} disabled={srcState.source === 'custom' && !customUrl.trim()} onClick={() => void applySource()}>
+                    {t('common.save')}
+                  </Button>
+                </div>
+              )}
+            >
+              <Button icon={<DatabaseOutlined />}>{t('plugin.market.sourceButton')}</Button>
+            </Popover>
+          </Toolbar>
 
+          <div style={{ padding: token.padding }}>
           {loading ? (
-            <div style={{ textAlign: 'center', padding: 24 }}><Spin /></div>
+            <Space orientation="vertical" style={{ width: '100%' }} size="middle">
+              {Array.from({ length: 5 }, (_, i) => <Skeleton key={i} active title paragraph={{ rows: 2 }} />)}
+            </Space>
           ) : (
             <List
               dataSource={rows}
@@ -289,17 +304,19 @@ export default function MarketSection(): JSX.Element {
             />
           )}
           {total > 0 && (
-            <Pagination
-              style={{ textAlign: 'center', marginTop: token.paddingSM }}
-              current={page}
-              pageSize={pageSize}
-              total={total}
-              showSizeChanger
-              pageSizeOptions={[10, 20, 50]}
-              onChange={(p) => setPage(p)}
-              onShowSizeChange={(_current, size) => { setPageSize(size); setPage(1) }}
-            />
+            <div style={{ textAlign: 'center', marginTop: token.padding }}>
+              <Pagination
+                current={page}
+                pageSize={pageSize}
+                total={total}
+                showSizeChanger
+                pageSizeOptions={[10, 20, 50]}
+                onChange={(p) => setPage(p)}
+                onShowSizeChange={(_current, size) => { setPageSize(size); setPage(1) }}
+              />
+            </div>
           )}
+          </div>
         </Panel>
       )}
 

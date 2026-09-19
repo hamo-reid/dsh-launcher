@@ -42,12 +42,13 @@ export interface AppSettings {
   marketSource?: MarketSource
   /** Custom market catalog URL, used when `marketSource === 'custom'`. */
   marketUrl?: string
-  /** Saved default launch parameters, keyed `<dshId>::<profile>` (see
-   * `appState.launchOptionsKey`). Kept out of the profile manifest on purpose so
-   * machine-specific patch paths never leak into an exported/imported profile. */
+  /** Saved default launch parameters, keyed `pid:<profileId>` (a stable id
+   * stored in each profile dir; see `core/launch-config.ts`). Kept out of the
+   * profile manifest on purpose so machine-specific patch paths never leak into
+   * an exported/imported profile. */
   launchOptions?: Record<string, LaunchOptions>
-  /** Last run mode per profile, keyed `<dshId>::<profile>`, so relaunching keeps
-   * the user's app/shell choice instead of resetting to `app`. */
+  /** Last run mode per stable profile id, keyed `pid:<profileId>`, so relaunching
+   * keeps the user's app/shell choice instead of resetting to `app`. */
   runModes?: Record<string, RunMode>
 }
 

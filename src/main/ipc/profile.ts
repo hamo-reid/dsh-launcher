@@ -158,7 +158,8 @@ export function registerProfileIpc(): void {
   handle('profile:summaries', (_event, dshId: string): IpcResult<ProfileSummary[]> => {
     const ctx = ctxOf(dshId)
     if (ctx === null) return fail(E.dshNotFound)
-    return { ok: true, value: listProfileSummaries(ctx) }
+    // Flag live profiles so the list can show "running" and refuse a delete.
+    return { ok: true, value: listProfileSummaries(ctx).map(s => ({ ...s, running: isProfileRunning(dshId, s.name) })) }
   })
 
   handle('profile:create', (_event, dshId: string, name: string, template?: string): IpcResult<boolean> => {
@@ -193,6 +194,9 @@ export function registerProfileIpc(): void {
     const ctx = ctxOf(dshId)
     if (ctx === null) return fail(E.dshNotFound)
     if (invalidName(name)) return fail(E.nameInvalid)
+    // A rename is refused while live; a delete must be too — moving the dir out
+    // from under a running dsh (whose cwd is inside it) leaves a half state.
+    if (isProfileRunning(dshId, name)) return fail(E.runAlreadyRunning, { profile: name })
     softDeleteProfile(ctx, name)
     return { ok: true, value: true }
   })

@@ -1,49 +1,41 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Alert, Button, Input, List, Menu, Modal, Space, Table, Tag, theme, message,
+  Alert, Badge, Button, Input, List, Menu, Modal, Pagination, Popover, Segmented, Select, Skeleton, Space, Tag, theme, message,
 } from 'antd'
-import { LoadingOutlined } from '@ant-design/icons'
+import { ArrowUpOutlined, ArrowDownOutlined, FilterOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
 import AppShell from '../components/AppShell.tsx'
+import EmptyState from '../components/EmptyState.tsx'
+import FieldLabel from '../components/FieldLabel.tsx'
+import FilterChips from '../components/FilterChips.tsx'
 import Panel from '../components/Panel.tsx'
+import SearchInput from '../components/SearchInput.tsx'
+import Toolbar from '../components/Toolbar.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
+import PluginCard from './PluginCard.tsx'
+import { loadFilters, saveFilters, type Bucket, type SortKey } from '../lib/pluginFilters.ts'
 import { DownloadVersionModal, PluginDetailModal, InstallToProfileModal, toStoreMap } from './PluginsModals.tsx'
 import MarketSection from './MarketSection.tsx'
-import type { InstalledOverviewRow, NpmSearchHit } from '../../../shared/types.ts'
+import type { InstalledOverviewRow, MarketAnnotations, NpmSearchHit, PluginKind, PluginOrigin, PluginProvenance, PluginUpdateInfo } from '../../../shared/types.ts'
 
 type PluginView = 'overview' | 'download' | 'install' | 'market'
 
 const PAGE_SIZE = 25
-
-/** Semantically-coloured source tags for the overview "source" column. */
-const SOURCE_COLORS: Record<string, string> = {
-  github: 'green',
-  npm: 'blue',
-  local: 'cyan',
-  dsh: 'purple',
-  store: 'default',
-}
+/** Cards per overview page (the grid paginates locally). */
+const CARDS_PER_PAGE = 24
 
 function fmtDate(iso: string): string {
   const d = new Date(iso)
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString()
 }
 
-function fmtBytes(n: number): string {
-  if (n < 1024) return `${n} B`
-  const units = ['KB', 'MB', 'GB', 'TB']
-  let v = n
-  let i = -1
-  do { v /= 1024; i++ } while (v >= 1024 && i < units.length - 1)
-  return `${v.toFixed(v >= 100 ? 0 : 1)} ${units[i]}`
-}
-
 /** 插件管理页：总览、下载中心、安装；详情 / 安装到 profile / 下载版本弹窗在 `PluginsModals`。
  * 下载中心：实时搜索（防抖）+ 分页加载更多 + 在库标记 + 可选版本下载。 */
 export default function PluginsSection() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { token } = theme.useToken()
+  const lang = i18n.language === 'zh' ? 'zh' : 'en'
   const [view, setView] = useState<PluginView>('overview')
 
   const [dir, setDir] = useState('')
@@ -59,6 +51,27 @@ export default function PluginsSection() {
   const [sizeLoading, setSizeLoading] = useState(false)
   // Store plugin names whose node_modules dir is missing on disk (stale).
   const [staleStoreNames, setStaleStoreNames] = useState<Set<string>>(new Set())
+
+  // Classification filters — multi-condition (OR within a dimension, AND across),
+  // plus the persisted sort. Loaded once from localStorage; saved on every change.
+  const [savedFilters] = useState(loadFilters)
+  const [bucket, setBucket] = useState<Bucket>(savedFilters.bucket)
+  const [origins, setOrigins] = useState<PluginOrigin[]>(savedFilters.origins)
+  const [kinds, setKinds] = useState<PluginKind[]>(savedFilters.kinds)
+  const [provenances, setProvenances] = useState<PluginProvenance[]>(savedFilters.provenances)
+  const [annotations, setAnnotations] = useState<MarketAnnotations | null>(null)
+  // Overview card sort + local pagination.
+  const [sortKey, setSortKey] = useState<SortKey>(savedFilters.sortKey)
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(savedFilters.sortDir)
+  const [page, setPage] = useState(1)
+
+  useEffect(() => {
+    saveFilters({ bucket, origins, kinds, provenances, sortKey, sortDir })
+  }, [bucket, origins, kinds, provenances, sortKey, sortDir])
+
+  // Update detection (manual; main-process cached).
+  const [updates, setUpdates] = useState<Map<string, PluginUpdateInfo>>(new Map())
+  const [updatesChecking, setUpdatesChecking] = useState(false)
 
   // Download center.
   const [dq, setDq] = useState('dsh')
@@ -116,6 +129,12 @@ export default function PluginsSection() {
       await Promise.all([load(), refreshStoreNames()])
     })()
   }, [refreshStoreNames])
+
+  // Catalog annotations (category / deprecation) for the overview — non-blocking;
+  // degrades to none when the market is unreachable.
+  useEffect(() => {
+    void window.api.market.annotations().then(r => { if (r.ok) setAnnotations(r.value) })
+  }, [])
 
   // 从市场 / 下载中心 / 安装切回「总览」时重载一次，让刚下载/安装的插件立即可
   // 见 —— view 切换不重挂载本组件，否则总览会一直持有旧的挂载时数据。
@@ -216,6 +235,15 @@ export default function PluginsSection() {
     setSizeMap(r.value)
   }
 
+  // Manual update check; the main process memoizes results for a short TTL.
+  const checkUpdates = async (refresh: boolean): Promise<void> => {
+    setUpdatesChecking(true)
+    const r = await window.api.plugins.checkUpdates(refresh ? { refresh: true } : undefined)
+    setUpdatesChecking(false)
+    if (!r.ok) { void message.error(apiErrorText(r)); return }
+    setUpdates(new Map(r.value.map(u => [u.name, u])))
+  }
+
   const install = (): void => {
     const s = source.trim()
     if (s === '') return
@@ -236,16 +264,53 @@ export default function PluginsSection() {
     await Promise.all([load(), refreshStoreNames()]) // 总览 + 在库名单同步刷新
   }
 
-  const versionCell = (versions: string[]): string => {
-    if (versions.length === 0) return '-'
-    if (versions.length === 1) return versions[0]
-    return t('plugin.overview.nVersions', { count: versions.length })
+  const overviewQ = search.trim().toLowerCase()
+  // Classification filters: bucket + multi-condition origin/kind/provenance.
+  // Within a dimension the selected values OR; across dimensions they AND.
+  const filteredOverview = useMemo(() => {
+    let rows = overview
+    if (overviewQ !== '') rows = rows.filter(x => x.name.toLowerCase().includes(overviewQ))
+    if (bucket === 'used') rows = rows.filter(x => x.usage.length > 0)
+    else if (bucket === 'unused') rows = rows.filter(x => x.inStore === true && x.usage.length === 0)
+    else if (bucket === 'update') rows = rows.filter(x => updates.get(x.name)?.updateAvailable === true)
+    else if (bucket === 'template') rows = rows.filter(x => x.kind === 'template')
+    if (origins.length > 0) rows = rows.filter(x => origins.includes(x.origin ?? 'unknown'))
+    if (kinds.length > 0) rows = rows.filter(x => kinds.includes(x.kind ?? 'dependency'))
+    if (provenances.length > 0) rows = rows.filter(x => (x.provenances ?? []).some(p => provenances.includes(p)))
+    return rows
+  }, [overview, overviewQ, bucket, origins, kinds, provenances, updates])
+
+  const catLabel = (id: string): string => {
+    const labels = annotations?.categories[id]
+    return labels?.[lang] ?? labels?.en ?? id
+  }
+  const updateCount = [...updates.values()].filter(u => u.updateAvailable).length
+
+  // Localized facet labels (kind / provenance need key-suffix mapping).
+  const kindLabel = (k: PluginKind): string => t(`plugin.kind.${k === 'store-only' ? 'storeOnly' : k}`)
+  const provLabel = (p: PluginProvenance): string => t(`plugin.provenance.${p === 'local-link' ? 'localLink' : p === 'sub-bundle' ? 'subBundle' : p}`)
+  const activeFilterCount = origins.length + kinds.length + provenances.length
+  const clearAllFilters = (): void => {
+    setBucket('all'); setOrigins([]); setKinds([]); setProvenances([]); setSortKey('name'); setSortDir('asc')
   }
 
-  const overviewQ = search.trim().toLowerCase()
-  const filteredOverview = overviewQ === '' ? overview : overview.filter(x => x.name.toLowerCase().includes(overviewQ))
-  // Sizes start unsorted (none computed); after a manual calc, default sort desc.
-  const sizeLoaded = Object.keys(sizeMap).length > 0
+  // Sort + paginate the filtered rows locally (direction-aware).
+  const sortedOverview = useMemo(() => {
+    const dir = sortDir === 'asc' ? 1 : -1
+    const arr = [...filteredOverview]
+    switch (sortKey) {
+      case 'size': return arr.sort((a, b) => ((sizeMap[a.name] ?? -1) - (sizeMap[b.name] ?? -1)) * dir)
+      case 'versions': return arr.sort((a, b) => (a.versions.length - b.versions.length) * dir)
+      case 'usage': return arr.sort((a, b) => (a.usage.length - b.usage.length) * dir)
+      default: return arr.sort((a, b) => a.name.localeCompare(b.name) * dir)
+    }
+  }, [filteredOverview, sortKey, sortDir, sizeMap])
+  const lastPage = Math.max(1, Math.ceil(sortedOverview.length / CARDS_PER_PAGE))
+  const currentPage = Math.min(page, lastPage)
+  const pagedOverview = sortedOverview.slice((currentPage - 1) * CARDS_PER_PAGE, currentPage * CARDS_PER_PAGE)
+
+  // Reset to the first page whenever the filter / sort changes.
+  useEffect(() => { setPage(1) }, [overviewQ, bucket, origins, kinds, provenances, sortKey, sortDir])
 
   return (
     <>
@@ -262,100 +327,178 @@ export default function PluginsSection() {
     >
       {view === 'overview' && (
         <Space orientation="vertical" style={{ width: '100%' }} size="middle">
-          <SectionHeading title={t('plugin.overview.title', { count: filteredOverview.length })} />
-          {dirMissing && <Alert type="warning" showIcon title={t('plugin.dirMissing')} />}
-          <Panel>
-          <Space style={{ marginBottom: token.paddingSM }} wrap>
-            <Input
-              allowClear
-              placeholder={t('plugin.overview.searchPlaceholder')}
-              value={search}
-              onChange={event => setSearch(event.target.value)}
-              style={{ maxWidth: 280 }}
-            />
-            <Button loading={sizeLoading} onClick={() => void calcSizes()}>
-              {t('plugin.overview.calcSize')}
-            </Button>
-          </Space>
-          <Table
-            size="small"
-            rowKey="name"
-            loading={overviewLoading}
-            dataSource={filteredOverview}
-            pagination={{ pageSize: 20, showSizeChanger: true }}
-            locale={{ emptyText: t('plugin.overview.empty') }}
-            onRow={r => ({ onClick: () => setTarget(r), style: { cursor: 'pointer' } })}
-            columns={[
-              {
-                title: t('plugin.overview.colName'),
-                dataIndex: 'name',
-                ellipsis: true,
-                render: (name: string) => {
-                  const stale = staleStoreNames.has(name)
-                  return (
-                    <Space size={4} wrap>
-                      <span>{name}</span>
-                      {stale && <Tag color="error">{t('plugin.stale')}</Tag>}
-                      {stale && <Button size="small" danger type="link" style={{ padding: 0 }} onClick={e => { e.stopPropagation(); deleteStale(name) }}>{t('plugin.removeStale')}</Button>}
-                    </Space>
-                  )
-                },
-              },
-              {
-                title: t('plugin.overview.colVersions'),
-                dataIndex: 'versions',
-                width: 140,
-                ellipsis: { showTitle: false },
-                render: (versions: string[]) => <span title={versions.join('、')}>{versionCell(versions)}</span>,
-              },
-              {
-                title: t('plugin.overview.colSize'),
-                key: 'size',
-                width: 110,
-                defaultSortOrder: sizeLoaded ? ('descend' as const) : undefined,
-                sorter: (a: InstalledOverviewRow, b: InstalledOverviewRow) => (sizeMap[a.name] ?? 0) - (sizeMap[b.name] ?? 0),
-                render: (_: unknown, r: InstalledOverviewRow) => {
-                  const bytes = sizeMap[r.name]
-                  return <span>{bytes !== undefined ? fmtBytes(bytes) : '-'}</span>
-                },
-              },
-              {
-                title: t('plugin.overview.colSource'),
-                key: 'source',
-                width: 150,
-                render: (_: unknown, r: InstalledOverviewRow) => (
-                  <Space size={4} wrap>
-                    {(r.sources ?? []).map(s => (
-                      <Tag key={s} color={SOURCE_COLORS[s] ?? 'default'}>{t(`plugin.source.${s}`)}</Tag>
-                    ))}
-                    {r.sources.length === 0 && <span style={{ color: token.colorTextTertiary }}>-</span>}
-                  </Space>
-                ),
-              },
-              {
-                title: t('plugin.overview.colUsage'),
-                key: 'usage',
-                width: 140,
-                render: (_: unknown, r: InstalledOverviewRow) => {
-                  const dshs = new Set(r.usage.map(u => u.dsh))
-                  return (
-                    <Space size={4} wrap>
-                      <Tag>{t('plugin.overview.usageN', { count: r.usage.length })}</Tag>
-                      <Tag>{t('plugin.overview.dshN', { count: dshs.size })}</Tag>
-                    </Space>
-                  )
-                },
-              },
-              {
-                title: t('plugin.overview.colDetail'),
-                key: 'detail',
-                width: 80,
-                render: (_: unknown, r: InstalledOverviewRow) => (
-                  <Button size="small" onClick={event => { event.stopPropagation(); setTarget(r) }}>{t('plugin.overview.view')}</Button>
-                ),
-              },
-            ]}
+          <SectionHeading
+            title={t('plugin.overview.title')}
+            description={t('plugin.overview.summary', { total: overview.length, shown: filteredOverview.length })}
+            extra={
+              <Space size={8}>
+                <Button loading={sizeLoading} onClick={() => void calcSizes()}>{t('plugin.overview.calcSize')}</Button>
+                <Button type="primary" ghost loading={updatesChecking} onClick={() => void checkUpdates(false)}>{t('plugin.overview.checkUpdates')}</Button>
+              </Space>
+            }
           />
+          {dirMissing && <Alert type="warning" showIcon title={t('plugin.dirMissing')} />}
+          <Panel pad={false}>
+            <Toolbar chips={activeFilterCount > 0 ? (
+              <FilterChips
+                items={[
+                  ...origins.map(v => ({ key: `o:${v}`, label: `${t('plugin.overview.facet.origin')}: ${t(`plugin.source.${v}`)}`, onClose: () => setOrigins(list => list.filter(x => x !== v)) })),
+                  ...kinds.map(v => ({ key: `k:${v}`, label: `${t('plugin.overview.facet.kind')}: ${kindLabel(v)}`, onClose: () => setKinds(list => list.filter(x => x !== v)) })),
+                  ...provenances.map(v => ({ key: `p:${v}`, label: `${t('plugin.overview.facet.provenance')}: ${provLabel(v)}`, onClose: () => setProvenances(list => list.filter(x => x !== v)) })),
+                ]}
+                onClear={clearAllFilters}
+                clearLabel={t('plugin.overview.clearFilters')}
+              />
+            ) : undefined}>
+              <SearchInput
+                value={search}
+                onChange={setSearch}
+                placeholder={t('plugin.overview.searchPlaceholder')}
+                ariaLabel={t('plugin.overview.searchPlaceholder')}
+              />
+              <Segmented
+                value={bucket}
+                onChange={value => setBucket(value as Bucket)}
+                options={[
+                  { value: 'all', label: t('plugin.overview.bucket.all') },
+                  { value: 'used', label: t('plugin.overview.bucket.used') },
+                  { value: 'unused', label: t('plugin.overview.bucket.unused') },
+                  { value: 'update', label: t('plugin.overview.bucket.update', { count: updateCount }) },
+                  { value: 'template', label: t('plugin.overview.bucket.template') },
+                ]}
+              />
+              <Popover
+                trigger="click"
+                placement="bottomRight"
+                content={(
+                  <div style={{ width: 280, display: 'flex', flexDirection: 'column', gap: token.padding }}>
+                    <div>
+                      <FieldLabel>{t('plugin.overview.facet.origin')}</FieldLabel>
+                      <Select
+                        mode="multiple" allowClear maxTagCount="responsive" value={origins}
+                        onChange={value => setOrigins(value as PluginOrigin[])}
+                        placeholder={t('plugin.overview.originAll')}
+                        style={{ width: '100%' }}
+                        options={[
+                          { value: 'npm', label: t('plugin.source.npm') },
+                          { value: 'github', label: t('plugin.source.github') },
+                          { value: 'local', label: t('plugin.source.local') },
+                          { value: 'unknown', label: t('plugin.source.unknown') },
+                        ]}
+                      />
+                    </div>
+                    <div>
+                      <FieldLabel>{t('plugin.overview.facet.kind')}</FieldLabel>
+                      <Select
+                        mode="multiple" allowClear maxTagCount="responsive" value={kinds}
+                        onChange={value => setKinds(value as PluginKind[])}
+                        placeholder={t('plugin.overview.kindAll')}
+                        style={{ width: '100%' }}
+                        options={[
+                          { value: 'bundle', label: kindLabel('bundle') },
+                          { value: 'dependency', label: kindLabel('dependency') },
+                          { value: 'template', label: kindLabel('template') },
+                          { value: 'store-only', label: kindLabel('store-only') },
+                        ]}
+                      />
+                    </div>
+                    <div>
+                      <FieldLabel>{t('plugin.overview.facet.provenance')}</FieldLabel>
+                      <Select
+                        mode="multiple" allowClear maxTagCount="responsive" value={provenances}
+                        onChange={value => setProvenances(value as PluginProvenance[])}
+                        placeholder={t('plugin.overview.provenanceAll')}
+                        style={{ width: '100%' }}
+                        options={[
+                          { value: 'store', label: provLabel('store') },
+                          { value: 'official', label: provLabel('official') },
+                          { value: 'sub-bundle', label: provLabel('sub-bundle') },
+                          { value: 'local-link', label: provLabel('local-link') },
+                          { value: 'external', label: provLabel('external') },
+                        ]}
+                      />
+                    </div>
+                    {activeFilterCount > 0 && (
+                      <Button size="small" onClick={clearAllFilters}>{t('plugin.overview.clearFilters')}</Button>
+                    )}
+                  </div>
+                )}
+              >
+                <Badge count={activeFilterCount} size="small" offset={[-2, 2]}>
+                  <Button icon={<FilterOutlined />}>{t('plugin.overview.filters')}</Button>
+                </Badge>
+              </Popover>
+              <Select
+                value={sortKey}
+                onChange={value => {
+                  const key = value as SortKey
+                  setSortKey(key)
+                  // Name reads best ascending; the numeric dimensions descending.
+                  setSortDir(key === 'name' ? 'asc' : 'desc')
+                }}
+                style={{ width: 150 }}
+                options={[
+                  { value: 'name', label: t('plugin.overview.sort.name') },
+                  { value: 'size', label: t('plugin.overview.sort.size') },
+                  { value: 'versions', label: t('plugin.overview.sort.versions') },
+                  { value: 'usage', label: t('plugin.overview.sort.usage') },
+                ]}
+              />
+              <Button
+                aria-label={t(sortDir === 'asc' ? 'plugin.overview.sortAsc' : 'plugin.overview.sortDesc')}
+                title={t(sortDir === 'asc' ? 'plugin.overview.sortAsc' : 'plugin.overview.sortDesc')}
+                icon={sortDir === 'asc' ? <ArrowUpOutlined /> : <ArrowDownOutlined />}
+                onClick={() => setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))}
+              />
+            </Toolbar>
+
+            <div style={{ padding: token.padding }}>
+              {overviewLoading ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: token.padding }}>
+                  {Array.from({ length: 6 }, (_, i) => (
+                    <div key={i} style={{ border: `1px solid ${token.colorBorder}`, borderRadius: token.borderRadiusLG, padding: token.padding }}>
+                      <Skeleton active title={false} paragraph={{ rows: 3 }} />
+                    </div>
+                  ))}
+                </div>
+              ) : sortedOverview.length === 0 ? (
+                <EmptyState title={t('plugin.overview.empty')} description={t('plugin.overview.emptyDesc')} />
+              ) : (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: token.padding }}>
+                    {pagedOverview.map(r => {
+                      const ann = annotations?.plugins[r.name]
+                      return (
+                        <PluginCard
+                          key={r.name}
+                          row={r}
+                          update={updates.get(r.name)}
+                          annotation={ann}
+                          categoryLabel={ann !== undefined ? catLabel(ann.category) : ''}
+                          sizeBytes={sizeMap[r.name]}
+                          stale={staleStoreNames.has(r.name)}
+                          onOpen={() => setTarget(r)}
+                          onInstallToProfile={() => { setTarget(null); setInstallPkg(r.name) }}
+                          onUninstall={() => void uninstall(r.name)}
+                          onReveal={() => void revealDir(r.name)}
+                          onDeleteStale={() => deleteStale(r.name)}
+                        />
+                      )
+                    })}
+                  </div>
+                  {lastPage > 1 && (
+                    <Pagination
+                      style={{ textAlign: 'center', marginTop: token.padding }}
+                      current={currentPage}
+                      pageSize={CARDS_PER_PAGE}
+                      total={sortedOverview.length}
+                      showSizeChanger={false}
+                      onChange={setPage}
+                    />
+                  )}
+                </>
+              )}
+            </div>
           </Panel>
         </Space>
       )}
@@ -366,27 +509,34 @@ export default function PluginsSection() {
         <Space orientation="vertical" style={{ width: '100%' }} size="middle">
           <SectionHeading title={t('plugin.download.title')} description={t('plugin.download.desc')} />
           {dirMissing && <Alert type="warning" showIcon title={t('plugin.dirMissingDownload')} />}
-          <Panel>
-          <Input
-            allowClear
-            value={dq}
-            onChange={event => setDq(event.target.value)}
-            onPressEnter={() => void runSearch(dq, false)}
-            placeholder={t('plugin.download.searchPlaceholder')}
-            suffix={searching ? <LoadingOutlined /> : undefined}
-            style={{ maxWidth: 480, marginBottom: token.paddingSM }}
-          />
+          <Panel pad={false}>
+          <Toolbar>
+            <SearchInput
+              value={dq}
+              onChange={setDq}
+              onPressEnter={() => void runSearch(dq, false)}
+              placeholder={t('plugin.download.searchPlaceholder')}
+              loading={searching}
+              ariaLabel={t('plugin.download.searchPlaceholder')}
+              style={{ minWidth: 240, maxWidth: 480 }}
+            />
+          </Toolbar>
 
+          <div style={{ padding: token.padding }}>
           {total > 0 && hits.length > 0 && (
             <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, marginBottom: token.paddingSM }}>
               {t('plugin.download.results', { total, loaded: hits.length })}
             </div>
           )}
 
+          {searching ? (
+            <Space orientation="vertical" style={{ width: '100%' }} size="middle">
+              {Array.from({ length: 5 }, (_, i) => <Skeleton key={i} active title paragraph={{ rows: 2 }} />)}
+            </Space>
+          ) : (
           <List
             dataSource={hits}
             rowKey="name"
-            loading={searching}
             locale={{
               emptyText: (dq ?? '') === 'dsh' ? t('plugin.download.emptyHint') : t('plugin.download.noMatch'),
             }}
@@ -428,12 +578,14 @@ export default function PluginsSection() {
               )
             }}
           />
+          )}
 
           {!searching && hits.length > 0 && hits.length < total && (
-            <div style={{ textAlign: 'center', marginTop: token.paddingSM }}>
+            <div style={{ textAlign: 'center', marginTop: token.padding }}>
               <Button onClick={loadMore} loading={loadingMore}>{t('plugin.download.loadMore')}</Button>
             </div>
           )}
+          </div>
           </Panel>
         </Space>
       )}

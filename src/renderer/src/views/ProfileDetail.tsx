@@ -21,6 +21,7 @@ import Panel from '../components/Panel.tsx'
 import ScrollModal from '../components/ScrollModal.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
 import StatusTag from '../components/StatusTag.tsx'
+import { PluginUpdatesModal } from './PluginsModals.tsx'
 import { MODAL } from '../theme.ts'
 
 // The Monaco wrapper pulls the whole editor; keep it out of the first parse.
@@ -101,6 +102,9 @@ export default function ProfileDetailView({ dshId, name, onChanged, onRenamed }:
   const [renameOpen, setRenameOpen] = useState(false)
   const [renameValue, setRenameValue] = useState('')
   const [renaming, setRenaming] = useState(false)
+
+  // Per-profile plugin updates.
+  const [updatesOpen, setUpdatesOpen] = useState(false)
 
   // Cross-profile patch transfer.
   const [transferOpen, setTransferOpen] = useState(false)
@@ -616,7 +620,12 @@ const loadSeq = useRef(0)
   // the global ones (validate / rename / reveal / inspector).
   const sectionActions = (): ReactNode => {
     if (section === 'deps') {
-      return <Button size="small" icon={<PlusOutlined />} onClick={() => setDepsAddOpen(v => !v)}>{t('profile.workspace.depAdd')}</Button>
+      return (
+        <Space size={8}>
+          <Button size="small" icon={<ReloadOutlined />} onClick={() => setUpdatesOpen(true)}>{t('plugin.update.check')}</Button>
+          <Button size="small" icon={<PlusOutlined />} onClick={() => setDepsAddOpen(v => !v)}>{t('profile.workspace.depAdd')}</Button>
+        </Space>
+      )
     }
     if (section === 'bundles') {
       return (
@@ -979,6 +988,14 @@ const loadSeq = useRef(0)
           </Space>
         </Space>
       </Modal>
+
+      <PluginUpdatesModal
+        open={updatesOpen}
+        dshId={dshId}
+        profile={name}
+        onClose={() => setUpdatesOpen(false)}
+        onDone={() => { void load(); onChanged?.() }}
+      />
     </div>
     </Loadable>
   )

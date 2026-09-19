@@ -10,6 +10,7 @@ import { LAYOUT } from './theme.ts'
 import OnboardingModal from './components/OnboardingModal.tsx'
 import CloseConfirmModal from './components/CloseConfirmModal.tsx'
 import DownloadPanel from './components/DownloadPanel.tsx'
+import { HEALTH_DIRTY_EVENT } from './lib/ipc.ts'
 import type { HealthIssue } from '../../shared/types.ts'
 
 // Views are lazy so a tab's heavy deps (markdown renderer, dnd-kit) only parse
@@ -115,6 +116,13 @@ export default function App() {
   useEffect(() => {
     if (tab === 'dsh' || tab === 'plugins') void refreshHealth()
   }, [tab])
+  // Sections that change dsh/store state dispatch this so the banner updates
+  // immediately, without waiting for a tab switch.
+  useEffect(() => {
+    const handler = (): void => { void refreshHealth() }
+    window.addEventListener(HEALTH_DIRTY_EVENT, handler)
+    return () => window.removeEventListener(HEALTH_DIRTY_EVENT, handler)
+  }, [])
 
   const TABS: { key: Tab; label: string; icon: ReactNode }[] = [
     { key: 'dsh', label: t('app.tab.dsh'), icon: <RobotOutlined /> },
