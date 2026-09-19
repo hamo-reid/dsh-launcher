@@ -2,7 +2,10 @@
  * (`settings:*`). */
 
 import { app, dialog } from 'electron'
-import { askOnCloseEnabled, closeToTrayEnabled, loadSettings, saveSettings } from '../core/settings.ts'
+import { readFileSync, writeFileSync } from 'node:fs'
+import {
+  askOnCloseEnabled, closeToTrayEnabled, exportSettings, importSettings, loadSettings, patchSettings,
+} from '../core/settings.ts'
 import { dshVersionDir, pluginDir, readDshState, shouldRunOnboarding } from '../core/appState.ts'
 import { failFromError } from '../core/errors.ts'
 import { handle } from './handle.ts'
@@ -25,7 +28,7 @@ export function registerSettingsIpc(): void {
 
   handle('settings:setUiLanguage', (_event, lng: string): IpcResult<boolean> => {
     try {
-      saveSettings({ ...loadSettings(), uiLanguage: lng })
+      patchSettings({ uiLanguage: lng })
       return { ok: true, value: true }
     } catch (error) {
       return failFromError(error)
@@ -42,7 +45,7 @@ export function registerSettingsIpc(): void {
 
   handle('settings:setCloseToTray', (_event, enabled: boolean): IpcResult<boolean> => {
     try {
-      saveSettings({ ...loadSettings(), closeToTray: enabled })
+      patchSettings({ closeToTray: enabled })
       return { ok: true, value: true }
     } catch (error) {
       return failFromError(error)
@@ -59,7 +62,7 @@ export function registerSettingsIpc(): void {
 
   handle('settings:setAskOnClose', (_event, enabled: boolean): IpcResult<boolean> => {
     try {
-      saveSettings({ ...loadSettings(), askOnClose: enabled })
+      patchSettings({ askOnClose: enabled })
       return { ok: true, value: true }
     } catch (error) {
       return failFromError(error)
@@ -79,7 +82,7 @@ export function registerSettingsIpc(): void {
   handle('settings:setNodePreference', (_event, preference: 'system' | 'bundled'): IpcResult<boolean> => {
     try {
       const value = preference === 'bundled' ? 'bundled' : 'system'
-      saveSettings({ ...loadSettings(), nodePreference: value })
+      patchSettings({ nodePreference: value })
       return { ok: true, value: true }
     } catch (error) {
       return failFromError(error)
@@ -128,8 +131,7 @@ export function registerSettingsIpc(): void {
         const res = setVersionDirValue(dshVersionDir)
         if (!res.ok) return res
       }
-      saveSettings({
-        ...loadSettings(),
+      patchSettings({
         ...(typeof uiLanguage === 'string' && uiLanguage.trim() !== ''
           ? { uiLanguage: uiLanguage.trim() }
           : {}),
@@ -168,6 +170,40 @@ export function registerSettingsIpc(): void {
   handle('app:checkUpdate', async (): Promise<IpcResult<AppUpdateInfo>> => {
     try {
       return { ok: true, value: await checkAppUpdate(app.getVersion()) }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // ── settings backup / restore ───────────────────────────────────────────────
+
+  /** Export the settings to a user-chosen JSON file. `''` = cancelled. */
+  handle('settings:export', async (): Promise<IpcResult<string>> => {
+    try {
+      const picked = await dialog.showSaveDialog({
+        title: '导出设置',
+        defaultPath: 'dsh-launcher-settings.json',
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      })
+      if (picked.canceled || picked.filePath === '') return { ok: true, value: '' }
+      writeFileSync(picked.filePath, exportSettings())
+      return { ok: true, value: picked.filePath }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  /** Import settings from a JSON file. `false` = cancelled. */
+  handle('settings:import', async (): Promise<IpcResult<boolean>> => {
+    try {
+      const picked = await dialog.showOpenDialog({
+        title: '导入设置',
+        properties: ['openFile'],
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      })
+      if (picked.canceled || picked.filePaths.length === 0) return { ok: true, value: false }
+      importSettings(readFileSync(picked.filePaths[0], 'utf8'))
+      return { ok: true, value: true }
     } catch (error) {
       return failFromError(error)
     }

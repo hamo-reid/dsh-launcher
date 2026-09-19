@@ -224,6 +224,10 @@ export interface WindowApi {
     getNodeEnvironment: () => Promise<IpcResult<NodeEnvironment>>
     /** Persist which node to use for launching dsh (`'system'` | `'bundled'`). */
     setNodePreference: (preference: 'system' | 'bundled') => Promise<IpcResult<boolean>>
+    /** Export settings to a user-chosen JSON file (`''` = cancelled). */
+    exportSettings: () => Promise<IpcResult<string>>
+    /** Import settings from a JSON file (`false` = cancelled). */
+    importSettings: () => Promise<IpcResult<boolean>>
   }
 
   logs: {

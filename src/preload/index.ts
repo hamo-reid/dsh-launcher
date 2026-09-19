@@ -254,6 +254,10 @@ const api = {
       ipcRenderer.invoke('settings:getNodeEnvironment'),
     setNodePreference: (preference: 'system' | 'bundled'): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('settings:setNodePreference', preference),
+    exportSettings: (): Promise<IpcResult<string>> =>
+      ipcRenderer.invoke('settings:export'),
+    importSettings: (): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('settings:import'),
   },
 
   trash: {

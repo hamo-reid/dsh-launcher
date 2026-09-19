@@ -12,7 +12,7 @@
  * installable. Nothing outside a catalog entry is ever accepted.
  */
 
-import { loadSettings, saveSettings } from './settings.ts'
+import { loadSettings, patchSettings } from './settings.ts'
 import { child, logger } from './logger.ts'
 import type { MarketAnnotations, MarketCatalog, MarketPage, MarketPlugin, MarketSort, MarketSource, MarketSourceState } from '../../shared/types.ts'
 
@@ -46,8 +46,7 @@ export function marketSourceState(): MarketSourceState {
 export function setMarketSourceState(next: MarketSourceState): boolean {
   const url = next.url.trim()
   if (next.source === 'custom' && !isHttpUrl(url)) return false
-  saveSettings({
-    ...loadSettings(),
+  patchSettings({
     marketSource: next.source,
     ...(next.source === 'custom' ? { marketUrl: url } : {}),
   })

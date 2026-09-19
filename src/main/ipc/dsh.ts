@@ -11,13 +11,13 @@ import {
 } from '../core/dsh.ts'
 import {
   contextForEntry, dshEntryById, dshVersionDir, effectiveProfileDir, legacyProfilesDir,
-  readDshState, writeDshState,
+  readDshState, updateDshState, writeDshState,
 } from '../core/appState.ts'
 import { listProfileInfos } from '../core/home.ts'
 import { startDshDownload } from '../core/pluginDownloads.ts'
 import { clearDshLaunchConfig } from '../core/launch-config.ts'
 import { listRuns } from './run.ts'
-import { loadSettings, saveSettings } from '../core/settings.ts'
+import { patchSettings } from '../core/settings.ts'
 import { fetchPackageVersions } from '../core/npm.ts'
 import { majorOfVersion } from '../core/version.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
@@ -93,7 +93,7 @@ export function setVersionDirValue(dir: string): IpcResult<boolean> {
   try {
     const trimmed = dir.trim()
     if (trimmed === '') {
-      saveSettings({ ...loadSettings(), dshVersionDir: undefined })
+      patchSettings({ dshVersionDir: undefined })
       return { ok: true, value: true }
     }
     // Normalize to an absolute path; create-allowed (the repo dir is made on
@@ -102,7 +102,7 @@ export function setVersionDirValue(dir: string): IpcResult<boolean> {
     if (existsSync(target) && !statSync(target).isDirectory()) {
       return fail(E.storeNotDir, { path: target })
     }
-    saveSettings({ ...loadSettings(), dshVersionDir: target })
+    patchSettings({ dshVersionDir: target })
     return { ok: true, value: true }
   } catch (error) {
     return failFromError(error)
@@ -188,7 +188,10 @@ export function registerDshIpc(): void {
     const sessionId = startDshDownload(entry.name, `→ v${target}`, async patchStep => {
       const result = await updateDsh(entry, dshVersionDir(), { version: target },
         step => patchStep(toDownloadStep(step)))
-      writeDshState(dshes.map(d => d.id === id ? { ...d, version: result.version } : d))
+      // Re-read the CURRENT registry at write time — the update job outlives the
+      // handler, so replaying the handler-start snapshot would clobber a dsh that
+      // was added/renamed/removed meanwhile (lost update).
+      updateDshState(list => list.map(d => d.id === id ? { ...d, version: result.version } : d))
       logger.info(`dsh updated: ${entry.name} ${entry.version} → ${result.version} (backup ${result.backupDir})`)
     })
     return { ok: true, value: { id: sessionId } }
@@ -320,7 +323,7 @@ export function registerDshIpc(): void {
         versionDir = repoDir
         // 用户在安装对话框把版本库指向了非当前设置的目录：写回设置，让「官方安装到指定目录」
         // 持久可锚定（删除/清理用 entry.versionDir 而不是之后可能变化的 dshVersionDir()）。
-        if (repoDir !== currentRoot) saveSettings({ ...loadSettings(), dshVersionDir: repoDir })
+        if (repoDir !== currentRoot) patchSettings({ dshVersionDir: repoDir })
       }
       const name = safeVersionName(options?.name)
       const target = join(versionDir, name)

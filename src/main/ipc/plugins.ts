@@ -16,7 +16,7 @@ import { checkPluginUpdates } from '../core/plugin-updates.ts'
 import { installSpecFor, marketSourceState, resolveMarket } from '../core/market.ts'
 import { contextForEntry, dshEntryById, dshScopes, pluginDir, profilesRootFor, type DshContext } from '../core/appState.ts'
 import { isProfileRunning, listRuns } from './run.ts'
-import { loadSettings, saveSettings } from '../core/settings.ts'
+import { patchSettings } from '../core/settings.ts'
 import { inlineRelativeImages } from '../core/app-util.ts'
 import { fetchPackageVersions, npmSearch } from '../core/npm.ts'
 import { attachPluginSizes } from '../core/store-overview.ts'
@@ -52,7 +52,7 @@ export function setPluginStoreDir(dir: string): IpcResult<boolean> {
       }
     }
     initStore(target)
-    saveSettings({ ...loadSettings(), pluginDir: target })
+    patchSettings({ pluginDir: target })
     return { ok: true, value: true }
   } catch (error) {
     return fail(E.storeUnusable, { detail: String(error) })

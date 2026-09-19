@@ -15,7 +15,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { listProfiles, profileDir } from './home.ts'
 import { contextForEntry, readDshState, type DshContext } from './appState.ts'
-import { loadSettings, saveSettings } from './settings.ts'
+import { loadSettings, updateSettings } from './settings.ts'
 import { logger } from './logger.ts'
 import type { LaunchOptions, RunMode } from '../../shared/types.ts'
 
@@ -80,8 +80,9 @@ export function readLaunchOptions(id: string): LaunchOptions {
 
 /** Persist (replace) a profile's saved launch parameters. */
 export function writeLaunchOptions(id: string, options: LaunchOptions): void {
-  const s = loadSettings()
-  saveSettings({ ...s, launchOptions: { ...(s.launchOptions ?? {}), [key(id)]: options } })
+  updateSettings((draft) => {
+    draft.launchOptions = { ...(draft.launchOptions ?? {}), [key(id)]: options }
+  })
 }
 
 /** The last run mode for a profile id (`'app'` when unset). */
@@ -91,31 +92,32 @@ export function readRunMode(id: string): RunMode {
 
 /** Persist the last run mode for a profile id. */
 export function writeRunMode(id: string, mode: RunMode): void {
-  const s = loadSettings()
-  saveSettings({ ...s, runModes: { ...(s.runModes ?? {}), [key(id)]: mode } })
+  updateSettings((draft) => {
+    draft.runModes = { ...(draft.runModes ?? {}), [key(id)]: mode }
+  })
 }
 
 /** Drop one profile's saved launch config (permanent delete / dsh removal). The
  * optional `legacy` key additionally clears a pre-migration `<dshId>::<name>`
  * entry. A no-op (no settings write) when neither key is present. */
 export function clearLaunchConfig(id: string, legacy?: string): void {
-  const s = loadSettings()
   const k = key(id)
-  let changed = false
-  const filter = <T>(map: Record<string, T> | undefined): Record<string, T> | undefined => {
-    if (map === undefined) return map
-    const hasK = map[k] !== undefined
-    const hasLegacy = legacy !== undefined && map[legacy] !== undefined
-    if (!hasK && !hasLegacy) return map
-    const next = { ...map }
-    if (hasK) delete next[k]
-    if (hasLegacy) delete next[legacy as string]
-    changed = true
-    return next
-  }
-  const launchOptions = filter(s.launchOptions)
-  const runModes = filter(s.runModes)
-  if (changed) saveSettings({ ...s, launchOptions, runModes })
+  const snapshot = loadSettings()
+  const present = (map: Record<string, unknown> | undefined): boolean =>
+    map !== undefined && (map[k] !== undefined || (legacy !== undefined && map[legacy] !== undefined))
+  if (!present(snapshot.launchOptions) && !present(snapshot.runModes)) return
+  updateSettings((draft) => {
+    const drop = <T>(map: Record<string, T> | undefined): Record<string, T> | undefined => {
+      if (map === undefined) return map
+      if (map[k] === undefined && (legacy === undefined || map[legacy] === undefined)) return map
+      const next = { ...map }
+      if (next[k] !== undefined) delete next[k]
+      if (legacy !== undefined) delete next[legacy]
+      return next
+    }
+    draft.launchOptions = drop(draft.launchOptions)
+    draft.runModes = drop(draft.runModes)
+  })
 }
 
 /** List a dsh's profile names, tolerating a missing/unreadable profiles dir. */
@@ -171,6 +173,9 @@ export function migrateLaunchConfigKeys(): void {
       moved += 1
     }
   }
-  saveSettings({ ...s, launchOptions: nextLaunch, runModes: nextModes })
+  updateSettings((draft) => {
+    draft.launchOptions = nextLaunch
+    draft.runModes = nextModes
+  })
   logger.info(`launch config migrated to stable profile ids (${moved} profile(s))`)
 }

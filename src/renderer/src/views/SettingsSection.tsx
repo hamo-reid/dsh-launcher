@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Button, Descriptions, Radio, Segmented, Select, Space, Switch, message, theme } from 'antd'
-import { FolderOpenOutlined } from '@ant-design/icons'
+import { Button, Descriptions, Modal, Radio, Segmented, Select, Space, Switch, message, theme } from 'antd'
+import { DownloadOutlined, FolderOpenOutlined, UploadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import Panel from '../components/Panel.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
@@ -67,6 +67,29 @@ export default function SettingsSection() {
     const res = await window.api.plugins.setDir(value)
     if (res.ok) { setPluginDir(value); return '' }
     return apiErrorText(res)
+  }
+
+  const exportSettings = async (): Promise<void> => {
+    const r = await window.api.settings.exportSettings()
+    if (!r.ok) { void message.error(apiErrorText(r)); return }
+    if (r.value === '') return // cancelled
+    void message.success(t('settings.backup.exported', { path: r.value }))
+  }
+
+  const importSettings = (): void => {
+    Modal.confirm({
+      title: t('settings.backup.importConfirmTitle'),
+      content: t('settings.backup.importConfirmBody'),
+      okText: t('common.confirm'),
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        const r = await window.api.settings.importSettings()
+        if (!r.ok) { void message.error(apiErrorText(r)); return }
+        if (!r.value) return // cancelled
+        void message.success(t('settings.backup.imported'))
+        await load()
+      },
+    })
   }
 
   return (
@@ -203,6 +226,19 @@ export default function SettingsSection() {
             >
               {t('settings.logs.reveal')}
             </Button>
+          </div>
+        </Panel>
+
+        <Panel title={t('settings.section.backup')}>
+          <div style={{ maxWidth: 620 }}>
+            <div style={{ fontWeight: 600 }}>{t('settings.backup.title')}</div>
+            <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, margin: '4px 0 12px' }}>
+              {t('settings.backup.desc')}
+            </div>
+            <Space>
+              <Button icon={<DownloadOutlined />} onClick={() => void exportSettings()}>{t('settings.backup.export')}</Button>
+              <Button icon={<UploadOutlined />} danger onClick={() => importSettings()}>{t('settings.backup.import')}</Button>
+            </Space>
           </div>
         </Panel>
       </Space>

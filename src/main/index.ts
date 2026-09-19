@@ -19,7 +19,7 @@ import { registerStoreIpc } from './ipc/store.ts'
 import { hookWindowMaximize, registerWindowIpc } from './ipc/window.ts'
 import { registerLogsIpc } from './ipc/logs.ts'
 import { child, initLogger, logger, printBanner } from './core/logger.ts'
-import { askOnCloseEnabled, closeToTrayEnabled, loadSettings, openDatabase, saveSettings } from './core/settings.ts'
+import { askOnCloseEnabled, closeToTrayEnabled, flushSettings, openDatabase, patchSettings } from './core/settings.ts'
 import { configureAppState, pluginDir } from './core/appState.ts'
 import { migrateLaunchConfigKeys } from './core/launch-config.ts'
 import { configurePnpmStore } from './core/pnpm.ts'
@@ -56,7 +56,11 @@ let tray: Tray | null = null
 /** Set once a real quit is requested (via tray 退出 / app.quit), so the window
  * close handler doesn't re-intercept it into another hide-to-tray. */
 let quitting = false
-app.on('before-quit', () => { quitting = true })
+app.on('before-quit', () => {
+  quitting = true
+  // Flush any coalesced settings write before the process exits.
+  try { flushSettings() } catch { /* database may not be open (early quit) */ }
+})
 
 // ── 启动画面（splash）────────────────────────────────────────────────────────
 // Portable / 冷启动里 Electron 就绪前的解范围内（DB 打开、i18n、渲染 bundle
@@ -269,7 +273,7 @@ function createWindow(): void {
   ipcMain.removeHandler('window:chooseClose')
   ipcMain.handle('window:chooseClose', (_event, action: 'tray' | 'quit', remember: boolean) => {
     if (remember) {
-      saveSettings({ ...loadSettings(), closeToTray: action === 'tray', askOnClose: false })
+      patchSettings({ closeToTray: action === 'tray', askOnClose: false })
     }
     if (action === 'tray') {
       if (!win.isDestroyed()) win.hide()

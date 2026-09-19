@@ -9,7 +9,7 @@ import { join, resolve } from 'node:path'
 import { loadSettings, openDatabase, saveSettings } from './settings.ts'
 import {
   configureAppState, dshEntryById, dshScopes, dshVersionDir, effectiveProfileDir,
-  legacyProfilesDir, pluginDir, readDshState, writeDshState,
+  legacyProfilesDir, pluginDir, readDshState, updateDshState, writeDshState,
 } from './appState.ts'
 import type { DshEntry } from '../../shared/types.ts'
 
@@ -65,6 +65,19 @@ describe('dsh state', () => {
 describe('effectiveProfileDir', () => {
   it('is always <home>/profiles, matching the host layout', () => {
     expect(effectiveProfileDir({ ...ENTRY_A })).toBe(join('/home/a', 'profiles'))
+  })
+})
+
+describe('updateDshState (atomic registry update)', () => {
+  it('keeps a concurrent add when a late writer updates from the CURRENT list', () => {
+    const a = { id: 'a', name: 'A', execPath: '/a', version: '1', home: '/ha' }
+    const b = { id: 'b', name: 'B', execPath: '/b', version: '1', home: '/hb' }
+    writeDshState([a])
+    // A concurrent add lands while a long-running job is in flight.
+    writeDshState([...readDshState().dshes, b])
+    // The job then updates from the CURRENT list (not a stale handler snapshot).
+    updateDshState(list => list.map(d => (d.id === 'a' ? { ...d, version: '2' } : d)))
+    expect(readDshState().dshes.map(d => `${d.id}@${d.version}`)).toEqual(['a@2', 'b@1'])
   })
 })
 

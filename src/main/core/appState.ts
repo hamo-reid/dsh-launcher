@@ -8,7 +8,7 @@
  * (via {@link configureAppState}); `core` itself stays free of Electron imports.
  */
 import { join, resolve } from 'node:path'
-import { loadSettings, saveSettings, type AppSettings } from './settings.ts'
+import { loadSettings, updateSettings, type AppSettings } from './settings.ts'
 import type { DshEntry } from '../../shared/types.ts'
 
 /** The dsh shape a scope carries through plugin-scoped scans. The profiles
@@ -41,7 +41,14 @@ export function readDshState(): { dshes: DshEntry[] } {
 
 /** Persist the registered dsh list. */
 export function writeDshState(dshes: DshEntry[]): void {
-  saveSettings({ ...loadSettings(), dshes })
+  updateSettings((draft) => { draft.dshes = dshes })
+}
+
+/** Atomically update the registered dsh list from its CURRENT value — the safe
+ * form for writers that cross an `await` and must not clobber a concurrent
+ * registry change with a stale snapshot. */
+export function updateDshState(mutate: (dshes: DshEntry[]) => DshEntry[]): void {
+  updateSettings((draft) => { draft.dshes = mutate(draft.dshes ?? []) })
 }
 
 /** The registered dsh with this id, or `undefined`. */
