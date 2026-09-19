@@ -8,7 +8,7 @@ import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-
 import { CSS } from '@dnd-kit/utilities'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
-import type { InsertConflict, InsertConflictLayer, ProfileDetail, ProfileLayer, RowCreateInput } from '../../../shared/types.ts'
+import type { InsertConflict, InsertConflictLayer, ProfileDetail, ProfileLayer, ProfileValidation, RowCreateInput } from '../../../shared/types.ts'
 import ActionCard from '../components/ActionCard.tsx'
 import FieldLabel from '../components/FieldLabel.tsx'
 import Loadable from '../components/Loadable.tsx'
@@ -31,6 +31,9 @@ interface Props {
 
 type EditKind = 'config' | 'insert'
 
+/** The workspace's left-hand sections. */
+type SectionKey = 'manifest' | 'deps' | 'bundles' | 'patch' | 'home' | 'diagnostics'
+
 interface Editor {
   id: string
   kind: EditKind
@@ -48,7 +51,6 @@ export default function ProfileDetailView({ dshId, name, onChanged }: Props) {
   const [conflicts, setConflicts] = useState<InsertConflict[]>([])
   const [loading, setLoading] = useState(true)
 
-  const [openBlock, setOpenBlock] = useState<'bundles' | 'deps' | null>(null)
   const [openLayer, setOpenLayer] = useState<number | null>(null)
   const [editor, setEditor] = useState<Editor | null>(null)
   const [editText, setEditText] = useState('')
@@ -61,6 +63,15 @@ export default function ProfileDetailView({ dshId, name, onChanged }: Props) {
   const [sourceText, setSourceText] = useState('')
   const [sourceLoading, setSourceLoading] = useState(false)
   const [sourceSaving, setSourceSaving] = useState(false)
+
+  // Workspace: active section + raw manifest/home editors + validation report.
+  const [section, setSection] = useState<SectionKey>('patch')
+  const [manifestText, setManifestText] = useState('')
+  const [homeText, setHomeText] = useState('')
+  const [fileLoading, setFileLoading] = useState(false)
+  const [fileSaving, setFileSaving] = useState(false)
+  const [validation, setValidation] = useState<ProfileValidation | null>(null)
+  const [validating, setValidating] = useState(false)
 
   const [newRowOpen, setNewRowOpen] = useState(false)
   const [newRowId, setNewRowId] = useState('')
@@ -260,6 +271,74 @@ const loadSeq = useRef(0)
     onChanged?.()
   }
 
+  // ── workspace: lazy-load the raw editors when their section is shown ─────
+  useEffect(() => {
+    if (section !== 'manifest') return undefined
+    let alive = true
+    setFileLoading(true)
+    void window.api.readFile(dshId, name, 'manifest').then(result => {
+      if (!alive) return
+      setFileLoading(false)
+      if (result.ok) setManifestText(result.value.text)
+      else void message.error(apiErrorText(result))
+    })
+    return () => { alive = false }
+  }, [section, dshId, name])
+
+  useEffect(() => {
+    if (section !== 'home') return undefined
+    let alive = true
+    setFileLoading(true)
+    void window.api.home.readPatch(dshId).then(result => {
+      if (!alive) return
+      setFileLoading(false)
+      if (result.ok) setHomeText(result.value.text)
+      else void message.error(apiErrorText(result))
+    })
+    return () => { alive = false }
+  }, [section, dshId])
+
+  // Re-run the composition check after any structural edit (the layer list
+  // changes) and on mount, so the inspector is always current.
+  useEffect(() => {
+    let alive = true
+    setValidating(true)
+    void window.api.validate(dshId, name).then(result => {
+      if (!alive) return
+      setValidating(false)
+      setValidation(result.ok ? result.value : null)
+    })
+    return () => { alive = false }
+  }, [dshId, name, layers])
+
+  const saveManifest = async (): Promise<void> => {
+    setFileSaving(true)
+    const result = await window.api.writeFile(dshId, name, 'manifest', manifestText)
+    setFileSaving(false)
+    if (!result.ok) { void message.error(apiErrorText(result)); return }
+    void message.success(t('profile.detail.fileSaved'))
+    void load()
+    onChanged?.()
+  }
+
+  const saveHome = async (): Promise<void> => {
+    setFileSaving(true)
+    const result = await window.api.home.writePatch(dshId, homeText)
+    setFileSaving(false)
+    if (!result.ok) { void message.error(apiErrorText(result)); return }
+    void message.success(t('profile.detail.fileSaved'))
+    void load()
+    onChanged?.()
+  }
+
+  const revalidate = (): void => {
+    setValidating(true)
+    void window.api.validate(dshId, name).then(result => {
+      setValidating(false)
+      setValidation(result.ok ? result.value : null)
+    })
+  }
+
   const removeBundleRow = (bundle: string): void => {
     Modal.confirm({
       title: t('profile.detail.removeBundle'),
@@ -353,14 +432,31 @@ const loadSeq = useRef(0)
   const activeLayer = openLayer !== null && layers !== null ? layers[openLayer] : undefined
   const bundles = detail?.bundles ?? []
   const dependencies = detail?.dependencies ?? []
+  const profileLayer = (layers ?? []).find(layer => layer.source === 'profile')
 
   if (name === '') return null
 
+  const navItems: { key: SectionKey; label: string; meta: string }[] = [
+    { key: 'manifest', label: t('profile.workspace.manifest'), meta: '' },
+    { key: 'deps', label: t('profile.workspace.deps'), meta: t('profile.detail.nDepsMeta', { count: dependencies.length }) },
+    { key: 'bundles', label: t('profile.workspace.bundles'), meta: t('profile.detail.nBundlesMeta', { count: bundles.length }) },
+    { key: 'patch', label: t('profile.workspace.patch'), meta: t('profile.detail.layerMetaEditable', { count: profileLayer?.rows.length ?? 0 }) },
+    { key: 'home', label: t('profile.workspace.home'), meta: '' },
+    { key: 'diagnostics', label: t('profile.workspace.diagnostics'), meta: validation?.ok === false ? '!' : '' },
+  ]
+
   return (
     <Loadable loading={loading}>
-    <div>
+    <div style={{ display: 'flex', gap: token.paddingSM, height: '100%', minHeight: 0 }}>
+      <div style={{ width: 200, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto' }}>
+        {navItems.map(item => (
+          <ActionCard key={item.key} title={item.label} meta={item.meta} selected={section === item.key} hoverable onClick={() => setSection(item.key)} />
+        ))}
+      </div>
+      <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', paddingRight: 4 }}>
       <SectionHeading title={t('profile.detail.overview')} extra={(
         <Space size={8}>
+          <Button size="small" onClick={revalidate} loading={validating}>{t('profile.workspace.validate')}</Button>
           <Button size="small" icon={<CodeOutlined />} onClick={() => void openSource()}>{t('profile.detail.sourceEdit')}</Button>
           <Button size="small" icon={<FileTextOutlined />} onClick={() => void openPatchSource()}>{t('profile.detail.openPatchSource')}</Button>
           <Button size="small" onClick={() => void reconcileNow()} loading={reconciling}>{t('profile.detail.reconcile')}</Button>
@@ -388,42 +484,125 @@ const loadSeq = useRef(0)
           )}
         />
       )}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: token.paddingSM, marginBottom: token.paddingLG }}>
-        {blockButton(t('profile.detail.bundles'), t('profile.detail.nBundlesMeta', { count: bundles.length }), () => setOpenBlock('bundles'))}
-        {blockButton(t('profile.detail.deps'), t('profile.detail.nDepsMeta', { count: dependencies.length }), () => setOpenBlock('deps'))}
-      </div>
+      {section === 'manifest' && (
+        <div>
+          <div style={{ marginBottom: 6, color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>{t('profile.workspace.manifestHint')}</div>
+          {fileLoading
+            ? <div style={{ height: 420, display: 'flex', alignItems: 'center', justifyContent: 'center', color: token.colorTextTertiary }}>{t('common.loading')}</div>
+            : (
+              <Suspense fallback={<div style={{ height: 420, display: 'flex', alignItems: 'center', justifyContent: 'center', color: token.colorTextTertiary }}>{t('common.loading')}</div>}>
+                <CodeEditor value={manifestText} language="json" onChange={setManifestText} height={420} />
+              </Suspense>
+            )}
+          <div style={{ marginTop: 8 }}>
+            <Button type="primary" loading={fileSaving} onClick={() => void saveManifest()}>{t('common.save')}</Button>
+          </div>
+        </div>
+      )}
 
-      <div style={{ fontSize: token.fontSizeLG, fontWeight: 600, color: token.colorText, marginBottom: token.paddingSM }}>{t('profile.detail.stack')}</div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: token.paddingSM }}>
-        {(layers ?? []).map((layer, i) => cloneElement(
-          blockButton(
-            `${i + 1}. ${layerLabel(layer)}`,
-            layer.source === 'profile' ? t('profile.detail.layerMetaEditable', { count: layer.rows.length }) : t('profile.detail.layerMeta', { count: layer.rows.length }),
-            () => setOpenLayer(i),
-          ),
-          // Stable key derived from the layer's identity, so a bundle reorder
-          // doesn't remount the cards (index would shuffle the keys).
-          { key: layer.source === 'bundle' ? `bundle:${layer.bundle}` : layer.source === 'profile' ? `profile:${layer.label}` : 'home' },
-        ))}
-      </div>
+      {section === 'deps' && (
+        dependencies.length === 0
+          ? <div style={{ color: token.colorTextTertiary }}>{t('common.none')}</div>
+          : <List size="small" dataSource={dependencies} renderItem={dependency => <List.Item key={dependency}>{dependency}</List.Item>} />
+      )}
 
-      <ScrollModal title={t('profile.detail.bundlesModal')} open={openBlock === 'bundles'} footer={null} width={MODAL.wide} onCancel={() => setOpenBlock(null)} bodyMax="md">
-          {bundles.length === 0 ? <div style={{ color: token.colorTextTertiary }}>{t('common.none')}</div> : (
+      {section === 'bundles' && (
+        bundles.length === 0
+          ? <div style={{ color: token.colorTextTertiary }}>{t('common.none')}</div>
+          : (
             <DndContext collisionDetection={closestCenter} autoScroll={false} onDragEnd={onDragEnd}>
-                <SortableContext items={bundles} strategy={verticalListSortingStrategy}>
-                  {bundles.map(bundle => (
-                    <SortableBundle key={bundle} bundle={bundle} onRemove={removeBundleRow} />
-                  ))}
-                </SortableContext>
-              </DndContext>
-          )}
-      </ScrollModal>
+              <SortableContext items={bundles} strategy={verticalListSortingStrategy}>
+                {bundles.map(bundle => <SortableBundle key={bundle} bundle={bundle} onRemove={removeBundleRow} />)}
+              </SortableContext>
+            </DndContext>
+          )
+      )}
 
-      <ScrollModal title={t('profile.detail.deps')} open={openBlock === 'deps'} footer={null} width={MODAL.wide} onCancel={() => setOpenBlock(null)} bodyMax="md">
-          {dependencies.length === 0 ? <div style={{ color: token.colorTextTertiary }}>{t('common.none')}</div> : (
-            <List size="small" dataSource={dependencies} renderItem={dependency => <List.Item key={dependency}>{dependency}</List.Item>} />
+      {section === 'patch' && (
+        <>
+          <div style={{ marginBottom: token.paddingSM }}>
+            <Button size="small" icon={<CodeOutlined />} onClick={() => void openSource()}>{t('profile.detail.sourceEdit')}</Button>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: token.paddingSM }}>
+            {(layers ?? []).map((layer, i) => cloneElement(
+              blockButton(
+                `${i + 1}. ${layerLabel(layer)}`,
+                layer.source === 'profile' ? t('profile.detail.layerMetaEditable', { count: layer.rows.length }) : t('profile.detail.layerMeta', { count: layer.rows.length }),
+                () => setOpenLayer(i),
+              ),
+              // Stable key derived from the layer's identity, so a bundle reorder
+              // doesn't remount the cards (index would shuffle the keys).
+              { key: layer.source === 'bundle' ? `bundle:${layer.bundle}` : layer.source === 'profile' ? `profile:${layer.label}` : 'home' },
+            ))}
+          </div>
+        </>
+      )}
+
+      {section === 'home' && (
+        <div>
+          <div style={{ marginBottom: 6, color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>{t('profile.workspace.homeHint')}</div>
+          {fileLoading
+            ? <div style={{ height: 420, display: 'flex', alignItems: 'center', justifyContent: 'center', color: token.colorTextTertiary }}>{t('common.loading')}</div>
+            : (
+              <Suspense fallback={<div style={{ height: 420, display: 'flex', alignItems: 'center', justifyContent: 'center', color: token.colorTextTertiary }}>{t('common.loading')}</div>}>
+                <CodeEditor value={homeText} language="yaml" onChange={setHomeText} height={420} />
+              </Suspense>
+            )}
+          <div style={{ marginTop: 8 }}>
+            <Button type="primary" loading={fileSaving} onClick={() => void saveHome()}>{t('common.save')}</Button>
+          </div>
+        </div>
+      )}
+
+      {section === 'diagnostics' && (
+        <div>
+          {validation === null
+            ? <div style={{ color: token.colorTextTertiary }}>{validating ? t('common.loading') : t('profile.workspace.noReport')}</div>
+            : (
+              <Space orientation="vertical" size="small" style={{ width: '100%' }}>
+                <Alert type={validation.ok ? 'success' : 'error'} showIcon title={validation.ok ? t('profile.workspace.ok') : t('profile.workspace.problems')} />
+                {validation.manifestError !== undefined && <Alert type="error" showIcon title={t('profile.workspace.manifestError')} description={validation.manifestError} />}
+                {validation.patchError !== undefined && <Alert type="error" showIcon title={t('profile.workspace.patchError')} description={validation.patchError} />}
+                {validation.conflicts.length > 0 && (
+                  <div>
+                    <div style={{ fontWeight: 600, marginBottom: 4 }}>{t('profile.detail.insertConflictTitle')}（{validation.conflicts.length}）</div>
+                    <ul style={{ margin: 0, paddingInlineStart: 18 }}>
+                      {validation.conflicts.map(c => <li key={c.id}><code>{c.id}</code> — {c.layers.map(conflictLayerLabel).join(' + ')}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {validation.missingBundles.length > 0 && (
+                  <div>
+                    <div style={{ fontWeight: 600, marginBottom: 4 }}>{t('profile.workspace.missingBundles')}</div>
+                    <div style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: token.fontSizeSM }}>{validation.missingBundles.join('、')}</div>
+                  </div>
+                )}
+                {validation.unclaimedBundles.length > 0 && (
+                  <div>
+                    <div style={{ fontWeight: 600, marginBottom: 4 }}>{t('profile.workspace.unclaimedBundles')}</div>
+                    <div style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: token.fontSizeSM }}>{validation.unclaimedBundles.join('、')}</div>
+                  </div>
+                )}
+              </Space>
+            )}
+        </div>
+      )}
+      </div>
+
+      {/* inspector: always-on composition summary for the current profile */}
+      <div style={{ width: 280, flexShrink: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: token.paddingSM }}>
+        <div style={{ fontSize: token.fontSizeLG, fontWeight: 600, color: token.colorText }}>{t('profile.workspace.inspector')}</div>
+        {validation === null
+          ? <div style={{ color: token.colorTextTertiary, fontSize: token.fontSizeSM }}>{validating ? t('common.loading') : t('profile.workspace.noReport')}</div>
+          : (
+            <>
+              <Alert type={validation.ok ? 'success' : 'error'} showIcon title={validation.ok ? t('profile.workspace.ok') : t('profile.workspace.problems')} />
+              {validation.conflicts.length > 0 && <div style={{ fontSize: token.fontSizeSM }}>{t('profile.detail.insertConflictTitle')}：{validation.conflicts.length}</div>}
+              {validation.missingBundles.length > 0 && <div style={{ fontSize: token.fontSizeSM }}>{t('profile.workspace.missingBundles')}：{validation.missingBundles.length}</div>}
+              {validation.unclaimedBundles.length > 0 && <div style={{ fontSize: token.fontSizeSM }}>{t('profile.workspace.unclaimedBundles')}：{validation.unclaimedBundles.length}</div>}
+            </>
           )}
-      </ScrollModal>
+      </div>
 
       <ScrollModal title={activeLayer !== undefined ? layerLabel(activeLayer) : ''} open={openLayer !== null} footer={null} onCancel={() => setOpenLayer(null)} width={MODAL.wide} bodyMax={440}>
         {activeLayer?.source === 'profile' && (
