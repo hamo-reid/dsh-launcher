@@ -204,6 +204,11 @@ function globalBinCandidates(): string[] {
   return [join(home, '.local', 'bin'), join(home, '.bin'), join(home, 'bin'), '/usr/local/bin']
 }
 
+/** Ceiling for the `where`/`which dsh` PATH probe. It scans the whole PATH, which
+ * is slow on a loaded machine and can hang outright — it must never stall the
+ * DSH page's executable scan. */
+const PATH_PROBE_TIMEOUT_MS = 3000
+
 /** Resolve candidate `dsh` executable paths: PATH lookup + common global bin
  * slots. Uses the filesystem only (never runs `dsh`), with realpath dedupe so
  * the same install surfaced through multiple symlinks is not listed twice. */
@@ -218,9 +223,22 @@ export async function detectExecutables(): Promise<string[]> {
     const cmd = process.platform === 'win32' ? 'where' : 'which'
     const child = spawn(cmd, ['dsh'], { shell: process.platform === 'win32' })
     let out = ''
+    let settled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const finish = (value: string[]): void => {
+      if (settled) return
+      settled = true
+      if (timer !== undefined) clearTimeout(timer)
+      resolve(value)
+    }
+    timer = setTimeout(() => {
+      try { child.kill() } catch { /* already gone */ }
+      logger.debug('dsh PATH probe timed out')
+      finish([])
+    }, PATH_PROBE_TIMEOUT_MS)
     child.stdout?.on('data', (data: Buffer) => { out += String(data) })
-    child.on('error', () => resolve([]))
-    child.on('close', () => resolve(out.split(/\r?\n/).map(s => s.trim()).filter(Boolean)))
+    child.on('error', () => finish([]))
+    child.on('close', () => finish(out.split(/\r?\n/).map(s => s.trim()).filter(Boolean)))
   })
   resolved.forEach(push)
 

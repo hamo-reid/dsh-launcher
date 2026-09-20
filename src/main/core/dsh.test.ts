@@ -2,10 +2,31 @@
  * Tests for dsh discovery: package-root resolution (publish vs source) and the
  * global-bin slot scan. Uses temp dirs / env overrides; no real dsh needed.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { EventEmitter } from 'node:events'
+import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+
+// The `where`/`which dsh` PATH probe is stubbed: it scans the entire PATH, which
+// is slow and machine-dependent — under CI load it once timed the suite out at
+// 5s. The candidate-dir scan under test does not need it. Tests that care about
+// the probe's own behaviour override this per call.
+vi.mock('node:child_process', async (importActual) => {
+  const actual = await importActual<typeof import('node:child_process')>()
+  const { EventEmitter: Emitter } = await import('node:events')
+  return {
+    ...actual,
+    spawn: vi.fn(() => {
+      const child = new Emitter() as EventEmitter & { stdout: EventEmitter }
+      child.stdout = new Emitter()
+      setImmediate(() => child.emit('close', 0))
+      return child
+    }),
+  }
+})
+
 import {
   baseLaunch, defaultHome, detectExecutables, discoverVersionRepo, entryFromPath,
   existsExecutable, installDir, isDeletableDsh, isManagedInstall, readVersionFromPath,
@@ -84,6 +105,32 @@ describe('detectExecutables', () => {
     } finally {
       if (prev === undefined) delete process.env.APPDATA
       else process.env.APPDATA = prev
+    }
+  })
+
+  it('abandons a hung PATH probe instead of stalling', async () => {
+    const prevAppData = process.env.APPDATA
+    const prevLocal = process.env.LOCALAPPDATA
+    // Point the global-bin candidates at empty dirs so the result is deterministic.
+    process.env.APPDATA = join(root, 'empty-appdata')
+    process.env.LOCALAPPDATA = join(root, 'empty-localappdata')
+    // A child that never closes: only the probe's own timeout can settle it.
+    vi.mocked(spawn).mockImplementationOnce(() => {
+      const child = new EventEmitter() as EventEmitter & { stdout: EventEmitter }
+      child.stdout = new EventEmitter()
+      return child as unknown as ReturnType<typeof spawn>
+    })
+    vi.useFakeTimers()
+    try {
+      const pending = detectExecutables()
+      await vi.advanceTimersByTimeAsync(3100)
+      await expect(pending).resolves.toEqual([])
+    } finally {
+      vi.useRealTimers()
+      if (prevAppData === undefined) delete process.env.APPDATA
+      else process.env.APPDATA = prevAppData
+      if (prevLocal === undefined) delete process.env.LOCALAPPDATA
+      else process.env.LOCALAPPDATA = prevLocal
     }
   })
 })
