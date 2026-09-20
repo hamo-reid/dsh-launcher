@@ -13,6 +13,8 @@ import ConfigRow from '../components/ConfigRow.tsx'
 import Panel from '../components/Panel.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
 import { AddDshModal, DataMirrorModal, DshRemoveModal, OfficialInstallModal, RenameDshModal, UpdateDshModal } from './DshModals.tsx'
+import SkillsManagePanel from './SkillsManagePanel.tsx'
+import McpManagePanel from './McpManagePanel.tsx'
 import { majorOfVersion } from '../../../shared/version.ts'
 import type { DshEntry } from '../../../shared/types.ts'
 
@@ -308,6 +310,8 @@ export default function DshSection() {
                 <Button onClick={() => setMirrorOpen(true)}>{t('data.mirror')}</Button>
               </Space>
             </Panel>
+            <SkillsManagePanel dshId={selected.id} />
+            <McpManagePanel dshId={selected.id} profile={null} withPanel />
           </Space>
         )
         : (loading

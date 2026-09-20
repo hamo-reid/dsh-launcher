@@ -124,6 +124,9 @@ export interface McpServerModalProps {
   editing: McpServer | null
   layer: 'profile' | 'home'
   onLayerChange: (layer: 'profile' | 'home') => void
+  /** Show the profile/home picker when adding (hidden for library entries —
+   * they carry no layer; the target is chosen when applying). */
+  selectLayer?: boolean
   profileName: string
   /** Names stored in the launcher's encrypted secret store. */
   storedNames: string[]
@@ -151,7 +154,13 @@ export default function McpServerModal(props: McpServerModalProps): JSX.Element 
 
   const submit = (): void => {
     const args = argsText.split('\n').map(line => line.trim()).filter(line => line !== '')
-    props.onSubmit({ ...input, args, env: input.env?.filter(e => e.name !== '') })
+    // Blank rows (a '+' click never filled in) are dropped for BOTH editors —
+    // the backend rejects an empty name outright.
+    props.onSubmit({
+      ...input, args,
+      env: input.env?.filter(e => e.name !== ''),
+      headers: input.headers?.filter(e => e.name !== ''),
+    })
   }
 
   const isStdio = input.transport === 'stdio'
@@ -181,7 +190,7 @@ export default function McpServerModal(props: McpServerModalProps): JSX.Element 
           />
         )}
 
-        {props.editing === null && (
+        {props.editing === null && props.selectLayer !== false && (
           <div>
             <FieldLabel>{t('ext.mcp.form.layer')}</FieldLabel>
             <Radio.Group

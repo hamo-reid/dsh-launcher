@@ -3,7 +3,7 @@ import {
   Alert, Badge, Button, Input, Modal, Select, Space, Tag, Tooltip, theme, message,
 } from 'antd'
 import {
-  ApartmentOutlined, AppstoreOutlined, CheckCircleFilled, CodeOutlined, FileTextOutlined,
+  ApartmentOutlined, ApiOutlined, AppstoreOutlined, CheckCircleFilled, CodeOutlined, FileTextOutlined,
   FolderOpenOutlined, HomeOutlined, PlusOutlined, ProfileOutlined, ReloadOutlined,
   SafetyCertificateOutlined, SwapOutlined,
 } from '@ant-design/icons'
@@ -22,6 +22,7 @@ import ScrollModal from '../components/ScrollModal.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
 import StatusTag from '../components/StatusTag.tsx'
 import { BundleVersionModal, PluginUpdatesModal, type BundleVersionTarget } from './PluginsModals.tsx'
+import McpManagePanel from './McpManagePanel.tsx'
 import { MODAL } from '../theme.ts'
 
 // The Monaco wrapper pulls the whole editor; keep it out of the first parse.
@@ -49,7 +50,7 @@ interface Props {
 type EditKind = 'config' | 'insert'
 
 /** The workspace's left-hand sections. */
-type SectionKey = 'manifest' | 'deps' | 'bundles' | 'patch' | 'home' | 'diagnostics'
+type SectionKey = 'manifest' | 'deps' | 'bundles' | 'mcp' | 'patch' | 'home' | 'diagnostics'
 
 interface Editor {
   id: string
@@ -635,6 +636,7 @@ const loadSeq = useRef(0)
     { key: 'manifest', icon: <ProfileOutlined />, label: t('profile.workspace.manifest'), meta: null },
     { key: 'deps', icon: <ApartmentOutlined />, label: t('profile.workspace.deps'), meta: dependencies.length || null },
     { key: 'bundles', icon: <AppstoreOutlined />, label: t('profile.workspace.bundles'), meta: bundles.length || null },
+    { key: 'mcp', icon: <ApiOutlined />, label: t('profile.workspace.mcp'), meta: null },
     { key: 'patch', icon: <CodeOutlined />, label: t('profile.workspace.patch'), meta: (profileLayer?.rows.length ?? 0) || null },
     { key: 'home', icon: <HomeOutlined />, label: t('profile.workspace.home'), meta: null },
     {
@@ -836,6 +838,10 @@ const loadSeq = useRef(0)
             </div>
           )}
         </div>
+      )}
+
+      {section === 'mcp' && (
+        <McpManagePanel dshId={dshId} profile={name} withPanel={false} />
       )}
 
       {section === 'patch' && (

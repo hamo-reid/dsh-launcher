@@ -57,8 +57,14 @@ import type {
   RunMode,
   LaunchOptions,
   McpListing,
+  McpApplyTarget,
+  McpLibOverviewRow,
+  McpServer,
   McpServerInput,
   SkillEntry,
+  SkillLibEntry,
+  SkillLibIssue,
+  SkillLibOverviewRow,
   SkillListing,
   TrashItem,
 } from '../shared/types.ts'
@@ -149,6 +155,8 @@ const api = {
   ext: {
     mcpList: (dshId: string, profile: string): Promise<IpcResult<McpListing>> =>
       ipcRenderer.invoke('ext:mcpList', dshId, profile),
+    mcpHomeList: (dshId: string): Promise<IpcResult<McpServer[]>> =>
+      ipcRenderer.invoke('ext:mcpHomeList', dshId),
     mcpSave: (dshId: string, profile: string, input: McpServerInput, layer: 'profile' | 'home'): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('ext:mcpSave', dshId, profile, input, layer),
     mcpRemove: (dshId: string, profile: string, id: string, layer: 'profile' | 'home'): Promise<IpcResult<boolean>> =>
@@ -163,16 +171,34 @@ const api = {
       ipcRenderer.invoke('ext:mcpSecretRemove', name),
     skillList: (dshId: string): Promise<IpcResult<SkillListing>> =>
       ipcRenderer.invoke('ext:skillList', dshId),
-    skillScaffold: (name: string): Promise<IpcResult<string>> =>
-      ipcRenderer.invoke('ext:skillScaffold', name),
-    skillRead: (dshId: string, name: string): Promise<IpcResult<{ text: string; path: string }>> =>
-      ipcRenderer.invoke('ext:skillRead', dshId, name),
-    skillSave: (dshId: string, previousName: string | null, text: string): Promise<IpcResult<SkillEntry>> =>
-      ipcRenderer.invoke('ext:skillSave', dshId, previousName, text),
     skillDelete: (dshId: string, name: string): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('ext:skillDelete', dshId, name),
-    skillImportZip: (dshId: string): Promise<IpcResult<SkillEntry[] | null>> =>
-      ipcRenderer.invoke('ext:skillImportZip', dshId),
+    libMcpOverview: (): Promise<IpcResult<McpLibOverviewRow[]>> =>
+      ipcRenderer.invoke('ext:libMcpOverview'),
+    libMcpSave: (previousServerName: string | null, input: McpServerInput): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('ext:libMcpSave', previousServerName, input),
+    libMcpRemove: (serverName: string): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('ext:libMcpRemove', serverName),
+    libMcpApply: (serverName: string, target: McpApplyTarget): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('ext:libMcpApply', serverName, target),
+    libMcpSync: (serverName: string): Promise<IpcResult<{ updated: number; skipped: number }>> =>
+      ipcRenderer.invoke('ext:libMcpSync', serverName),
+    libSkillList: (): Promise<IpcResult<{ skills: SkillLibEntry[]; issues: SkillLibIssue[] }>> =>
+      ipcRenderer.invoke('ext:libSkillList'),
+    libSkillOverview: (): Promise<IpcResult<SkillLibOverviewRow[]>> =>
+      ipcRenderer.invoke('ext:libSkillOverview'),
+    libSkillScaffold: (name: string): Promise<IpcResult<string>> =>
+      ipcRenderer.invoke('ext:libSkillScaffold', name),
+    libSkillRead: (name: string): Promise<IpcResult<{ text: string; path: string }>> =>
+      ipcRenderer.invoke('ext:libSkillRead', name),
+    libSkillSave: (previousName: string | null, text: string): Promise<IpcResult<SkillLibEntry>> =>
+      ipcRenderer.invoke('ext:libSkillSave', previousName, text),
+    libSkillDelete: (name: string): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('ext:libSkillDelete', name),
+    libSkillImportZip: (): Promise<IpcResult<SkillLibEntry[] | null>> =>
+      ipcRenderer.invoke('ext:libSkillImportZip'),
+    libSkillInstall: (name: string, dshId: string, overwrite: boolean): Promise<IpcResult<SkillEntry>> =>
+      ipcRenderer.invoke('ext:libSkillInstall', name, dshId, overwrite),
   },
 
   run: {

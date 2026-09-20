@@ -230,6 +230,17 @@ describe('write / rename / delete (writable root only)', () => {
     expect(existsSync(join(USER_DSH(), 'flat-doomed.md'))).toBe(false)
     expect(existsSync(join(USER_DSH(), 'alpha'))).toBe(true)
   })
+
+  it('saving a flat skill in place upgrades it to a bundle and removes the flat file', () => {
+    skill('flat-edit', makeSkill('flat-edit'), true)
+    const entry = writeSkill(ctx(), 'flat-edit', makeSkill('flat-edit', 'edited in place'))
+    expect(entry.shape).toBe('bundle')
+    expect(existsSync(join(USER_DSH(), 'flat-edit.md'))).toBe(false)
+    expect(existsSync(join(USER_DSH(), 'flat-edit', 'SKILL.md'))).toBe(true)
+    // One skill, not two: the flat file no longer shadows the bundle.
+    expect(listSkills(ctx()).skills.filter(s => s.name === 'flat-edit')).toHaveLength(1)
+    expect(readSkillFile(ctx(), 'flat-edit')).toContain('edited in place')
+  })
 })
 
 describe('zip import', () => {

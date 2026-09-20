@@ -975,6 +975,47 @@ export interface McpListing {
   layers: McpLayer[]
 }
 
+// ── launcher-global libraries (dsh/profile-agnostic) ─────────────────────────
+
+/** One launcher-global MCP server definition. Applying it materializes a full
+ * row into a patch layer — dsh only reads configuration from patch files — so
+ * the `serverName` is the link between an applied row and its entry. */
+export interface McpLibEntry {
+  serverName: string
+  input: McpServerInput
+  updatedAt: string
+}
+
+/** Where a library entry has been applied, with its drift state. */
+export interface McpLibUsage {
+  dshId: string
+  dshName: string
+  target: { kind: 'profile'; profile: string } | { kind: 'home' }
+  /** The applied row's id. */
+  id: string
+  disabled: boolean
+  /** The row's config differs from the library entry — syncable. */
+  stale: boolean
+  /** Raw/unparsable config: shown, but never auto-synced. */
+  handwritten: boolean
+}
+
+/** Library overview row: the entry plus a summary of where it is applied. */
+export interface McpLibOverviewRow {
+  entry: McpLibEntry
+  applied: number
+  stale: number
+  handwritten: number
+}
+
+/** Where to materialize a library entry. */
+export interface McpApplyTarget {
+  dshId: string
+  layer: 'profile' | 'home'
+  /** Required when `layer === 'profile'`. */
+  profile?: string
+}
+
 /** Origin bucket for a skill contribution (mirrors dsh's `SkillSource`).
  * Project roots are cwd-dependent and therefore not managed by the launcher. */
 export type SkillSource = 'user-dsh' | 'user-agents' | 'custom' | 'bundled'
@@ -1023,4 +1064,39 @@ export interface SkillListing {
   roots: SkillRootInfo[]
   skills: SkillEntry[]
   issues: SkillIssue[]
+}
+
+/** One launcher-global skill definition (always a `<name>/SKILL.md` bundle).
+ * Installing copies the bundle into a dsh's writable root. */
+export interface SkillLibEntry {
+  name: string
+  description: string
+  whenToUse?: string
+  modelInvocable: boolean
+  userInvocable: boolean
+  path: string
+  dir: string
+}
+
+/** A skill-like file in the library that would not load, with the reason. */
+export interface SkillLibIssue {
+  path: string
+  reason: string
+}
+
+/** The install state of one library skill on one dsh. */
+export interface SkillLibInstall {
+  dshId: string
+  dshName: string
+  installed: boolean
+  /** The installed copy's SKILL.md differs from the library — reinstallable. */
+  stale: boolean
+  /** The installed entry, when present (path/source for the UI). */
+  entry?: SkillEntry
+}
+
+/** Library overview row: the entry plus where it is installed. */
+export interface SkillLibOverviewRow {
+  entry: SkillLibEntry
+  installs: SkillLibInstall[]
 }

@@ -16,7 +16,7 @@
  * mistake is reversible without a launcher-side restore UI.
  */
 import AdmZip from 'adm-zip'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { homePatchPath, readHomePatch } from './home.ts'
@@ -381,25 +381,31 @@ export function writeSkill(ctx: DshContext, previousName: string | null, text: s
   if (!parsed.ok) throw new Error(parsed.reason)
   const name = parsed.skill.name
   const { dir, file } = targetPaths(ctx, name)
-  const previous = previousName !== null && previousName !== name ? findEditableSkill(ctx, previousName) : undefined
+  const previous = previousName !== null ? findEditableSkill(ctx, previousName) : undefined
   if (previousName !== null && previous === undefined) {
     throw new Error(`skill "${previousName}" is not editable (not in the writable root)`)
   }
-  if (previous !== undefined && findEditableSkill(ctx, name) !== undefined) {
+  const renaming = previousName !== null && previousName !== name
+  if (renaming && findEditableSkill(ctx, name) !== undefined) {
     throw new Error(`skill "${name}" already exists in the writable root`)
   }
-  if (previous !== undefined && previous.entry.shape === 'bundle') {
+  if (previous !== undefined && renaming && previous.entry.shape === 'bundle') {
     // Plain rename within the same root; the destination must not exist.
     renameSync(previous.entry.dir, dir)
-  } else if (previous !== undefined) {
+  } else if (previous !== undefined && renaming) {
     // A flat `<old>.md` becomes a bundle: the file moves inside the new dir.
     mkdirSync(dir, { recursive: true })
     renameSync(previous.entry.path, file)
   } else {
+    // Fresh creation, or an in-place edit (same name): for the latter the
+    // bundle dir already exists — keep it and all of its resource files.
     mkdirSync(dir, { recursive: true })
   }
   writeFileSync(file, text)
   if (readFileSync(file, 'utf8') !== text) throw new Error('write verify failed')
+  // An in-place edit of a flat `<name>.md` entry just became a bundle — drop
+  // the flat file so the root does not keep two same-named skills.
+  if (previousName === name) rmSync(join(writableSkillRoot(ctx), `${name}.md`), { force: true })
   logger.info(`skills: wrote ${file}`)
   return installedEntry(parsed.skill, writableSkillRoot(ctx))
 }
@@ -417,8 +423,8 @@ export async function deleteSkill(ctx: DshContext, name: string): Promise<void> 
 
 // ── zip import ───────────────────────────────────────────────────────────────
 
-/** The catalog entry for a skill just installed into the writable root. */
-function installedEntry(skill: ParsedSkill, root: string): SkillEntry {
+/** The catalog entry for a skill just installed as a bundle into `root`. */
+export function installedEntry(skill: ParsedSkill, root: string): SkillEntry {
   const dir = join(root, skill.name)
   return {
     name: skill.name,
@@ -469,15 +475,20 @@ function skillZipRoots(names: string[]): string[] {
 }
 
 /**
- * Install every skill a zip carries into the writable root, all-or-nothing.
+ * Install every skill a zip carries into `targetRoot`, all-or-nothing.
  *
  * The archive is extracted to a temp staging dir; every candidate is parsed and
- * collision-checked (against the writable root AND the other candidates) BEFORE
- * anything is installed, so a failure leaves the root untouched. The installed
+ * collision-checked (against `exists` AND the other candidates) BEFORE anything
+ * is installed, so a failure leaves the target untouched. The installed
  * directory name is the frontmatter `name` — the same authority as the editor —
  * and the skill's own directory (scripts, references, …) is carried over whole.
+ * Returns what landed, so callers can map to their own entry shapes.
  */
-export function importSkillZip(ctx: DshContext, zipPath: string): SkillEntry[] {
+export function installZipSkills(
+  targetRoot: string,
+  zipPath: string,
+  exists: (name: string) => boolean,
+): Array<{ skill: ParsedSkill; dir: string }> {
   const arc = new AdmZip(zipPath)
   const unsafe = arc.getEntries().find(entry => zipEntryUnsafe(entry.entryName))
   if (unsafe !== undefined) throwE(E.extSkillZipUnsafe, { detail: unsafe.entryName })
@@ -494,22 +505,39 @@ export function importSkillZip(ctx: DshContext, zipPath: string): SkillEntry[] {
       const parsed = parseSkillText(readFileSync(join(staging, dir, 'SKILL.md'), 'utf8'))
       if (!parsed.ok) throwE(E.extBadSkill, { detail: label }, `${label}: ${parsed.reason}`)
       const name = parsed.skill.name
-      if (seen.has(name) || findEditableSkill(ctx, name) !== undefined) {
+      if (seen.has(name) || exists(name)) {
         throwE(E.extSkillExists, { detail: name })
       }
       seen.add(name)
       installs.push({ skill: parsed.skill, from: join(staging, dir) })
     }
-    // Pass 2 — install (renames inside staging → writable root).
-    const root = writableSkillRoot(ctx)
-    mkdirSync(root, { recursive: true })
-    return installs.map(({ skill, from }) => {
-      renameSync(from, join(root, skill.name))
-      return installedEntry(skill, root)
-    })
+    // Pass 2 — install (copy out of staging → target root; a copy, not a
+    // rename, because staging may sit on another drive than the target, where
+    // a rename would throw EXDEV).
+    mkdirSync(targetRoot, { recursive: true })
+    const landed: string[] = []
+    try {
+      return installs.map(({ skill, from }) => {
+        const dir = join(targetRoot, skill.name)
+        cpSync(from, dir, { recursive: true })
+        landed.push(dir)
+        return { skill, dir }
+      })
+    } catch (error) {
+      // Roll back whatever landed so the import stays all-or-nothing.
+      for (const dir of landed) rmSync(dir, { recursive: true, force: true })
+      throw error
+    }
   } finally {
     rmSync(staging, { recursive: true, force: true })
   }
+}
+
+/** Install every skill a zip carries into the dsh's writable root. */
+export function importSkillZip(ctx: DshContext, zipPath: string): SkillEntry[] {
+  const rootDir = writableSkillRoot(ctx)
+  return installZipSkills(rootDir, zipPath, name => findEditableSkill(ctx, name) !== undefined)
+    .map(({ skill }) => installedEntry(skill, rootDir))
 }
 
 /** The home-layer patch path a `skill-filesystem` config row lives in (for docs/UX). */

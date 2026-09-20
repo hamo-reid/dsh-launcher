@@ -28,6 +28,7 @@ import { repairArchiveLinks } from './core/plugins.ts'
 import { initGithubAuth, setTokenCipher } from './core/github-auth.ts'
 import { setMcpSecretCipher } from './core/mcp-secrets.ts'
 import { setSkillTrash } from './core/skills.ts'
+import { setSkillLibraryDir, setSkillLibraryTrash } from './core/skill-library.ts'
 
 /** Domain-tagged logger for renderer-sourced messages (`{domain:"renderer"}`). */
 const rlog = child('renderer')
@@ -373,6 +374,10 @@ app.whenReady().then(async () => {
   })
   // Skill deletion moves the entry to the OS recycle bin (reversible there).
   setSkillTrash(path => shell.trashItem(path))
+  // The launcher-global skill library lives under userData; deletions from it
+  // use the same recycle-bin mover.
+  setSkillLibraryTrash(path => shell.trashItem(path))
+  setSkillLibraryDir(join(app.getPath('userData'), 'skill-library'))
   initGithubAuth()
   // Give app-level state the Electron `userData` dir for its defaults.
   configureAppState(app.getPath('userData'))

@@ -103,6 +103,9 @@ export const E = {
   extBadSkill: 'ext.badSkill',
   extSkillZipNoSkill: 'ext.skillZipNoSkill',
   extSkillZipUnsafe: 'ext.skillZipUnsafe',
+  // extensions (MCP library)
+  extMcpExists: 'ext.mcpExists',
+  extMcpNotInLib: 'ext.mcpNotInLib',
   // dsh data import/export
   dataNotSelected: 'data.notSelected',
   // run

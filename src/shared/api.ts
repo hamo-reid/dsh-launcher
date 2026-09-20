@@ -59,8 +59,14 @@ import type {
   RunMode,
   LaunchOptions,
   McpListing,
+  McpApplyTarget,
+  McpLibOverviewRow,
+  McpServer,
   McpServerInput,
   SkillEntry,
+  SkillLibEntry,
+  SkillLibIssue,
+  SkillLibOverviewRow,
   SkillListing,
   TrashItem,
 } from './types.ts'
@@ -134,6 +140,8 @@ export interface WindowApi {
     /** Every MCP row the profile resolves (bundle → profile → home), with
      * field-level and duplicate-`serverName` problems attached per row. */
     mcpList: (dshId: string, profile: string) => Promise<IpcResult<McpListing>>
+    /** The dsh's home-layer MCP rows alone (the "every profile" scope). */
+    mcpHomeList: (dshId: string) => Promise<IpcResult<McpServer[]>>
     /** Create or update one row in the chosen layer. */
     mcpSave: (dshId: string, profile: string, input: McpServerInput, layer: 'profile' | 'home') => Promise<IpcResult<boolean>>
     /** Remove one row; its `insert:` block goes with it when it was the last. */
@@ -150,17 +158,39 @@ export interface WindowApi {
     /** Every root dsh scans for skills, the discovered catalog, and skill-like
      * files that would not load (with reasons). dsh-scoped, not per-profile. */
     skillList: (dshId: string) => Promise<IpcResult<SkillListing>>
-    /** Scaffold text for a new skill, rendered by the same renderer that writes. */
-    skillScaffold: (name: string) => Promise<IpcResult<string>>
-    /** Full text of an editable skill, for the editor modal. */
-    skillRead: (dshId: string, name: string) => Promise<IpcResult<{ text: string; path: string }>>
-    /** Create (`previousName === null`) or update one skill from full file text. */
-    skillSave: (dshId: string, previousName: string | null, text: string) => Promise<IpcResult<SkillEntry>>
     /** Move an editable skill to the OS recycle bin. */
     skillDelete: (dshId: string, name: string) => Promise<IpcResult<boolean>>
-    /** Pick a skill zip via a file dialog and install its skills into the
-     * writable root (all-or-nothing). `null` when the dialog was cancelled. */
-    skillImportZip: (dshId: string) => Promise<IpcResult<SkillEntry[] | null>>
+    // ── MCP library (launcher-global definitions; applied rows are copies) ──
+    /** Every library entry with where it is applied and drift counts. */
+    libMcpOverview: () => Promise<IpcResult<McpLibOverviewRow[]>>
+    /** Create or update one library entry (`previousServerName` renames). */
+    libMcpSave: (previousServerName: string | null, input: McpServerInput) => Promise<IpcResult<boolean>>
+    /** Delete one library entry (applied rows are left untouched). */
+    libMcpRemove: (serverName: string) => Promise<IpcResult<boolean>>
+    /** Materialize a library entry as a row in a profile layer or the home
+     * layer. Fails when the target layer already has a row of that name. */
+    libMcpApply: (serverName: string, target: McpApplyTarget) => Promise<IpcResult<boolean>>
+    /** Rewrite every drifted, non-handwritten applied row from the library. */
+    libMcpSync: (serverName: string) => Promise<IpcResult<{ updated: number; skipped: number }>>
+    // ── Skill library (launcher-global bundles; dsh roots hold copies) ──
+    /** The library catalog plus every file that would not load (with reasons). */
+    libSkillList: () => Promise<IpcResult<{ skills: SkillLibEntry[]; issues: SkillLibIssue[] }>>
+    /** Entries with their per-dsh install states (installed / stale). */
+    libSkillOverview: () => Promise<IpcResult<SkillLibOverviewRow[]>>
+    /** Scaffold text for a new library skill. */
+    libSkillScaffold: (name: string) => Promise<IpcResult<string>>
+    /** Full text of one library skill, for the editor modal. */
+    libSkillRead: (name: string) => Promise<IpcResult<{ text: string; path: string }>>
+    /** Create (`previousName === null`) or update one library skill; the
+     * frontmatter `name` is authoritative and renames the entry. */
+    libSkillSave: (previousName: string | null, text: string) => Promise<IpcResult<SkillLibEntry>>
+    /** Move one library skill to the OS recycle bin. */
+    libSkillDelete: (name: string) => Promise<IpcResult<boolean>>
+    /** Pick a zip via a file dialog and install its skills into the library
+     * (all-or-nothing). `null` when the dialog was cancelled. */
+    libSkillImportZip: () => Promise<IpcResult<SkillLibEntry[] | null>>
+    /** Copy a library skill into a dsh's writable root (`overwrite` = reinstall). */
+    libSkillInstall: (name: string, dshId: string, overwrite: boolean) => Promise<IpcResult<SkillEntry>>
   }
 
   run: {

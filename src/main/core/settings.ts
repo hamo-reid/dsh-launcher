@@ -28,7 +28,7 @@ import { basename, dirname, join } from 'node:path'
 import initSqlJs, { type Database, type SqlJsStatic } from 'sql.js'
 import { logger } from './logger.ts'
 import type { DshEntry } from './dsh.ts'
-import type { DevPlugin, LaunchOptions, MarketSource, RunMode } from '../../shared/types.ts'
+import type { DevPlugin, LaunchOptions, MarketSource, McpLibEntry, RunMode } from '../../shared/types.ts'
 
 /** The merged settings shape callers see (a union of the three stored rows). */
 export interface AppSettings {
@@ -66,6 +66,9 @@ export interface AppSettings {
    * `!!js process.env.<NAME>` references in MCP rows resolve. Secrets: never
    * exported and only the names ever cross to the renderer. */
   mcpSecrets?: Record<string, string>
+  /** The launcher-global MCP server library (see `core/mcp-library.ts`).
+   * Definitions, not secrets — exported with settings backups. */
+  mcpLibrary?: McpLibEntry[]
   /** Registered local development plugins (linked, not archived). Launcher-only
    * state: independent of the plugin store. */
   devPlugins?: DevPlugin[]
@@ -83,7 +86,7 @@ export interface AppSettings {
 type PrefsSettings = Pick<AppSettings,
   'pluginDir' | 'dshVersionDir' | 'uiLanguage' | 'closeToTray' | 'askOnClose' |
   'nodePreference' | 'onboarded' | 'marketSource' | 'marketUrl' | 'githubTokenEnc' |
-  'mcpSecrets' | 'devPlugins'>
+  'mcpSecrets' | 'mcpLibrary' | 'devPlugins'>
 /** The `dsh` row: the registered dsh installs. */
 type DshSettings = Pick<AppSettings, 'dshes'>
 /** The `launch` row: per-profile launch config. */
@@ -463,6 +466,7 @@ function splitPrefs(s: AppSettings): PrefsSettings {
     ...(s.marketUrl !== undefined ? { marketUrl: s.marketUrl } : {}),
     ...(s.githubTokenEnc !== undefined ? { githubTokenEnc: s.githubTokenEnc } : {}),
     ...(s.mcpSecrets !== undefined ? { mcpSecrets: s.mcpSecrets } : {}),
+    ...(s.mcpLibrary !== undefined ? { mcpLibrary: s.mcpLibrary } : {}),
     ...(s.devPlugins !== undefined ? { devPlugins: s.devPlugins } : {}),
   }
 }
@@ -517,6 +521,23 @@ function readDevPlugins(raw: unknown): DevPlugin[] {
   return out
 }
 
+/** Normalize the MCP library: entries need a valid `serverName` and an input
+ * object; everything else is best-effort (settings may be hand-edited). */
+function readMcpLibrary(raw: unknown[]): McpLibEntry[] {
+  const out: McpLibEntry[] = []
+  for (const item of raw) {
+    if (!isRecord(item)) continue
+    const serverName = typeof item.serverName === 'string' ? item.serverName : ''
+    if (serverName === '' || !isRecord(item.input)) continue
+    out.push({
+      serverName,
+      input: item.input as unknown as McpLibEntry['input'],
+      updatedAt: typeof item.updatedAt === 'string' && item.updatedAt !== '' ? item.updatedAt : new Date(0).toISOString(),
+    })
+  }
+  return out
+}
+
 export function normalizeSettings(raw: unknown): AppSettings {
   if (!isRecord(raw)) return {}
   const out: AppSettings = {}
@@ -549,6 +570,7 @@ export function normalizeSettings(raw: unknown): AppSettings {
     }
     if (Object.keys(secrets).length > 0) out.mcpSecrets = secrets
   }
+  if (Array.isArray(raw.mcpLibrary)) out.mcpLibrary = readMcpLibrary(raw.mcpLibrary)
   if (Array.isArray(raw.dshes)) out.dshes = raw.dshes.filter(isDshEntry)
   const devPlugins = readDevPlugins(raw.devPlugins)
   if (devPlugins.length > 0) out.devPlugins = devPlugins
