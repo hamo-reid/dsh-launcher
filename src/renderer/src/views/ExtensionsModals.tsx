@@ -43,6 +43,9 @@ function KVEditor(props: {
   label: string
   hint?: string
   entries: McpKV[]
+  /** Names stored in the launcher's encrypted secret store; an `env`-mode entry
+   * matching one is tagged so the user sees the reference will resolve. */
+  storedNames?: string[]
   onChange: (next: McpKV[]) => void
 }): JSX.Element {
   const { t } = useTranslation()
@@ -57,37 +60,51 @@ function KVEditor(props: {
         <div style={{ color: token.colorTextTertiary, fontSize: token.fontSizeSM, marginBottom: 4 }}>{props.hint}</div>
       )}
       <Space direction="vertical" size={4} style={{ width: '100%' }}>
-        {props.entries.map((entry, i) => (
-          <Space.Compact key={i} style={{ width: '100%' }}>
-            <Input
-              style={{ width: '32%' }}
-              value={entry.name}
-              placeholder={t('ext.mcp.form.kvName')}
-              onChange={e => update(i, { name: e.target.value })}
-            />
-            <Select<McpValueMode>
-              style={{ width: '28%' }}
-              value={entry.mode}
-              onChange={mode => update(i, { mode })}
-              options={[
-                { value: 'env', label: t('ext.mcp.form.kvModeEnv') },
-                { value: 'plain', label: t('ext.mcp.form.kvModePlain') },
-                { value: 'js', label: t('ext.mcp.form.kvModeJs') },
-              ]}
-            />
-            <Input
-              style={{ flex: 1 }}
-              value={entry.mode === 'env' ? '' : (entry.value ?? '')}
-              disabled={entry.mode === 'env'}
-              placeholder={entry.mode === 'env' ? `process.env.${entry.name || 'NAME'}` : t('ext.mcp.form.kvValue')}
-              onChange={e => update(i, { value: e.target.value })}
-            />
-            <Button
-              icon={<DeleteOutlined />}
-              onClick={() => props.onChange(props.entries.filter((_, j) => j !== i))}
-            />
-          </Space.Compact>
-        ))}
+        {props.entries.map((entry, i) => {
+          const stored = entry.mode === 'env' && (props.storedNames ?? []).includes(entry.name)
+          return (
+            <Space.Compact key={i} style={{ width: '100%' }}>
+              <Input
+                style={{ width: '32%' }}
+                value={entry.name}
+                placeholder={t('ext.mcp.form.kvName')}
+                onChange={e => update(i, { name: e.target.value })}
+              />
+              <Select<McpValueMode>
+                style={{ width: '24%' }}
+                value={entry.mode}
+                onChange={mode => update(i, { mode })}
+                options={[
+                  { value: 'env', label: t('ext.mcp.form.kvModeEnv') },
+                  { value: 'plain', label: t('ext.mcp.form.kvModePlain') },
+                  { value: 'js', label: t('ext.mcp.form.kvModeJs') },
+                ]}
+              />
+              <Input
+                style={{ flex: 1 }}
+                value={entry.mode === 'env' ? '' : (entry.value ?? '')}
+                disabled={entry.mode === 'env'}
+                placeholder={entry.mode === 'env' ? `process.env.${entry.name || 'NAME'}` : t('ext.mcp.form.kvValue')}
+                onChange={e => update(i, { value: e.target.value })}
+              />
+              {stored && (
+                <span
+                  style={{
+                    color: token.colorSuccess, fontSize: token.fontSizeSM,
+                    display: 'inline-flex', alignItems: 'center', padding: `0 ${token.paddingXS}px`,
+                    background: token.colorSuccessBg, borderRadius: token.borderRadiusSM,
+                  }}
+                >
+                  {t('ext.secrets.stored')}
+                </span>
+              )}
+              <Button
+                icon={<DeleteOutlined />}
+                onClick={() => props.onChange(props.entries.filter((_, j) => j !== i))}
+              />
+            </Space.Compact>
+          )
+        })}
         <Button
           size="small"
           icon={<PlusOutlined />}
@@ -107,6 +124,8 @@ export interface McpServerModalProps {
   layer: 'profile' | 'home'
   onLayerChange: (layer: 'profile' | 'home') => void
   profileName: string
+  /** Names stored in the launcher's encrypted secret store. */
+  storedNames: string[]
   saving: boolean
   onCancel: () => void
   onSubmit: (input: McpServerInput) => void
@@ -234,6 +253,7 @@ export default function McpServerModal(props: McpServerModalProps): JSX.Element 
             <KVEditor
               label={t('ext.mcp.form.headers')}
               entries={input.headers ?? []}
+              storedNames={props.storedNames}
               onChange={next => set({ headers: next })}
             />
           </>
@@ -243,6 +263,7 @@ export default function McpServerModal(props: McpServerModalProps): JSX.Element 
           label={t('ext.mcp.form.env')}
           hint={t('ext.mcp.form.envHint')}
           entries={input.env ?? []}
+          storedNames={props.storedNames}
           onChange={next => set({ env: next })}
         />
 
@@ -307,6 +328,69 @@ export default function McpServerModal(props: McpServerModalProps): JSX.Element 
             ),
           }]}
         />
+      </Space>
+    </Modal>
+  )
+}
+
+/** Add / update one launch secret (name + value). The value never leaves the
+ * main process; the renderer only sends it here and never reads it back. */
+export interface McpSecretModalProps {
+  open: boolean
+  saving: boolean
+  onCancel: () => void
+  onSave: (name: string, value: string) => void
+}
+
+export function McpSecretModal(props: McpSecretModalProps): JSX.Element {
+  const { t } = useTranslation()
+  const [name, setName] = useState('')
+  const [value, setValue] = useState('')
+
+  useEffect(() => {
+    if (props.open) { setName(''); setValue('') }
+  }, [props.open])
+
+  const nameValid = /^[A-Za-z_][A-Za-z0-9_]*$/.test(name.trim())
+  const canSave = nameValid && value !== ''
+  const submit = (): void => {
+    if (!canSave) return
+    props.onSave(name.trim(), value)
+  }
+
+  return (
+    <Modal
+      open={props.open}
+      title={t('ext.secrets.addTitle')}
+      okText={t('common.save')}
+      cancelText={t('common.cancel')}
+      confirmLoading={props.saving}
+      onOk={submit}
+      onCancel={props.onCancel}
+      width={480}
+      destroyOnHidden
+    >
+      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+        <div style={{ color: 'inherit', fontSize: 'inherit' }}>
+          {t('ext.secrets.addHint')}
+        </div>
+        <div>
+          <FieldLabel>{t('ext.secrets.fieldName')}</FieldLabel>
+          <Input
+            value={name}
+            placeholder="GITHUB_TOKEN"
+            status={name !== '' && !nameValid ? 'error' : undefined}
+            onChange={e => setName(e.target.value)}
+          />
+        </div>
+        <div>
+          <FieldLabel>{t('ext.secrets.fieldValue')}</FieldLabel>
+          <Input.Password
+            value={value}
+            placeholder={t('ext.secrets.fieldValuePlaceholder')}
+            onChange={e => setValue(e.target.value)}
+          />
+        </div>
       </Space>
     </Modal>
   )

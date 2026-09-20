@@ -931,6 +931,19 @@ const zh = {
     'ext.mcp.form.reconnectAttempts': '最大次数',
     'ext.mcp.form.rawConfigTitle': '无法结构化编辑',
     'ext.mcp.form.rawConfigBody': '该行的 config 无法解析成表单；保存会以表单内容覆盖它。如需保留原文，请用源码编辑。',
+
+    'ext.secrets.title': 'Launcher 密钥（随每次启动注入）',
+    'ext.secrets.hint': '这些环境变量会在每次启动 dsh 时注入，供 MCP 行里的 !!js process.env.<名称> 引用使用；以 safeStorage 加密存储，不会进入 patch 文件或设置备份。',
+    'ext.secrets.empty': '还没有保存的密钥。',
+    'ext.secrets.add': '添加密钥',
+    'ext.secrets.addTitle': '保存启动密钥',
+    'ext.secrets.addHint': '值会被加密保存（Windows DPAPI / 系统钥匙串），名称已存在时覆盖旧值。',
+    'ext.secrets.fieldName': '环境变量名',
+    'ext.secrets.fieldValue': '值',
+    'ext.secrets.fieldValuePlaceholder': '输入密钥值',
+    'ext.secrets.saved': '已保存密钥：{{name}}',
+    'ext.secrets.removeConfirm': '删除密钥「{{name}}」？',
+    'ext.secrets.stored': '已保存',
   },
 }
 

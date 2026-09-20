@@ -933,6 +933,19 @@ const en: typeof zh = {
     'ext.mcp.form.reconnectAttempts': 'Max attempts',
     'ext.mcp.form.rawConfigTitle': 'Not structurally editable',
     'ext.mcp.form.rawConfigBody': 'This row\'s config does not parse into the form; saving overwrites it with the form contents. Use source editing to keep the original.',
+
+    'ext.secrets.title': 'Launcher secrets (injected on every launch)',
+    'ext.secrets.hint': 'These variables are injected into every dsh launch so MCP rows can reference them via !!js process.env.<NAME>. They are stored encrypted (safeStorage) and never enter the patch file or a settings backup.',
+    'ext.secrets.empty': 'No secrets stored yet.',
+    'ext.secrets.add': 'Add secret',
+    'ext.secrets.addTitle': 'Save a launch secret',
+    'ext.secrets.addHint': 'The value is stored encrypted (DPAPI / system keychain). Saving an existing name overwrites it.',
+    'ext.secrets.fieldName': 'Environment-variable name',
+    'ext.secrets.fieldValue': 'Value',
+    'ext.secrets.fieldValuePlaceholder': 'Enter the secret value',
+    'ext.secrets.saved': 'Saved secret {{name}}',
+    'ext.secrets.removeConfirm': 'Delete secret “{{name}}”?',
+    'ext.secrets.stored': 'Saved',
   },
 }
 

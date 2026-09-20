@@ -8,13 +8,13 @@
  * writes an id-targeted override instead of a second insert.
  */
 import { useCallback, useEffect, useState } from 'react'
-import { Alert, Button, Empty, Popconfirm, Skeleton, Space, Switch, Tag, Tooltip, Typography, theme, message } from 'antd'
+import { Alert, Button, Collapse, Empty, Popconfirm, Skeleton, Space, Switch, Tag, Tooltip, Typography, theme, message } from 'antd'
 import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
 import Panel from '../components/Panel.tsx'
 import Toolbar from '../components/Toolbar.tsx'
-import McpServerModal from './ExtensionsModals.tsx'
+import McpServerModal, { McpSecretModal } from './ExtensionsModals.tsx'
 import type { McpListing, McpServer, McpServerInput } from '../../../shared/types.ts'
 
 /** Which layer a write targets: a shipped row is switched off in the profile
@@ -32,8 +32,17 @@ export default function McpView(props: { dshId?: string; profile?: string }): JS
   const [modal, setModal] = useState<{ open: boolean; editing: McpServer | null; layer: 'profile' | 'home' }>(
     { open: false, editing: null, layer: 'profile' },
   )
+  const [secrets, setSecrets] = useState<string[]>([])
+  const [secretModal, setSecretModal] = useState(false)
 
   const { dshId, profile } = props
+
+  const loadSecrets = useCallback(async (): Promise<void> => {
+    const r = await window.api.ext.mcpSecrets()
+    if (r.ok) setSecrets(r.value)
+  }, [])
+
+  useEffect(() => { void loadSecrets() }, [loadSecrets])
 
   const load = useCallback(async (): Promise<void> => {
     if (dshId === undefined || profile === undefined) { setListing(null); return }
@@ -77,6 +86,24 @@ export default function McpView(props: { dshId?: string; profile?: string }): JS
     await load()
   }
 
+  const saveSecret = async (name: string, value: string): Promise<void> => {
+    setBusy('secret')
+    const r = await window.api.ext.mcpSecretSet(name, value)
+    setBusy('')
+    if (!r.ok) { void message.error(apiErrorText(r)); return }
+    void message.success(t('ext.secrets.saved', { name }))
+    setSecretModal(false)
+    await loadSecrets()
+  }
+
+  const removeSecret = async (name: string): Promise<void> => {
+    setBusy(`secret:${name}`)
+    const r = await window.api.ext.mcpSecretRemove(name)
+    setBusy('')
+    if (!r.ok) { void message.error(apiErrorText(r)); return }
+    await loadSecrets()
+  }
+
   const layerTag = (server: McpServer): JSX.Element => {
     const colour = server.layer === 'bundle' ? 'default' : server.layer === 'home' ? 'purple' : 'blue'
     const label = server.layer === 'bundle'
@@ -107,6 +134,50 @@ export default function McpView(props: { dshId?: string; profile?: string }): JS
           {t('ext.mcp.toolPrefixHint')}
         </Typography.Text>
       </Toolbar>
+
+      <div style={{ padding: `${token.paddingXS}px ${token.padding}px` }}>
+        <Collapse
+          ghost
+          size="small"
+          items={[{
+            key: 'secrets',
+            label: <Typography.Text type="secondary">{t('ext.secrets.title')}</Typography.Text>,
+            children: (
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Typography.Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
+                  {t('ext.secrets.hint')}
+                </Typography.Text>
+                {secrets.length === 0 ? (
+                  <Typography.Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
+                    {t('ext.secrets.empty')}
+                  </Typography.Text>
+                ) : secrets.map(name => (
+                  <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Typography.Text code>{name}</Typography.Text>
+                    <span style={{ flex: 1 }} />
+                    <Popconfirm
+                      title={t('ext.secrets.removeConfirm', { name })}
+                      okText={t('common.delete')}
+                      cancelText={t('common.cancel')}
+                      onConfirm={() => void removeSecret(name)}
+                    >
+                      <Button
+                        size="small"
+                        danger
+                        icon={<DeleteOutlined />}
+                        loading={busy === `secret:${name}`}
+                      />
+                    </Popconfirm>
+                  </div>
+                ))}
+                <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={() => setSecretModal(true)}>
+                  {t('ext.secrets.add')}
+                </Button>
+              </Space>
+            ),
+          }]}
+        />
+      </div>
 
       <div style={{ flex: 1, overflow: 'auto', padding: token.padding }}>
         {loading && servers.length === 0 ? (
@@ -207,9 +278,17 @@ export default function McpView(props: { dshId?: string; profile?: string }): JS
         layer={modal.layer}
         onLayerChange={layer => setModal(prev => ({ ...prev, layer }))}
         profileName={profile ?? ''}
+        storedNames={secrets}
         saving={busy === 'save'}
         onCancel={() => setModal({ open: false, editing: null, layer: 'profile' })}
         onSubmit={input => void save(input)}
+      />
+
+      <McpSecretModal
+        open={secretModal}
+        saving={busy === 'secret'}
+        onCancel={() => setSecretModal(false)}
+        onSave={(name, value) => void saveSecret(name, value)}
       />
     </div>
   )

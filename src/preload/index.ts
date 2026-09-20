@@ -153,6 +153,12 @@ const api = {
       ipcRenderer.invoke('ext:mcpRemove', dshId, profile, id, layer),
     mcpSetDisabled: (dshId: string, profile: string, id: string, disabled: boolean, layer: 'profile' | 'home'): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('ext:mcpSetDisabled', dshId, profile, id, disabled, layer),
+    mcpSecrets: (): Promise<IpcResult<string[]>> =>
+      ipcRenderer.invoke('ext:mcpSecrets'),
+    mcpSecretSet: (name: string, value: string): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('ext:mcpSecretSet', name, value),
+    mcpSecretRemove: (name: string): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('ext:mcpSecretRemove', name),
   },
 
   run: {

@@ -19,6 +19,7 @@ import { contextForEntry, dshEntryById, type DshContext } from '../core/appState
 import { homePatchPath, profileDir } from '../core/home.ts'
 import { listMcpServers } from '../core/combo.ts'
 import { addMcpServer, findMcpServer, mcpRowIds, removeMcpServer, SERVER_NAME_RE, updateMcpServer } from '../core/mcp.ts'
+import { listMcpSecretNames, setMcpSecret } from '../core/mcp-secrets.ts'
 import { assertPatchDocValid, setRowDisabled } from '../core/patch.ts'
 import { verifyDisabledState } from '../core/app-util.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
@@ -152,5 +153,29 @@ export function registerExtensionsIpc(): void {
     } catch (error) {
       return failFromError(error)
     }
+  })
+
+  // The stored launch secrets: names only — values never cross to the renderer,
+  // and the patch file only ever holds a `!!js process.env.<name>` reference.
+  handle('ext:mcpSecrets', (): IpcResult<string[]> => {
+    return { ok: true, value: listMcpSecretNames() }
+  })
+
+  // Save (or, with `''`, clear) one launch secret.
+  handle('ext:mcpSecretSet', (_event, name: string, value: string): IpcResult<boolean> => {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return fail(E.extBadEnvName, { detail: name })
+    try {
+      setMcpSecret(name, value)
+      return { ok: true, value: true }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Clear one launch secret (idempotent: absent names are a no-op).
+  handle('ext:mcpSecretRemove', (_event, name: string): IpcResult<boolean> => {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return { ok: true, value: false }
+    setMcpSecret(name, null)
+    return { ok: true, value: true }
   })
 }

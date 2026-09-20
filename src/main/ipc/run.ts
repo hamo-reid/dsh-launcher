@@ -12,6 +12,7 @@ import { join } from 'node:path'
 import { existsExecutable, resolveLaunchEntry, type LaunchEntry } from '../core/dsh.ts'
 import { buildDshLaunch } from '../core/launch-spec.ts'
 import { findInsertConflicts } from '../core/combo.ts'
+import { mcpSecretsEnv } from '../core/mcp-secrets.ts'
 import { nodeEnvironment } from '../core/node-env.ts'
 import { nodePreferenceValue } from '../core/settings.ts'
 import { contextForEntry, dshEntryById } from '../core/appState.ts'
@@ -247,6 +248,8 @@ export function registerRunIpc(): void {
       // for the Electron process itself and preloads a shim that clears it before dsh
       // can spawn children; the system-node path carries neither.
       const node = resolveNodeExe()
+      // MCP launch secrets ride into every dsh child, overridden by any value the
+      // user set in the launch panel's environment editor (explicit wins).
       const { exe, argv, env } = buildDshLaunch({
         launch,
         home: entry.home,
@@ -254,7 +257,7 @@ export function registerRunIpc(): void {
         profile,
         args: effectiveArgs(sanitized),
         patches: sanitized.patches,
-        env: sanitized.env,
+        env: { ...mcpSecretsEnv(), ...sanitized.env },
       })
       const shellMode = resolvedMode === 'shell'
       const command = argv.join(' ')

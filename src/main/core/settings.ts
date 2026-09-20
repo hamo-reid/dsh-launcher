@@ -61,6 +61,11 @@ export interface AppSettings {
   /** The user's GitHub token, encrypted at rest (see `core/github-auth.ts`).
    * A secret: never exported and never logged. */
   githubTokenEnc?: string
+  /** MCP launch secrets, name → value encrypted at rest (see
+   * `core/mcp-secrets.ts`). Injected into every dsh child's environment so the
+   * `!!js process.env.<NAME>` references in MCP rows resolve. Secrets: never
+   * exported and only the names ever cross to the renderer. */
+  mcpSecrets?: Record<string, string>
   /** Registered local development plugins (linked, not archived). Launcher-only
    * state: independent of the plugin store. */
   devPlugins?: DevPlugin[]
@@ -77,7 +82,8 @@ export interface AppSettings {
 /** The `prefs` row: user preferences (no registry / no per-profile config). */
 type PrefsSettings = Pick<AppSettings,
   'pluginDir' | 'dshVersionDir' | 'uiLanguage' | 'closeToTray' | 'askOnClose' |
-  'nodePreference' | 'onboarded' | 'marketSource' | 'marketUrl' | 'githubTokenEnc' | 'devPlugins'>
+  'nodePreference' | 'onboarded' | 'marketSource' | 'marketUrl' | 'githubTokenEnc' |
+  'mcpSecrets' | 'devPlugins'>
 /** The `dsh` row: the registered dsh installs. */
 type DshSettings = Pick<AppSettings, 'dshes'>
 /** The `launch` row: per-profile launch config. */
@@ -370,10 +376,11 @@ export function flushSettings(): void {
 }
 
 /** Export the settings plus a header, for backup / migration. The GitHub token
- * is a secret and is deliberately left out of the export. */
+ * and the MCP launch secrets are secrets and are deliberately left out. */
 export function exportSettings(): string {
   const app = loadSettings()
   delete app.githubTokenEnc
+  delete app.mcpSecrets
   return JSON.stringify(
     { schemaVersion, exportedAt: new Date().toISOString(), app },
     null, 2,
@@ -390,9 +397,11 @@ export function importSettings(json: string): void {
     throw new Error(`settings export is newer (v${fromVersion}) than this app (v${CURRENT_SCHEMA_VERSION})`)
   }
   const migrated = runMigrations(normalizeSettings(envelope.app), fromVersion).data
-  // An export never carries the token; keep the one already on this machine.
+  // An export never carries secrets; keep the ones already on this machine.
   const existingToken = current.githubTokenEnc
+  const existingSecrets = current.mcpSecrets
   current = existingToken !== undefined ? { ...migrated, githubTokenEnc: existingToken } : migrated
+  current = existingSecrets !== undefined ? { ...current, mcpSecrets: existingSecrets } : current
   schemaVersion = CURRENT_SCHEMA_VERSION
   lastSignature = ''
   persist()
@@ -453,6 +462,7 @@ function splitPrefs(s: AppSettings): PrefsSettings {
     ...(s.marketSource !== undefined ? { marketSource: s.marketSource } : {}),
     ...(s.marketUrl !== undefined ? { marketUrl: s.marketUrl } : {}),
     ...(s.githubTokenEnc !== undefined ? { githubTokenEnc: s.githubTokenEnc } : {}),
+    ...(s.mcpSecrets !== undefined ? { mcpSecrets: s.mcpSecrets } : {}),
     ...(s.devPlugins !== undefined ? { devPlugins: s.devPlugins } : {}),
   }
 }
@@ -532,6 +542,13 @@ export function normalizeSettings(raw: unknown): AppSettings {
   if (marketUrl !== undefined) out.marketUrl = marketUrl
   const githubTokenEnc = nonEmptyString(raw.githubTokenEnc)
   if (githubTokenEnc !== undefined) out.githubTokenEnc = githubTokenEnc
+  if (isRecord(raw.mcpSecrets)) {
+    const secrets: Record<string, string> = {}
+    for (const [key, value] of Object.entries(raw.mcpSecrets)) {
+      if (typeof value === 'string' && value !== '' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) secrets[key] = value
+    }
+    if (Object.keys(secrets).length > 0) out.mcpSecrets = secrets
+  }
   if (Array.isArray(raw.dshes)) out.dshes = raw.dshes.filter(isDshEntry)
   const devPlugins = readDevPlugins(raw.devPlugins)
   if (devPlugins.length > 0) out.devPlugins = devPlugins

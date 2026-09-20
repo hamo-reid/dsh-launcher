@@ -26,6 +26,7 @@ import { migrateLaunchConfigKeys } from './core/launch-config.ts'
 import { configurePnpmStore } from './core/pnpm.ts'
 import { repairArchiveLinks } from './core/plugins.ts'
 import { initGithubAuth, setTokenCipher } from './core/github-auth.ts'
+import { setMcpSecretCipher } from './core/mcp-secrets.ts'
 
 /** Domain-tagged logger for renderer-sourced messages (`{domain:"renderer"}`). */
 const rlog = child('renderer')
@@ -359,6 +360,12 @@ app.whenReady().then(async () => {
   // Encrypt the GitHub token at rest with the OS keychain (DPAPI on Windows),
   // then resolve the effective token (saved setting → GH_TOKEN/GITHUB_TOKEN env).
   setTokenCipher({
+    available: () => safeStorage.isEncryptionAvailable(),
+    encrypt: plain => safeStorage.encryptString(plain).toString('base64'),
+    decrypt: cipherText => safeStorage.decryptString(Buffer.from(cipherText, 'base64')),
+  })
+  // The MCP launch secrets share the same at-rest cipher.
+  setMcpSecretCipher({
     available: () => safeStorage.isEncryptionAvailable(),
     encrypt: plain => safeStorage.encryptString(plain).toString('base64'),
     decrypt: cipherText => safeStorage.decryptString(Buffer.from(cipherText, 'base64')),

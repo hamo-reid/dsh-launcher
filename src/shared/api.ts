@@ -138,6 +138,13 @@ export interface WindowApi {
     mcpRemove: (dshId: string, profile: string, id: string, layer: 'profile' | 'home') => Promise<IpcResult<boolean>>
     /** Reversible off switch — the row stays, dsh does not load it. */
     mcpSetDisabled: (dshId: string, profile: string, id: string, disabled: boolean, layer: 'profile' | 'home') => Promise<IpcResult<boolean>>
+    /** Names of the launch secrets stored in the launcher (encrypted at rest,
+     * injected into every dsh child). Values never leave the main process. */
+    mcpSecrets: () => Promise<IpcResult<string[]>>
+    /** Save (or, with `''`, clear) one launch secret. */
+    mcpSecretSet: (name: string, value: string) => Promise<IpcResult<boolean>>
+    /** Clear one launch secret (idempotent). */
+    mcpSecretRemove: (name: string) => Promise<IpcResult<boolean>>
   }
 
   run: {
