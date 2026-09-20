@@ -15,7 +15,7 @@ import Toolbar from '../components/Toolbar.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
 import PluginCard from './PluginCard.tsx'
 import { loadFilters, saveFilters, applyOverviewFilters, type Bucket, type Facet, type FacetMode, type SortKey } from '../lib/pluginFilters.ts'
-import { DownloadVersionModal, PluginDetailModal, InstallToProfileModal, toStoreMap } from './PluginsModals.tsx'
+import { DownloadVersionModal, PluginDetailModal, InstallToProfileModal, UpdatePluginModal, toStoreMap, type UpdatePluginTarget } from './PluginsModals.tsx'
 import MarketSection from './MarketSection.tsx'
 import DevPluginsView from './DevPluginsView.tsx'
 import type { InstalledOverviewRow, MarketAnnotations, NpmSearchHit, PluginKind, PluginOrigin, PluginProvenance, PluginUpdateInfo } from '../../../shared/types.ts'
@@ -88,6 +88,8 @@ export default function PluginsSection() {
   const [loadingMore, setLoadingMore] = useState(false)
   const [storeMap, setStoreMap] = useState<Map<string, string[]>>(new Map())
   const [dlPkg, setDlPkg] = useState<string | null>(null)
+  // The update dialog (pick a version + the profiles to re-point).
+  const [updatePkg, setUpdatePkg] = useState<UpdatePluginTarget | null>(null)
   const fromRef = useRef(0)
 
   // Install / busy state.
@@ -286,13 +288,15 @@ export default function PluginsSection() {
   // Download a specific version into the store (the picker fetches the list).
   const openDownloadVersion = (name: string): void => { setTarget(null); setDlPkg(name) }
 
-  // One-click: archive the newest release. The download panel streams progress
-  // and reports a failure; the in-store tag refreshes on settle.
-  const downloadUpdate = (name: string): void => {
-    const latest = updates.get(name)?.latest
-    if (latest === undefined) { openDownloadVersion(name); return }
-    void window.api.downloads.start(`${name}@${latest}`, name)
-    void message.info(t('plugin.overview.updateStarted', { spec: `${name}@${latest}` }))
+  // Update to a chosen version and (optionally) re-point the profiles using it.
+  const openUpdate = (row: InstalledOverviewRow): void => {
+    const latest = updates.get(row.name)?.latest
+    setTarget(null)
+    setUpdatePkg({
+      name: row.name,
+      ...(latest !== undefined ? { latest } : {}),
+      usage: row.usage.map(u => ({ dsh: u.dsh, profile: u.profile, ...(u.version !== undefined ? { version: u.version } : {}) })),
+    })
   }
 
   const install = (): void => {
@@ -557,7 +561,7 @@ export default function PluginsSection() {
                           onOpen={() => setTarget(r)}
                           onInstallToProfile={() => { setTarget(null); setInstallPkg(r.name) }}
                           onDownloadVersion={() => openDownloadVersion(r.name)}
-                          onUpdate={() => downloadUpdate(r.name)}
+                          onUpdate={() => openUpdate(r)}
                           onUninstall={() => void uninstall(r.name)}
                           onReveal={() => void revealDir(r.name)}
                           onDeleteStale={() => deleteStale(r.name)}
@@ -712,7 +716,7 @@ export default function PluginsSection() {
       sizeBytes={target !== null ? sizeMap[target.name] : undefined}
       onClose={() => setTarget(null)}
       onDownloadVersion={openDownloadVersion}
-      onUpdate={downloadUpdate}
+      onUpdate={name => { const row = overview.find(x => x.name === name); if (row !== undefined) openUpdate(row) }}
       onUninstall={name => void uninstall(name)}
       onUninstallVersion={(name, version) => void uninstallVersion(name, version)}
       onReveal={name => void revealDir(name)}
@@ -725,6 +729,11 @@ export default function PluginsSection() {
       installPkg={installPkg}
       versions={installPkg !== null ? storeMap.get(installPkg) ?? [] : []}
       onClose={() => setInstallPkg(null)}
+      onDone={async () => { await Promise.all([load(), refreshStoreNames()]) }}
+    />
+    <UpdatePluginModal
+      target={updatePkg}
+      onClose={() => setUpdatePkg(null)}
       onDone={async () => { await Promise.all([load(), refreshStoreNames()]) }}
     />
     <DownloadVersionModal

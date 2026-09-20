@@ -150,6 +150,24 @@ export interface PluginApplyResult {
   text: string
 }
 
+/** Outcome of applying a plugin version to one profile. */
+export interface PluginApplyTarget {
+  /** The dsh id the profile belongs to. */
+  dsh: string
+  profile: string
+  ok: boolean
+  text: string
+}
+
+/** Result of a one-plugin update across profiles. */
+export interface PluginUpdateResult {
+  /** True when the version had to be archived into the store first. */
+  downloaded: boolean
+  results: PluginApplyTarget[]
+  /** Older versions dropped from the store when the caller asked not to keep them. */
+  removed?: string[]
+}
+
 /** Result of garbage-collecting a plugin's unused archived versions. */
 export interface PluginCleanupResult {
   removed: string[]

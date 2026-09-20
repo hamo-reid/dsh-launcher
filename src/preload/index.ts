@@ -50,6 +50,7 @@ import type {
   PluginCleanupResult,
   PluginMigrationResult,
   PluginUpdateInfo,
+  PluginUpdateResult,
   RunEvent,
   RunDefaults,
   RunInfo,
@@ -196,6 +197,8 @@ const api = {
       ipcRenderer.invoke('plugins:checkUpdates', opts),
     applyUpdates: (dshId: string, profile: string, updates: { name: string; version: string }[]): Promise<IpcResult<{ results: PluginApplyResult[] }>> =>
       ipcRenderer.invoke('plugins:applyUpdates', dshId, profile, updates),
+    applyUpdate: (name: string, version: string, targets: { dshId: string; profile: string }[], opts?: { keepOld?: boolean }): Promise<IpcResult<PluginUpdateResult>> =>
+      ipcRenderer.invoke('plugins:applyUpdate', name, version, targets, opts),
     cleanupVersions: (name: string): Promise<IpcResult<PluginCleanupResult>> =>
       ipcRenderer.invoke('plugins:cleanupVersions', name),
     migrateReplacement: (name: string, replacement: string): Promise<IpcResult<PluginMigrationResult>> =>

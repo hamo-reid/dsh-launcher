@@ -28,7 +28,7 @@ import { attachPluginSizes } from '../core/store-overview.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
 import { pathIdentifierInvalid, versionInvalid } from './validate.ts'
 import { handle } from './handle.ts'
-import type { ComboPlugin, DevBuildTarget, DevDiagnosis, DevLinkMode, DevPlugin, DevRunResult, DevScriptOptions, DownloadSessionInfo, InstalledOverviewRow, IpcResult, NpmSearchHit, PackageVersionInfo, PluginApplyResult, PluginCleanupResult, PluginMigrationResult, PluginUpdateInfo, PluginUsagePoint } from '../../shared/types.ts'
+import type { ComboPlugin, DevBuildTarget, DevDiagnosis, DevLinkMode, DevPlugin, DevRunResult, DevScriptOptions, DownloadSessionInfo, InstalledOverviewRow, IpcResult, NpmSearchHit, PackageVersionInfo, PluginApplyResult, PluginApplyTarget, PluginCleanupResult, PluginMigrationResult, PluginUpdateInfo, PluginUpdateResult, PluginUsagePoint } from '../../shared/types.ts'
 
 /** Validate + persist the plugin-store location (shared by `plugins:setDir`
  * and the onboarding wizard). On success the dir is made usable and saved. */
@@ -78,6 +78,26 @@ function anyDshContext(dshId: unknown): DshContext | null {
   if (explicit !== null) return explicit
   const scope = dshScopes()[0]
   return scope === undefined ? null : { execPath: scope.execPath ?? '', home: scope.home, version: scope.version ?? '' }
+}
+
+/** Remove a plugin's UNUSED archived versions — keep the newest, plus any version
+ * a profile still resolves to. Frees disk without breaking profiles. Shared by
+ * the explicit cleanup action and an update's "don't keep the old version". */
+function cleanupUnusedVersions(store: string, name: string): string[] {
+  const versions = storeVersions(store, name)
+  if (versions.length <= 1) return []
+  const used = new Set(
+    (buildInstalledOverview(dshScopes(), store).find(r => r.name === name)?.usage ?? [])
+      .map(u => u.version)
+      .filter((v): v is string => v !== undefined && v !== ''),
+  )
+  const keep = versions[versions.length - 1]
+  const removed: string[] = []
+  for (const version of versions) {
+    if (version === keep || used.has(version)) continue
+    if (removePlugin(store, name, version).ok) removed.push(version)
+  }
+  return removed
 }
 
 export function registerPluginsIpc(): void {
@@ -276,26 +296,49 @@ export function registerPluginsIpc(): void {
     }
   })
 
-  // Garbage-collect a plugin's UNUSED archived versions (keep the newest, and any
-  // version a profile still resolves to). Frees disk without breaking profiles.
+  // Apply ONE plugin version to specific profiles (or just archive it when no
+  // target is given): downloads once, then re-points each profile's dependency.
+  handle('plugins:applyUpdate', async (
+    _event, name: string, version: string, targets: { dshId: string; profile: string }[],
+    opts?: { keepOld?: boolean },
+  ): Promise<IpcResult<PluginUpdateResult>> => {
+    try {
+      if (pathIdentifierInvalid(name)) return fail(E.nameInvalid)
+      if (versionInvalid(version)) return fail(E.nameInvalid)
+      if (!Array.isArray(targets)) return fail(E.nameInvalid)
+      const store = pluginDir()
+      if (store === '') return fail(E.storeNotConfigured)
+      let downloaded = false
+      if (!storeVersions(store, name).includes(version)) {
+        const added = await addPlugin(store, `${name}@${version}`, name)
+        if (!added.ok) return fail(E.storeInstallFailed, { detail: added.text })
+        downloaded = true
+      }
+      const results: PluginApplyTarget[] = []
+      for (const target of targets) {
+        const dshId = typeof target?.dshId === 'string' ? target.dshId : ''
+        const profile = typeof target?.profile === 'string' ? target.profile : ''
+        const ctx = ctxOf(dshId)
+        if (ctx === null) { results.push({ dsh: dshId, profile, ok: false, text: '未找到该 DSH' }); continue }
+        if (pathIdentifierInvalid(profile)) { results.push({ dsh: dshId, profile, ok: false, text: 'profile 名不合法' }); continue }
+        // Replacing the install under a live runtime breaks it.
+        if (isProfileRunning(dshId, profile)) { results.push({ dsh: dshId, profile, ok: false, text: '运行中，已跳过' }); continue }
+        const linked = await installIntoProfile(profilesRootFor(ctx), profile, name, store, { version })
+        results.push({ dsh: dshId, profile, ok: linked.ok, text: linked.text })
+      }
+      // Optionally drop the now-unused older versions (newest + in-use are kept).
+      const removed = opts?.keepOld === false ? cleanupUnusedVersions(store, name) : []
+      return { ok: true, value: { downloaded, results, ...(removed.length > 0 ? { removed } : {}) } }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Garbage-collect a plugin's UNUSED archived versions.
   handle('plugins:cleanupVersions', (_event, name: string): IpcResult<PluginCleanupResult> => {
     try {
       if (pathIdentifierInvalid(name)) return fail(E.nameInvalid)
-      const store = pluginDir()
-      const versions = storeVersions(store, name)
-      if (versions.length <= 1) return { ok: true, value: { removed: [] } }
-      const used = new Set(
-        (buildInstalledOverview(dshScopes(), store).find(r => r.name === name)?.usage ?? [])
-          .map(u => u.version)
-          .filter((v): v is string => v !== undefined && v !== ''),
-      )
-      const keep = versions[versions.length - 1]
-      const removed: string[] = []
-      for (const version of versions) {
-        if (version === keep || used.has(version)) continue
-        if (removePlugin(store, name, version).ok) removed.push(version)
-      }
-      return { ok: true, value: { removed } }
+      return { ok: true, value: { removed: cleanupUnusedVersions(pluginDir(), name) } }
     } catch (error) {
       return failFromError(error)
     }

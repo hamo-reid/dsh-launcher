@@ -52,6 +52,7 @@ import type {
   PluginCleanupResult,
   PluginMigrationResult,
   PluginUpdateInfo,
+  PluginUpdateResult,
   RunEvent,
   RunDefaults,
   RunInfo,
@@ -167,6 +168,10 @@ export interface WindowApi {
     checkUpdates: (opts?: { refresh?: boolean }) => Promise<IpcResult<PluginUpdateInfo[]>>
     /** Apply plugin version updates to a profile (refused while it runs). */
     applyUpdates: (dshId: string, profile: string, updates: { name: string; version: string }[]) => Promise<IpcResult<{ results: PluginApplyResult[] }>>
+    /** Apply ONE plugin version to specific profiles (or archive it when the
+     * target list is empty): downloads once, then re-points each profile.
+     * `keepOld: false` also drops the now-unused older versions. */
+    applyUpdate: (name: string, version: string, targets: { dshId: string; profile: string }[], opts?: { keepOld?: boolean }) => Promise<IpcResult<PluginUpdateResult>>
     /** Remove a plugin's unused archived versions (keeps the newest + in-use ones). */
     cleanupVersions: (name: string) => Promise<IpcResult<PluginCleanupResult>>
     /** Migrate a deprecated plugin to its replacement across every using profile. */
