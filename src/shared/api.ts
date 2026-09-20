@@ -181,6 +181,10 @@ export interface WindowApi {
     /** Subscribe to live session-snapshot pushes from the main process. Returns
      * an unsubscribe function. */
     onChange: (fn: (list: DownloadSessionInfo[]) => void) => () => void
+    /** Subscribe to one-shot terminal-state pushes: a session that has just left
+     * the live list (`done`/`failed`/`cancelled`), carrying its final message.
+     * Returns an unsubscribe function. */
+    onSettled: (fn: (session: DownloadSessionInfo) => void) => () => void
   }
 
   market: {

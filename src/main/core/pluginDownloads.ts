@@ -8,6 +8,11 @@
  * up to date via `onDownloadsChange`. Sessions are removed once they reach a
  * terminal state, so the panel shows live work only (plus a cleanup affordance
  * for any half-written staging/import leftovers).
+ *
+ * Because a settled session leaves the live list, its terminal state is
+ * delivered exactly once through `onDownloadsSettled` — that is the only way a
+ * consumer can observe completion, and the reason a failure is reported instead
+ * of silently vanishing.
  */
 import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -34,6 +39,7 @@ interface DownloadSession {
 const active = new Map<string, DownloadSession>()
 let seq = 0
 let emit: ((list: DownloadSessionInfo[]) => void) | undefined
+let emitSettled: ((session: DownloadSessionInfo) => void) | undefined
 
 /** Register the listener that pushes session snapshots (the IPC layer wires this
  * to `webContents.send('download:change', …)`). */
@@ -41,10 +47,20 @@ export function onDownloadsChange(fn: (list: DownloadSessionInfo[]) => void): vo
   emit = fn
 }
 
+/** Register the listener notified once per session when it reaches a terminal
+ * state, right after it leaves the live list. The live snapshot deliberately
+ * drops settled sessions, so this is the sole completion signal — without it a
+ * finished download (a FAILED one above all) would vanish without a trace. */
+export function onDownloadsSettled(fn: (session: DownloadSessionInfo) => void): void {
+  emitSettled = fn
+}
+
+function toInfo({ id, kind, name, source, detail, status, message, steps }: DownloadSession): DownloadSessionInfo {
+  return { id, kind, name, source, detail, status, message, steps }
+}
+
 function snapshot(): DownloadSessionInfo[] {
-  return [...active.values()].map(({ id, kind, name, source, detail, status, message, steps }) => ({
-    id, kind, name, source, detail, status, message, steps,
-  }))
+  return [...active.values()].map(toInfo)
 }
 
 function notify(): void {
@@ -87,6 +103,7 @@ export function startPluginDownload(storeDir: string, source: string, name?: str
     } finally {
       active.delete(id)
       notify()
+      emitSettled?.(toInfo(session))
       logger.info(`plugin download ${session.name}: ${session.status}`)
     }
   })()
@@ -135,6 +152,7 @@ export function startDshDownload(
     } finally {
       active.delete(id)
       notify()
+      emitSettled?.(toInfo(session))
       logger.info(`dsh install ${session.name}: ${session.status}`)
     }
   })()

@@ -14,7 +14,7 @@ import Panel from '../components/Panel.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
 import { AddDshModal, DataMirrorModal, DshRemoveModal, OfficialInstallModal, RenameDshModal, UpdateDshModal } from './DshModals.tsx'
 import { majorOfVersion } from '../../../shared/version.ts'
-import type { DownloadSessionInfo, DshEntry } from '../../../shared/types.ts'
+import type { DshEntry } from '../../../shared/types.ts'
 
 /** DSH 页：安装(官方安装) + 管理(列表)；弹窗在 `DshModals`。套统一 AppShell。
  *
@@ -84,29 +84,14 @@ export default function DshSection() {
   }, [])
 
   // 后台的 dsh 下载/更新会话（已在统一下载中心展示）结束后联动刷新列表，
-  // 让新版本 / 新安装即时反映到 DSH 页。
+  // 让新版本 / 新安装即时反映到 DSH 页。安装/更新弹窗返回时只 kick off 了后台
+  // 会话，那一刻新版本还没注册，必须靠这里补上。
   //
-  // 会话一旦进入终态就被主进程从活动列表移除（下载中心只展示进行中的工作），
-  // 因此带 `status: 'done'` 的快照永远不会下发 —— 改以「先前在列、现在消失」
-  // 判定一次会话结束，再刷新（安装/更新弹窗返回时只 kick off 了后台会话，
-  // 那一刻新版本还没注册，必须靠这里补上）。
-  useEffect(() => {
-    let alive = true
-    let seen = new Set<string>()
-    const track = (list: DownloadSessionInfo[]): void => {
-      const current = new Set(list.filter(d => d.kind === 'dsh').map(d => d.id))
-      const settled = [...seen].some(id => !current.has(id))
-      seen = current
-      if (settled) void refresh()
-    }
-    const off = window.api.downloads.onChange(track)
-    // 页面是在安装进行中才挂载时，补种当前会话，别错过它的结束。
-    void window.api.downloads.list().then(r => {
-      if (!alive || !r.ok) return
-      for (const d of r.value) if (d.kind === 'dsh') seen.add(d.id)
-    })
-    return () => { alive = false; off() }
-  }, [refresh])
+  // 会话进入终态即被主进程移出活动列表（下载中心只展示进行中的工作），终态由
+  // `download:settled` 一次性下发 —— 所以不再依赖 `status === 'done'` 的快照。
+  useEffect(() => window.api.downloads.onSettled(s => {
+    if (s.kind === 'dsh') void refresh()
+  }), [refresh])
 
   const selected = dshes.find(d => d.id === selectedId)
 

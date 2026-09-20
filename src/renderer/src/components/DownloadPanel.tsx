@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 import { Badge, Button, Drawer, Empty, Modal, Space, Spin, Tabs, Tag, theme, message } from 'antd'
 import {
   CheckCircleFilled, CloseCircleFilled, CloudDownloadOutlined, LoadingOutlined, MinusCircleFilled,
@@ -26,10 +26,11 @@ function StatusIcon({ status }: { status: DownloadSessionInfo['status'] }): JSX.
 }
 
 /** One download row: status icon + two-line info on the left, actions on the right. */
-function DownloadRow({ d, onDetail, onCancel }: {
+function DownloadRow({ d, onDetail, onCancel, onDismiss }: {
   d: DownloadSessionInfo
   onDetail: (id: string) => void
   onCancel: (id: string) => void
+  onDismiss: (id: string) => void
 }): JSX.Element {
   const { t } = useTranslation()
   const { token } = theme.useToken()
@@ -56,6 +57,9 @@ function DownloadRow({ d, onDetail, onCancel }: {
       <Space size={4}>
         {d.kind === 'plugin' && d.status === 'running' && (
           <Button size="small" danger type="text" onClick={() => onCancel(d.id)}>{t('download.panel.cancel')}</Button>
+        )}
+        {d.status !== 'running' && (
+          <Button size="small" type="text" onClick={() => onDismiss(d.id)}>{t('download.panel.dismiss')}</Button>
         )}
         <Button size="small" type="text" onClick={() => onDetail(d.id)}>{t('download.detail')}</Button>
       </Space>
@@ -125,16 +129,24 @@ function DownloadDetailModal({ session, onClose }: {
 
 /**
  * Global download center: a **always-present** header entrance (badge with the
- * live task count; spinners while anything runs) that opens a right-side Drawer
- * split into DSH / plugin tabs. Each task row shows status + two-line info + a
- * detail button; plugins additionally get a cancel while running.
+ * task count; spinners while anything runs) that opens a right-side Drawer split
+ * into DSH / plugin tabs. Each task row shows status + two-line info + a detail
+ * button; plugins additionally get a cancel while running, and a settled row a
+ * dismiss. Failed sessions are retained by `useDownloads` (and toasted) so an
+ * error never disappears with the row.
  */
 export default function DownloadPanel(): JSX.Element {
   const { t } = useTranslation()
-  const { downloads, dshDownloads, pluginDownloads, cancel, cleanup } = useDownloads()
+  const { downloads, dshDownloads, pluginDownloads, cancel, dismiss, cleanup } = useDownloads()
   const [open, setOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('plugin')
   const [detailId, setDetailId] = useState<string | null>(null)
+
+  // A settled session leaves the live list, so its failure would otherwise be
+  // silent — announce it (the retained row is easy to miss with the panel shut).
+  useEffect(() => window.api.downloads.onSettled(s => {
+    if (s.status === 'failed') void message.error(t('download.failed', { name: s.name }))
+  }), [t])
 
   const running = downloads.some(d => d.status === 'running')
   const detail = downloads.find(d => d.id === detailId) ?? null
@@ -147,7 +159,7 @@ export default function DownloadPanel(): JSX.Element {
   const renderList = (list: DownloadSessionInfo[]): JSX.Element =>
     list.length === 0
       ? <Empty description={t('download.panel.empty')} style={{ marginTop: 48 }} />
-      : <>{list.map(d => <DownloadRow key={d.id} d={d} onDetail={setDetailId} onCancel={id => void cancel(id)} />)}</>
+      : <>{list.map(d => <DownloadRow key={d.id} d={d} onDetail={setDetailId} onCancel={id => void cancel(id)} onDismiss={dismiss} />)}</>
 
   return (
     <>

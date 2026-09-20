@@ -10,7 +10,7 @@ import {
 } from '../core/plugins.ts'
 import { listComboPlugins } from '../core/combo.ts'
 import {
-  cancelPluginDownload, cleanupPluginDownloads, listPluginDownloads, onDownloadsChange, startPluginDownload,
+  cancelPluginDownload, cleanupPluginDownloads, listPluginDownloads, onDownloadsChange, onDownloadsSettled, startPluginDownload,
 } from '../core/pluginDownloads.ts'
 import { checkPluginUpdates } from '../core/plugin-updates.ts'
 import { installSpecFor, marketSourceState, resolveMarket } from '../core/market.ts'
@@ -408,6 +408,16 @@ export function registerPluginsIpc(): void {
   onDownloadsChange((list) => {
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) win.webContents.send('download:change', list)
+    }
+  })
+
+  // One-shot terminal-state push per session: the live list drops a settled
+  // session, so this is what lets the renderer refresh dependents (a finished
+  // dsh install/update) and report a failure that would otherwise vanish with
+  // the row.
+  onDownloadsSettled((session) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('download:settled', session)
     }
   })
 }

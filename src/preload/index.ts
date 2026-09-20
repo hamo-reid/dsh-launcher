@@ -218,6 +218,11 @@ const api = {
       ipcRenderer.on('download:change', listener)
       return () => ipcRenderer.removeListener('download:change', listener)
     },
+    onSettled: (fn: (session: DownloadSessionInfo) => void): (() => void) => {
+      const listener = (_e: unknown, session: DownloadSessionInfo): void => fn(session)
+      ipcRenderer.on('download:settled', listener)
+      return () => ipcRenderer.removeListener('download:settled', listener)
+    },
   },
 
   market: {
