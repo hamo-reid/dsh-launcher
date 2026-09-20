@@ -356,6 +356,8 @@ const en: typeof zh = {
     'plugin.overview.title': 'Plugin overview',
     'plugin.overview.summary': '{{total}} total · {{shown}} shown',
     'plugin.overview.filters': 'Filters',
+    'plugin.overview.facetMode.include': 'Include',
+    'plugin.overview.facetMode.exclude': 'Exclude',
     'plugin.overview.facet.origin': 'Origin',
     'plugin.overview.facet.kind': 'Type',
     'plugin.overview.facet.provenance': 'Managed via',

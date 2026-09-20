@@ -354,6 +354,8 @@ const zh = {
     'plugin.overview.title': '插件总览',
     'plugin.overview.summary': '共 {{total}} 个 · 显示 {{shown}} 个',
     'plugin.overview.filters': '筛选',
+    'plugin.overview.facetMode.include': '包含',
+    'plugin.overview.facetMode.exclude': '排除',
     'plugin.overview.facet.origin': '归档来源',
     'plugin.overview.facet.kind': '类型',
     'plugin.overview.facet.provenance': '管理来源',

@@ -14,7 +14,7 @@ import SearchInput from '../components/SearchInput.tsx'
 import Toolbar from '../components/Toolbar.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
 import PluginCard from './PluginCard.tsx'
-import { loadFilters, saveFilters, type Bucket, type SortKey } from '../lib/pluginFilters.ts'
+import { loadFilters, saveFilters, applyOverviewFilters, type Bucket, type Facet, type FacetMode, type SortKey } from '../lib/pluginFilters.ts'
 import { DownloadVersionModal, PluginDetailModal, InstallToProfileModal, toStoreMap } from './PluginsModals.tsx'
 import MarketSection from './MarketSection.tsx'
 import DevPluginsView from './DevPluginsView.tsx'
@@ -58,13 +58,14 @@ export default function PluginsSection() {
   const [devNames, setDevNames] = useState<Set<string>>(new Set())
   const [showDev, setShowDev] = useState(false)
 
-  // Classification filters — multi-condition (OR within a dimension, AND across),
-  // plus the persisted sort. Loaded once from localStorage; saved on every change.
+  // Classification filters — each facet is a whitelist (`include`) or a
+  // blacklist (`exclude`); within a facet the values OR, across facets they AND.
+  // Loaded once from localStorage; saved on every change.
   const [savedFilters] = useState(loadFilters)
   const [bucket, setBucket] = useState<Bucket>(savedFilters.bucket)
-  const [origins, setOrigins] = useState<PluginOrigin[]>(savedFilters.origins)
-  const [kinds, setKinds] = useState<PluginKind[]>(savedFilters.kinds)
-  const [provenances, setProvenances] = useState<PluginProvenance[]>(savedFilters.provenances)
+  const [originFacet, setOriginFacet] = useState<Facet<PluginOrigin>>(savedFilters.origin)
+  const [kindFacet, setKindFacet] = useState<Facet<PluginKind>>(savedFilters.kind)
+  const [provFacet, setProvFacet] = useState<Facet<PluginProvenance>>(savedFilters.provenance)
   const [annotations, setAnnotations] = useState<MarketAnnotations | null>(null)
   // Overview card sort + local pagination.
   const [sortKey, setSortKey] = useState<SortKey>(savedFilters.sortKey)
@@ -72,8 +73,8 @@ export default function PluginsSection() {
   const [page, setPage] = useState(1)
 
   useEffect(() => {
-    saveFilters({ bucket, origins, kinds, provenances, sortKey, sortDir })
-  }, [bucket, origins, kinds, provenances, sortKey, sortDir])
+    saveFilters({ bucket, origin: originFacet, kind: kindFacet, provenance: provFacet, sortKey, sortDir })
+  }, [bucket, originFacet, kindFacet, provFacet, sortKey, sortDir])
 
   // Update detection (manual; main-process cached).
   const [updates, setUpdates] = useState<Map<string, PluginUpdateInfo>>(new Map())
@@ -314,23 +315,16 @@ export default function PluginsSection() {
     await Promise.all([load(), refreshStoreNames()]) // 总览 + 在库名单同步刷新
   }
 
-  const overviewQ = search.trim().toLowerCase()
-  // Classification filters: bucket + multi-condition origin/kind/provenance.
-  // Within a dimension the selected values OR; across dimensions they AND.
-  const filteredOverview = useMemo(() => {
-    let rows = overview
-    // Dev plugins are managed in their own section; hide them here unless asked.
-    if (!showDev) rows = rows.filter(x => !devNames.has(x.name))
-    if (overviewQ !== '') rows = rows.filter(x => x.name.toLowerCase().includes(overviewQ))
-    if (bucket === 'used') rows = rows.filter(x => x.usage.length > 0)
-    else if (bucket === 'unused') rows = rows.filter(x => x.inStore === true && x.usage.length === 0)
-    else if (bucket === 'update') rows = rows.filter(x => updates.get(x.name)?.updateAvailable === true)
-    else if (bucket === 'template') rows = rows.filter(x => x.kind === 'template')
-    if (origins.length > 0) rows = rows.filter(x => origins.includes(x.origin ?? 'unknown'))
-    if (kinds.length > 0) rows = rows.filter(x => kinds.includes(x.kind ?? 'dependency'))
-    if (provenances.length > 0) rows = rows.filter(x => (x.provenances ?? []).some(p => provenances.includes(p)))
-    return rows
-  }, [overview, overviewQ, bucket, origins, kinds, provenances, updates, devNames, showDev])
+  // Classification filters: bucket + per-facet include/exclude. Within a facet
+  // the values OR; across facets they AND (see `applyOverviewFilters`).
+  const filteredOverview = useMemo(
+    () => applyOverviewFilters(
+      overview,
+      { bucket, origin: originFacet, kind: kindFacet, provenance: provFacet, sortKey, sortDir },
+      { query: search, updates, devNames, showDev },
+    ),
+    [overview, search, bucket, originFacet, kindFacet, provFacet, sortKey, sortDir, updates, devNames, showDev],
+  )
 
   const catLabel = (id: string): string => {
     const labels = annotations?.categories[id]
@@ -341,10 +335,31 @@ export default function PluginsSection() {
   // Localized facet labels (kind / provenance need key-suffix mapping).
   const kindLabel = (k: PluginKind): string => t(`plugin.kind.${k === 'store-only' ? 'storeOnly' : k}`)
   const provLabel = (p: PluginProvenance): string => t(`plugin.provenance.${p === 'local-link' ? 'localLink' : p === 'sub-bundle' ? 'subBundle' : p}`)
-  const activeFilterCount = origins.length + kinds.length + provenances.length
+  const activeFilterCount = originFacet.values.length + kindFacet.values.length + provFacet.values.length
   const clearAllFilters = (): void => {
-    setBucket('all'); setOrigins([]); setKinds([]); setProvenances([]); setSortKey('name'); setSortDir('asc')
+    setBucket('all')
+    setOriginFacet({ mode: 'include', values: [] })
+    setKindFacet({ mode: 'include', values: [] })
+    setProvFacet({ mode: 'include', values: [] })
+    setSortKey('name'); setSortDir('asc')
   }
+
+  /** A chip label: `来源: npm` for include, `来源 ≠ official` for exclude. */
+  const facetChip = (facet: string, mode: FacetMode, value: string): string =>
+    `${facet} ${mode === 'exclude' ? '≠' : ':'} ${value}`
+
+  /** The include/exclude switch shown next to a facet's label. */
+  const facetModeSwitch = (mode: FacetMode, onChange: (mode: FacetMode) => void): JSX.Element => (
+    <Segmented
+      size="small"
+      value={mode}
+      onChange={value => onChange(value as FacetMode)}
+      options={[
+        { value: 'include', label: t('plugin.overview.facetMode.include') },
+        { value: 'exclude', label: t('plugin.overview.facetMode.exclude') },
+      ]}
+    />
+  )
 
   // Sort + paginate the filtered rows locally (direction-aware).
   const sortedOverview = useMemo(() => {
@@ -362,7 +377,7 @@ export default function PluginsSection() {
   const pagedOverview = sortedOverview.slice((currentPage - 1) * CARDS_PER_PAGE, currentPage * CARDS_PER_PAGE)
 
   // Reset to the first page whenever the filter / sort changes.
-  useEffect(() => { setPage(1) }, [overviewQ, bucket, origins, kinds, provenances, sortKey, sortDir])
+  useEffect(() => { setPage(1) }, [search, bucket, originFacet, kindFacet, provFacet, sortKey, sortDir])
 
   return (
     <>
@@ -394,9 +409,9 @@ export default function PluginsSection() {
             <Toolbar chips={activeFilterCount > 0 ? (
               <FilterChips
                 items={[
-                  ...origins.map(v => ({ key: `o:${v}`, label: `${t('plugin.overview.facet.origin')}: ${t(`plugin.source.${v}`)}`, onClose: () => setOrigins(list => list.filter(x => x !== v)) })),
-                  ...kinds.map(v => ({ key: `k:${v}`, label: `${t('plugin.overview.facet.kind')}: ${kindLabel(v)}`, onClose: () => setKinds(list => list.filter(x => x !== v)) })),
-                  ...provenances.map(v => ({ key: `p:${v}`, label: `${t('plugin.overview.facet.provenance')}: ${provLabel(v)}`, onClose: () => setProvenances(list => list.filter(x => x !== v)) })),
+                  ...originFacet.values.map(v => ({ key: `o:${v}`, label: facetChip(t('plugin.overview.facet.origin'), originFacet.mode, t(`plugin.source.${v}`)), onClose: () => setOriginFacet(f => ({ ...f, values: f.values.filter(x => x !== v) })) })),
+                  ...kindFacet.values.map(v => ({ key: `k:${v}`, label: facetChip(t('plugin.overview.facet.kind'), kindFacet.mode, kindLabel(v)), onClose: () => setKindFacet(f => ({ ...f, values: f.values.filter(x => x !== v) })) })),
+                  ...provFacet.values.map(v => ({ key: `p:${v}`, label: facetChip(t('plugin.overview.facet.provenance'), provFacet.mode, provLabel(v)), onClose: () => setProvFacet(f => ({ ...f, values: f.values.filter(x => x !== v) })) })),
                 ]}
                 onClear={clearAllFilters}
                 clearLabel={t('plugin.overview.clearFilters')}
@@ -425,10 +440,13 @@ export default function PluginsSection() {
                 content={(
                   <div style={{ width: 280, display: 'flex', flexDirection: 'column', gap: token.padding }}>
                     <div>
-                      <FieldLabel>{t('plugin.overview.facet.origin')}</FieldLabel>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                        <FieldLabel>{t('plugin.overview.facet.origin')}</FieldLabel>
+                        {facetModeSwitch(originFacet.mode, mode => setOriginFacet(f => ({ ...f, mode })))}
+                      </div>
                       <Select
-                        mode="multiple" allowClear maxTagCount="responsive" value={origins}
-                        onChange={value => setOrigins(value as PluginOrigin[])}
+                        mode="multiple" allowClear maxTagCount="responsive" value={originFacet.values}
+                        onChange={value => setOriginFacet(f => ({ ...f, values: value as PluginOrigin[] }))}
                         placeholder={t('plugin.overview.originAll')}
                         style={{ width: '100%' }}
                         options={[
@@ -440,10 +458,13 @@ export default function PluginsSection() {
                       />
                     </div>
                     <div>
-                      <FieldLabel>{t('plugin.overview.facet.kind')}</FieldLabel>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                        <FieldLabel>{t('plugin.overview.facet.kind')}</FieldLabel>
+                        {facetModeSwitch(kindFacet.mode, mode => setKindFacet(f => ({ ...f, mode })))}
+                      </div>
                       <Select
-                        mode="multiple" allowClear maxTagCount="responsive" value={kinds}
-                        onChange={value => setKinds(value as PluginKind[])}
+                        mode="multiple" allowClear maxTagCount="responsive" value={kindFacet.values}
+                        onChange={value => setKindFacet(f => ({ ...f, values: value as PluginKind[] }))}
                         placeholder={t('plugin.overview.kindAll')}
                         style={{ width: '100%' }}
                         options={[
@@ -455,10 +476,13 @@ export default function PluginsSection() {
                       />
                     </div>
                     <div>
-                      <FieldLabel>{t('plugin.overview.facet.provenance')}</FieldLabel>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                        <FieldLabel>{t('plugin.overview.facet.provenance')}</FieldLabel>
+                        {facetModeSwitch(provFacet.mode, mode => setProvFacet(f => ({ ...f, mode })))}
+                      </div>
                       <Select
-                        mode="multiple" allowClear maxTagCount="responsive" value={provenances}
-                        onChange={value => setProvenances(value as PluginProvenance[])}
+                        mode="multiple" allowClear maxTagCount="responsive" value={provFacet.values}
+                        onChange={value => setProvFacet(f => ({ ...f, values: value as PluginProvenance[] }))}
                         placeholder={t('plugin.overview.provenanceAll')}
                         style={{ width: '100%' }}
                         options={[
