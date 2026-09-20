@@ -60,6 +60,8 @@ jobs:
       # 用 gh CLI 创建 Release：正文从 docs/releases/<tag>.md 读取（中英、中文在前），
       # 与 annotated tag 的 message 一致，保证 tag 页与 Release 页同步。
       # gh 在 GitHub-hosted runner 预装；--notes-file 读文件可靠，且沿用 github.token。
+      # 预发布语义：tag 含 `-`（如 -beta1 / -rc1）标为 Pre-release，且 --latest=false
+      # 使其不占用 Releases 页的 "Latest"（否则 beta 会顶掉正式版的 Latest 位置）。
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -74,4 +76,6 @@ jobs:
           $files = @()
           $files += Get-ChildItem -Path release -Filter 'Dsh-Launcher-*.exe' | ForEach-Object { $_.FullName }
           $files += (Get-Item 'release/Dsh-Launcher-win-unpacked.zip').FullName
-          gh release create $tag @files --notes-file $notes --title $tag
+          $flags = @()
+          if ($tag -match '-') { $flags = @('--prerelease', '--latest=false') }
+          gh release create $tag @files --notes-file $notes --title $tag @flags
