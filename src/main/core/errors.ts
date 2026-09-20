@@ -96,6 +96,10 @@ export const E = {
   extNeedUrl: 'ext.needUrl',
   extBadEnvName: 'ext.badEnvName',
   extBadEnvValue: 'ext.badEnvValue',
+  // extensions (skills)
+  extSkillNotFound: 'ext.skillNotFound',
+  extSkillReadOnly: 'ext.skillReadOnly',
+  extBadSkill: 'ext.badSkill',
   // dsh data import/export
   dataNotSelected: 'data.notSelected',
   // run

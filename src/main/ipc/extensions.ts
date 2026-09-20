@@ -10,6 +10,11 @@
  * Editing is allowed while the profile runs: dsh hot-reloads a changed
  * configuration entry in place, which is exactly the "reconnect this server"
  * gesture a user wants.
+ *
+ * Track B is Skills: the filesystem roots dsh discovers (see `core/skills.ts`).
+ * They are dsh-scoped rather than profile-scoped, so those channels take no
+ * profile; writes are confined to the writable user-dsh root, and a delete
+ * moves the entry to the OS recycle bin.
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
@@ -20,11 +25,15 @@ import { homePatchPath, profileDir } from '../core/home.ts'
 import { listMcpServers } from '../core/combo.ts'
 import { addMcpServer, findMcpServer, mcpRowIds, removeMcpServer, SERVER_NAME_RE, updateMcpServer } from '../core/mcp.ts'
 import { listMcpSecretNames, setMcpSecret } from '../core/mcp-secrets.ts'
+import {
+  deleteSkill, findEditableSkill, listSkills, readSkillFile, scaffoldSkill, writeSkill,
+} from '../core/skills.ts'
+import { SKILL_NAME_RE } from '../../shared/skill.ts'
 import { assertPatchDocValid, setRowDisabled } from '../core/patch.ts'
 import { verifyDisabledState } from '../core/app-util.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
 import { rowIdInvalid } from './validate.ts'
-import type { IpcResult, McpLayer, McpListing, McpServerInput } from '../../shared/types.ts'
+import type { IpcResult, McpLayer, McpListing, McpServerInput, SkillEntry, SkillListing } from '../../shared/types.ts'
 
 /** A layer the extensions surface may write. `bundle` is read-only (shipped). */
 type McpWriteLayer = 'profile' | 'home'
@@ -177,5 +186,68 @@ export function registerExtensionsIpc(): void {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return { ok: true, value: false }
     setMcpSecret(name, null)
     return { ok: true, value: true }
+  })
+
+  // ── Track B: skills (the filesystem roots dsh discovers) ────────────────────
+  // Skills are dsh-scoped, not profile-scoped: every root hangs off the dsh's
+  // home (or machine/global config), so these channels take no profile.
+
+  // Every root dsh scans, the discovered catalog (rank order), and every
+  // skill-like file dsh would silently ignore — surfaced with the reason.
+  handle('ext:skillList', (_event, dshId: string): IpcResult<SkillListing> => {
+    const ctx = ctxOf(dshId)
+    if (ctx === null) return fail(E.dshNotFound)
+    try {
+      return { ok: true, value: listSkills(ctx) }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Scaffold text for a new skill, rendered by the same renderer that writes it.
+  handle('ext:skillScaffold', (_event, name: string): IpcResult<string> => {
+    if (!SKILL_NAME_RE.test(name)) return fail(E.extBadSkill, { detail: name })
+    return { ok: true, value: scaffoldSkill(name) }
+  })
+
+  // Full text of an editable skill, for the editor modal.
+  handle('ext:skillRead', (_event, dshId: string, name: string): IpcResult<{ text: string; path: string }> => {
+    const ctx = ctxOf(dshId)
+    if (ctx === null) return fail(E.dshNotFound)
+    if (!SKILL_NAME_RE.test(name)) return fail(E.extBadSkill, { detail: name })
+    try {
+      const found = findEditableSkill(ctx, name)
+      if (found === undefined) return fail(E.extSkillReadOnly, { detail: name })
+      return { ok: true, value: { text: readSkillFile(ctx, name), path: found.entry.path } }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Create (`previousName === null`) or update one skill from full file text.
+  // The frontmatter `name` is authoritative; editing it renames the bundle dir.
+  handle('ext:skillSave', (_event, dshId: string, previousName: string | null, text: string): IpcResult<SkillEntry> => {
+    const ctx = ctxOf(dshId)
+    if (ctx === null) return fail(E.dshNotFound)
+    if (previousName !== null && !SKILL_NAME_RE.test(previousName)) return fail(E.extBadSkill, { detail: previousName })
+    try {
+      return { ok: true, value: writeSkill(ctx, previousName, text) }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Move an editable skill to the OS recycle bin (reversible through the OS —
+  // the entry is resolved here so nothing outside the writable root can pass).
+  handle('ext:skillDelete', async (_event, dshId: string, name: string): Promise<IpcResult<boolean>> => {
+    const ctx = ctxOf(dshId)
+    if (ctx === null) return fail(E.dshNotFound)
+    if (!SKILL_NAME_RE.test(name)) return fail(E.extBadSkill, { detail: name })
+    try {
+      await deleteSkill(ctx, name)
+      return { ok: true, value: true }
+    } catch (error) {
+      return failFromError(error)
+    }
   })
 }

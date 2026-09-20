@@ -974,3 +974,53 @@ export interface McpListing {
   /** Layers actually read, in application order. */
   layers: McpLayer[]
 }
+
+/** Origin bucket for a skill contribution (mirrors dsh's `SkillSource`).
+ * Project roots are cwd-dependent and therefore not managed by the launcher. */
+export type SkillSource = 'user-dsh' | 'user-agents' | 'custom' | 'bundled'
+
+/** One filesystem root dsh scans for skills, with the launcher's read/write view. */
+export interface SkillRootInfo {
+  /** Stable label for the UI (`user-dsh`, `user-agents`, `custom:<i>`, `bundled`). */
+  root: string
+  source: SkillSource
+  /** dsh's precedence rank (custom 300 < user-dsh 400 < user-agents 500 < bundled 600). */
+  rank: number
+  path: string
+  exists: boolean
+  /** The launcher may create/edit/delete entries here (only the user-dsh root). */
+  writable: boolean
+}
+
+/** A discovered skill, mirroring dsh's catalog entry. */
+export interface SkillEntry {
+  name: string
+  description: string
+  whenToUse?: string
+  modelInvocable: boolean
+  userInvocable: boolean
+  source: SkillSource
+  rank: number
+  /** Absolute path to the file that carries the skill (`SKILL.md` or `<name>.md`). */
+  path: string
+  /** Directory holding the entry (the bundle dir for a bundle, the root for a flat file). */
+  dir: string
+  /** `bundle` = `<name>/SKILL.md`; `flat` = `<name>.md`. */
+  shape: 'bundle' | 'flat'
+  /** Whether the launcher may edit/delete this entry. */
+  editable: boolean
+}
+
+/** A skill-like file dsh would silently ignore; the launcher surfaces it. */
+export interface SkillIssue {
+  path: string
+  source: SkillSource
+  reason: string
+}
+
+/** Full skill listing for a dsh: roots scanned, discovered catalog, problems. */
+export interface SkillListing {
+  roots: SkillRootInfo[]
+  skills: SkillEntry[]
+  issues: SkillIssue[]
+}

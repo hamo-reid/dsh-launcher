@@ -6,17 +6,17 @@
  * this shell's dsh/profile picker, so each ships and evolves on its own.
  */
 import { useEffect, useState } from 'react'
-import { Empty, Segmented, Select, Space, Typography, theme } from 'antd'
+import { Empty, Segmented, Select, Space } from 'antd'
 import { useTranslation } from 'react-i18next'
 import Toolbar from '../components/Toolbar.tsx'
 import McpView from './McpView.tsx'
+import SkillsView from './SkillsView.tsx'
 
 /** One dsh and the profiles it holds, for the target picker. */
 interface DshScope { id: string; name: string; profiles: string[] }
 
 export default function ExtensionsSection(): JSX.Element {
   const { t } = useTranslation()
-  const { token } = theme.useToken()
   const [tab, setTab] = useState<'mcp' | 'skills'>('mcp')
   const [scopes, setScopes] = useState<DshScope[]>([])
   const [dshId, setDshId] = useState<string>()
@@ -81,18 +81,7 @@ export default function ExtensionsSection(): JSX.Element {
           <McpView dshId={dshId} profile={profile} />
         )
       ) : (
-        <div style={{ padding: token.padding, maxWidth: 720 }}>
-          <Empty
-            description={(
-              <Space direction="vertical" size={4}>
-                <Typography.Text>{t('ext.skills.placeholder')}</Typography.Text>
-                <Typography.Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
-                  {t('ext.skills.placeholderHint')}
-                </Typography.Text>
-              </Space>
-            )}
-          />
-        </div>
+        <SkillsView dshId={dshId} />
       )}
     </div>
   )

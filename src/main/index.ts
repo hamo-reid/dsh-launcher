@@ -27,6 +27,7 @@ import { configurePnpmStore } from './core/pnpm.ts'
 import { repairArchiveLinks } from './core/plugins.ts'
 import { initGithubAuth, setTokenCipher } from './core/github-auth.ts'
 import { setMcpSecretCipher } from './core/mcp-secrets.ts'
+import { setSkillTrash } from './core/skills.ts'
 
 /** Domain-tagged logger for renderer-sourced messages (`{domain:"renderer"}`). */
 const rlog = child('renderer')
@@ -370,6 +371,8 @@ app.whenReady().then(async () => {
     encrypt: plain => safeStorage.encryptString(plain).toString('base64'),
     decrypt: cipherText => safeStorage.decryptString(Buffer.from(cipherText, 'base64')),
   })
+  // Skill deletion moves the entry to the OS recycle bin (reversible there).
+  setSkillTrash(path => shell.trashItem(path))
   initGithubAuth()
   // Give app-level state the Electron `userData` dir for its defaults.
   configureAppState(app.getPath('userData'))

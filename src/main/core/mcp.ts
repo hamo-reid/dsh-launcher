@@ -13,7 +13,7 @@
  * `!!js process.env.<NAME>`, which keeps the secret out of the patch file (and
  * therefore out of a profile export or a backup).
  */
-import { CORE_SCHEMA, defineScalarTag, load } from 'js-yaml'
+import { isJsExpr, jsExprText, loadYaml } from './yaml.ts'
 import {
   appendInsertChild, extractKeyValue, parseNamedRows, removeInsertRow, setRowConfig, setRowDisabled,
 } from './patch.ts'
@@ -26,31 +26,6 @@ export const MCP_PACKAGE = '@deepseek-ai/dsh-mcp-client'
 
 /** dsh's own `serverName` rule (`[A-Za-z0-9_-]{1,32}`). */
 export const SERVER_NAME_RE = /^[A-Za-z0-9_-]{1,32}$/
-
-/** Sentinel prefix carrying a cordis `!!js` expression through js-yaml. */
-const JS_PREFIX = '\u0000dsh-js:'
-
-/** Resolve cordis' non-standard `!!js` tag to a marked string, so a config that
- * uses one still parses (js-yaml rejects an unknown explicit tag otherwise).
- * The tag is registered under its RESOLVED name: js-yaml looks up `!!js` as
- * `tag:yaml.org,2002:js`, and a short name here never matches.
- * Load-only: the launcher never dumps `!!js` back through js-yaml. */
-const jsExprTag = defineScalarTag<string>('tag:yaml.org,2002:js', {
-  identify: () => false,
-  resolve: (source: string): string => `${JS_PREFIX}${source}`,
-})
-
-/** `CORE_SCHEMA` + `!!js`: booleans/numbers stay typed, expressions survive. */
-const MCP_SCHEMA = CORE_SCHEMA.withTags(jsExprTag)
-
-/** Whether a parsed scalar came from a `!!js` expression. */
-function isJsExpr(value: unknown): value is string {
-  return typeof value === 'string' && value.startsWith(JS_PREFIX)
-}
-
-function jsExprText(value: string): string {
-  return value.slice(JS_PREFIX.length)
-}
 
 /** The env-var reference form the launcher writes by default. */
 const ENV_REF_RE = /^process\.env\.([A-Za-z_][A-Za-z0-9_]*)$/
@@ -183,7 +158,7 @@ function readConfig(raw: string | undefined): { config?: Record<string, unknown>
   }
   let parsed: unknown
   try {
-    parsed = load(raw, { schema: MCP_SCHEMA })
+    parsed = loadYaml(raw)
   } catch (error) {
     return { raw, issues: [{ kind: 'unparsable-config', message: error instanceof Error ? error.message : String(error) }] }
   }

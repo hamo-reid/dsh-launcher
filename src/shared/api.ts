@@ -60,6 +60,8 @@ import type {
   LaunchOptions,
   McpListing,
   McpServerInput,
+  SkillEntry,
+  SkillListing,
   TrashItem,
 } from './types.ts'
 
@@ -145,6 +147,17 @@ export interface WindowApi {
     mcpSecretSet: (name: string, value: string) => Promise<IpcResult<boolean>>
     /** Clear one launch secret (idempotent). */
     mcpSecretRemove: (name: string) => Promise<IpcResult<boolean>>
+    /** Every root dsh scans for skills, the discovered catalog, and skill-like
+     * files that would not load (with reasons). dsh-scoped, not per-profile. */
+    skillList: (dshId: string) => Promise<IpcResult<SkillListing>>
+    /** Scaffold text for a new skill, rendered by the same renderer that writes. */
+    skillScaffold: (name: string) => Promise<IpcResult<string>>
+    /** Full text of an editable skill, for the editor modal. */
+    skillRead: (dshId: string, name: string) => Promise<IpcResult<{ text: string; path: string }>>
+    /** Create (`previousName === null`) or update one skill from full file text. */
+    skillSave: (dshId: string, previousName: string | null, text: string) => Promise<IpcResult<SkillEntry>>
+    /** Move an editable skill to the OS recycle bin. */
+    skillDelete: (dshId: string, name: string) => Promise<IpcResult<boolean>>
   }
 
   run: {

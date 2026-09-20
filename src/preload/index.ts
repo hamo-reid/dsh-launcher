@@ -58,6 +58,8 @@ import type {
   LaunchOptions,
   McpListing,
   McpServerInput,
+  SkillEntry,
+  SkillListing,
   TrashItem,
 } from '../shared/types.ts'
 import type { WindowApi } from '../shared/api.ts'
@@ -159,6 +161,16 @@ const api = {
       ipcRenderer.invoke('ext:mcpSecretSet', name, value),
     mcpSecretRemove: (name: string): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('ext:mcpSecretRemove', name),
+    skillList: (dshId: string): Promise<IpcResult<SkillListing>> =>
+      ipcRenderer.invoke('ext:skillList', dshId),
+    skillScaffold: (name: string): Promise<IpcResult<string>> =>
+      ipcRenderer.invoke('ext:skillScaffold', name),
+    skillRead: (dshId: string, name: string): Promise<IpcResult<{ text: string; path: string }>> =>
+      ipcRenderer.invoke('ext:skillRead', dshId, name),
+    skillSave: (dshId: string, previousName: string | null, text: string): Promise<IpcResult<SkillEntry>> =>
+      ipcRenderer.invoke('ext:skillSave', dshId, previousName, text),
+    skillDelete: (dshId: string, name: string): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('ext:skillDelete', dshId, name),
   },
 
   run: {
