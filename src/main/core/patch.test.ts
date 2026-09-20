@@ -17,6 +17,8 @@ import {
   setRowInsert,
   upsertRow,
   removeRow,
+  appendInsertChild,
+  removeInsertRow,
   extractRowBlock,
   extractKeyValue,
 } from './patch.ts'
@@ -158,6 +160,84 @@ describe('extractKeyValue', () => {
 
   it('handles inline scalar values', () => {
     expect(extractKeyValue('- id: a\n  config: {q: 1}\n', 'a', 'config')).toBe('{q: 1}')
+  })
+})
+
+describe('block end (nested list values)', () => {
+  const ROW = [
+    '- id: mcp',
+    '  config:',
+    '    args:',
+    '      - serve',
+    '    env:',
+    '      A: 1',
+    '- id: other',
+    '',
+  ].join('\n')
+
+  it('does not truncate a row at its own block-style list', () => {
+    expect(extractKeyValue(ROW, 'mcp', 'config')).toBe('args:\n  - serve\nenv:\n  A: 1')
+  })
+
+  it('still ends a row at a same-indent sibling', () => {
+    expect(removeRow(ROW, 'mcp')).toBe('- id: other\n')
+  })
+
+  it('ends a nested child at its sibling, not at its own list item', () => {
+    const text = [
+      '- insert:',
+      '    - id: a',
+      '      config:',
+      '        args:',
+      '          - x',
+      '    - id: b',
+      '',
+    ].join('\n')
+    expect(extractKeyValue(text, 'a', 'config')).toBe('args:\n  - x')
+    expect(removeRow(text, 'a')).toBe('- insert:\n    - id: b\n')
+  })
+})
+
+describe('appendInsertChild', () => {
+  it('creates the insert block on an empty or template layer', () => {
+    expect(appendInsertChild('[]\n', ['    - id: a'])).toBe('- insert:\n    - id: a\n')
+    expect(appendInsertChild('', ['    - id: a'])).toBe('- insert:\n    - id: a\n')
+  })
+
+  it('reuses an existing top-level insert block', () => {
+    expect(appendInsertChild('- insert:\n    - id: a\n', ['    - id: b'])).toBe(
+      '- insert:\n    - id: a\n    - id: b\n',
+    )
+  })
+
+  it('keeps sibling rows that follow the block', () => {
+    expect(appendInsertChild('- insert:\n    - id: a\n\n- id: c\n', ['    - id: b'])).toBe(
+      '- insert:\n    - id: a\n    - id: b\n\n- id: c\n',
+    )
+  })
+
+  it('appends a fresh block after a non-insert row', () => {
+    expect(appendInsertChild('- id: x\n  disabled: true\n', ['    - id: a'])).toBe(
+      '- id: x\n  disabled: true\n- insert:\n    - id: a\n',
+    )
+  })
+})
+
+describe('removeInsertRow', () => {
+  it('drops the child and the now-empty insert block', () => {
+    expect(removeInsertRow('- insert:\n    - id: a\n', 'a')).toBe('')
+  })
+
+  it('keeps the block while a sibling child remains', () => {
+    expect(removeInsertRow('- insert:\n    - id: a\n    - id: b\n', 'a')).toBe('- insert:\n    - id: b\n')
+  })
+
+  it('delegates a top-level row to removeRow', () => {
+    expect(removeInsertRow('- id: a\n- id: b\n', 'a')).toBe('- id: b\n')
+  })
+
+  it('is a no-op for an absent row', () => {
+    expect(removeInsertRow('- insert:\n    - id: a\n', 'zz')).toBe('- insert:\n    - id: a\n')
   })
 })
 

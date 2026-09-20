@@ -869,3 +869,108 @@ export interface MarketListOpts {
   category?: string
   sort?: MarketSort
 }
+
+// ── MCP servers (extensions) ─────────────────────────────────────────────────
+
+/** Transport an MCP row declares. */
+export type McpTransport = 'stdio' | 'streamable-http'
+
+/** How one `env` / `headers` value is written into the patch. */
+export type McpValueMode = 'plain' | 'env' | 'js'
+
+/** One `env` / `headers` entry. */
+export interface McpKV {
+  /** Environment-variable / header name. */
+  name: string
+  /**
+   * `env` (the default) writes `!!js process.env.<name>`: the patch file holds
+   * only the variable NAME, so a profile export or backup cannot leak the
+   * secret. `plain` writes the literal value. `js` writes a raw `!!js`
+   * expression (for header templates such as a bearer prefix).
+   */
+  mode: McpValueMode
+  /** The literal value (`plain`) or the raw expression (`js`). */
+  value?: string
+}
+
+/** Reconnect policy of one MCP server. */
+export interface McpReconnect {
+  enabled?: boolean
+  initialDelayMs?: number
+  maxDelayMs?: number
+  maxAttempts?: number
+}
+
+/** Which composed layer a row was read from. */
+export type McpLayer = 'bundle' | 'profile' | 'home'
+
+/** A problem the launcher can name before dsh fails at load. */
+export interface McpIssue {
+  kind:
+    | 'bad-server-name'
+    | 'missing-transport'
+    | 'unknown-transport'
+    | 'missing-command'
+    | 'missing-url'
+    | 'duplicate-server-name'
+    | 'unparsable-config'
+  /** Short English summary; the UI localizes from `kind`. */
+  message: string
+  /** Offending value (`serverName`, `transport`, …) when there is one. */
+  detail?: string
+  /** For `duplicate-server-name`: the other row claiming the same name. */
+  other?: { layer: McpLayer; bundle?: string; id: string }
+}
+
+/** One MCP server row found in a composed patch layer. */
+export interface McpServer {
+  /** Loader entry id of the row. */
+  id: string
+  /** Namespace for its tool names (`mcp__<serverName>__<tool>`); `''` when the
+   * config could not be read. */
+  serverName: string
+  transport: McpTransport | string
+  command?: string
+  args?: string[]
+  env?: McpKV[]
+  cwd?: string
+  url?: string
+  headers?: McpKV[]
+  toolCallTimeoutMs?: number
+  failOnStartupError?: boolean
+  reconnect?: McpReconnect
+  /** Layer the row was read from. */
+  layer: McpLayer
+  /** Bundle package name when `layer === 'bundle'`. */
+  bundle?: string
+  disabled: boolean
+  /** Raw `config` body when it could not be parsed into the typed shape. */
+  rawConfig?: string
+  /** Problems found while reading this row. */
+  issues: McpIssue[]
+}
+
+/** Create/update input for one MCP row. */
+export interface McpServerInput {
+  /** Row id; `''` derives one from `serverName`. */
+  id: string
+  serverName: string
+  transport: McpTransport
+  command?: string
+  args?: string[]
+  env?: McpKV[]
+  cwd?: string
+  url?: string
+  headers?: McpKV[]
+  toolCallTimeoutMs?: number
+  failOnStartupError?: boolean
+  reconnect?: McpReconnect
+  disabled?: boolean
+}
+
+/** Every MCP row a profile resolves, plus which layers were read. */
+export interface McpListing {
+  servers: McpServer[]
+  /** Layers actually read, in application order. */
+  layers: McpLayer[]
+}

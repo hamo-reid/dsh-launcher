@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { contextForEntry } from './appState.ts'
 import {
-  composeProfileLayers, defaultConfigText, findInsertConflicts, listComboPlugins, listMissingBundles,
+  composeProfileLayers, defaultConfigText, findInsertConflicts, listComboPlugins, listMcpServers, listMissingBundles,
   listUnclaimedBundles, reconcileBundles, resolveBundlePatch, validateComposition,
 } from './combo.ts'
 
@@ -229,5 +229,53 @@ describe('listMissingBundles / validateComposition', () => {
     const v = validateComposition(ctx(), 'nope')
     expect(v.ok).toBe(false)
     expect(v.manifestError).toBeDefined()
+  })
+})
+
+describe('listMcpServers', () => {
+  const ROW = (id: string, serverName: string, command = 'npx') => [
+    '- insert:',
+    `    - id: ${id}`,
+    "      name: '@deepseek-ai/dsh-mcp-client'",
+    '      config:',
+    `        serverName: ${serverName}`,
+    '        transport: stdio',
+    `        command: ${command}`,
+    '',
+  ].join('\n')
+
+  it('reads profile and home rows, tagging each with its layer', () => {
+    mkProfile('p', [], {})
+    mkUserPatch('p', ROW('mcp-a', 'alpha'))
+    writeFileSync(join(home(), 'cordis.patch.yml'), ROW('mcp-b', 'beta'))
+    const servers = listMcpServers(ctx(), 'p')
+    expect(servers.map(s => [s.id, s.serverName, s.layer])).toEqual([
+      ['mcp-a', 'alpha', 'profile'],
+      ['mcp-b', 'beta', 'home'],
+    ])
+    expect(servers.flatMap(s => s.issues)).toEqual([])
+  })
+
+  it('names a serverName claimed by two layers (a real dsh load failure)', () => {
+    mkProfile('p', [], {})
+    mkUserPatch('p', ROW('mcp-a', 'same'))
+    writeFileSync(join(home(), 'cordis.patch.yml'), ROW('mcp-b', 'same'))
+    const issues = listMcpServers(ctx(), 'p').flatMap(s => s.issues)
+    expect(issues.map(i => i.kind)).toEqual(['duplicate-server-name', 'duplicate-server-name'])
+    expect(issues[0].other).toEqual({ layer: 'home', id: 'mcp-b' })
+  })
+
+  it('reads a row shipped by a bundle layer', () => {
+    mkProfile('p', ['b1'], {})
+    mkBundle('p', 'b1', ROW('mcp-shipped', 'shipped'))
+    const servers = listMcpServers(ctx(), 'p')
+    expect(servers).toHaveLength(1)
+    expect(servers[0].layer).toBe('bundle')
+    expect(servers[0].bundle).toBe('b1')
+  })
+
+  it('returns nothing for a profile with no MCP rows', () => {
+    mkProfile('p', [], {})
+    expect(listMcpServers(ctx(), 'p')).toEqual([])
   })
 })

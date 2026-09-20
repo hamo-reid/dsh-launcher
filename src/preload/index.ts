@@ -56,6 +56,8 @@ import type {
   RunInfo,
   RunMode,
   LaunchOptions,
+  McpListing,
+  McpServerInput,
   TrashItem,
 } from '../shared/types.ts'
 import type { WindowApi } from '../shared/api.ts'
@@ -140,6 +142,17 @@ const api = {
       ipcRenderer.invoke('home:readPatch', dshId),
     writePatch: (dshId: string, text: string): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('home:writePatch', dshId, text),
+  },
+
+  ext: {
+    mcpList: (dshId: string, profile: string): Promise<IpcResult<McpListing>> =>
+      ipcRenderer.invoke('ext:mcpList', dshId, profile),
+    mcpSave: (dshId: string, profile: string, input: McpServerInput, layer: 'profile' | 'home'): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('ext:mcpSave', dshId, profile, input, layer),
+    mcpRemove: (dshId: string, profile: string, id: string, layer: 'profile' | 'home'): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('ext:mcpRemove', dshId, profile, id, layer),
+    mcpSetDisabled: (dshId: string, profile: string, id: string, disabled: boolean, layer: 'profile' | 'home'): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('ext:mcpSetDisabled', dshId, profile, id, disabled, layer),
   },
 
   run: {

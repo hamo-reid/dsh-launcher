@@ -58,6 +58,8 @@ import type {
   RunInfo,
   RunMode,
   LaunchOptions,
+  McpListing,
+  McpServerInput,
   TrashItem,
 } from './types.ts'
 
@@ -121,6 +123,21 @@ export interface WindowApi {
     /** The home patch layer's raw text (source mode). */
     readPatch: (dshId: string) => Promise<IpcResult<{ text: string; path: string }>>
     writePatch: (dshId: string, text: string) => Promise<IpcResult<boolean>>
+  }
+
+  /** Extensions surface. Track A is MCP servers — the `insert:` rows that mount
+   * `@deepseek-ai/dsh-mcp-client`, in the profile layer or the machine-level
+   * home layer. */
+  ext: {
+    /** Every MCP row the profile resolves (bundle → profile → home), with
+     * field-level and duplicate-`serverName` problems attached per row. */
+    mcpList: (dshId: string, profile: string) => Promise<IpcResult<McpListing>>
+    /** Create or update one row in the chosen layer. */
+    mcpSave: (dshId: string, profile: string, input: McpServerInput, layer: 'profile' | 'home') => Promise<IpcResult<boolean>>
+    /** Remove one row; its `insert:` block goes with it when it was the last. */
+    mcpRemove: (dshId: string, profile: string, id: string, layer: 'profile' | 'home') => Promise<IpcResult<boolean>>
+    /** Reversible off switch — the row stays, dsh does not load it. */
+    mcpSetDisabled: (dshId: string, profile: string, id: string, disabled: boolean, layer: 'profile' | 'home') => Promise<IpcResult<boolean>>
   }
 
   run: {

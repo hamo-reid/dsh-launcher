@@ -35,12 +35,26 @@ function findIdLine(lines: string[], id: string): number | undefined {
   return undefined
 }
 
-/** End (exclusive) of the block starting at `start` — the next `- ` row, or EOF. */
+/** Leading-space count of a line (0 for a column-0 line). */
+function indentOf(line: string): number {
+  return /^(\s*)/.exec(line)?.[1].length ?? 0
+}
+
+/**
+ * End (exclusive) of the block starting at `start` — the next `- ` row at the
+ * SAME OR SHALLOWER indent, or EOF.
+ *
+ * Depth matters: a `- ` line nested deeper than the row is that row's own list
+ * value (`args:` / `env:` entries, a group's nested rows), not a sibling. The
+ * earlier indent-blind check truncated a row at its first list item, which broke
+ * `extractKeyValue`/`removeRow` for any block-style list.
+ */
 function blockEnd(lines: string[], start: number): number {
+  const rowIndent = indentOf(lines[start])
   for (let i = start + 1; i < lines.length; i++) {
     const line = lines[i]
     if (line.trim() === '' || line.trim().startsWith('#')) continue
-    if (/^\s*- /.test(line)) return i
+    if (indentOf(line) <= rowIndent && /^\s*- /.test(line)) return i
   }
   return lines.length
 }
@@ -346,6 +360,74 @@ export function removeRow(text: string, id: string): string {
   const idx = findIdLine(lines, id)
   if (idx === undefined) return text
   lines.splice(idx, blockEnd(lines, idx) - idx)
+  return lines.join('\n')
+}
+
+/** The `- insert:` line that owns a nested row: the nearest preceding line with a
+ * shallower indent, when that line is an insert header. `undefined` when the row
+ * is top-level or its owner is some other key (a group's `config:`). */
+function findInsertHeader(lines: string[], rowIndex: number): number | undefined {
+  const rowIndent = indentOf(lines[rowIndex])
+  for (let i = rowIndex - 1; i >= 0; i--) {
+    const line = lines[i]
+    if (line.trim() === '' || line.trim().startsWith('#')) continue
+    if (indentOf(line) >= rowIndent) continue
+    return /^(\s*)- insert\s*:\s*$/.test(line) ? i : undefined
+  }
+  return undefined
+}
+
+/** End (exclusive) of the block owned by a key line: the next non-blank,
+ * non-comment line at the same or a shallower indent. */
+function blockEndByIndent(lines: string[], start: number): number {
+  const indent = indentOf(lines[start])
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i]
+    if (line.trim() === '' || line.trim().startsWith('#')) continue
+    if (indentOf(line) <= indent) return i
+  }
+  return lines.length
+}
+
+/**
+ * Append one child row (object form; `childLines` already carry their 4-space
+ * base indent) to the document's top-level `- insert:` list, creating that block
+ * when absent. Reuses an existing block so repeated adds keep one tidy list.
+ */
+export function appendInsertChild(text: string, childLines: string[]): string {
+  const base = stripEmptyArrayMarker(text)
+  const lines = base.split('\n')
+  const header = lines.findIndex(line => /^- insert\s*:\s*$/.test(line))
+  if (header < 0) {
+    const body = ['- insert:', ...childLines].join('\n') + '\n'
+    if (base.trim() === '') return body
+    return base.endsWith('\n') ? base + body : `${base}\n${body}`
+  }
+  // Sit with the siblings: step back over the blank lines that trail the block.
+  let at = blockEndByIndent(lines, header)
+  while (at > header + 1 && lines[at - 1].trim() === '') at--
+  lines.splice(at, 0, ...childLines)
+  return lines.join('\n')
+}
+
+/**
+ * Remove one row nested under an `insert:` key, dropping the owning `- insert:`
+ * block when it was the last child — an `insert:` with no children is a null
+ * value, which is not a valid loader patch list. A top-level row is delegated to
+ * {@link removeRow}.
+ */
+export function removeInsertRow(text: string, id: string): string {
+  const base = stripEmptyArrayMarker(text)
+  const lines = base.split('\n')
+  const idx = findIdLine(lines, id)
+  if (idx === undefined) return base
+  if (indentOf(lines[idx]) === 0) return removeRow(base, id)
+  const header = findInsertHeader(lines, idx)
+  lines.splice(idx, blockEnd(lines, idx) - idx)
+  if (header === undefined) return lines.join('\n')
+  const end = blockEndByIndent(lines, header)
+  const hasChild = lines.slice(header + 1, end).some(line => /^\s+- /.test(line))
+  if (!hasChild) lines.splice(header, end - header)
   return lines.join('\n')
 }
 

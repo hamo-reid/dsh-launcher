@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { Alert, Button, ConfigProvider, Layout, message, Modal, Space, Spin, Tabs, theme, Typography } from 'antd'
 import {
-  AppstoreOutlined, CloseOutlined, FullscreenExitOutlined, FullscreenOutlined,
+  ApiOutlined, AppstoreOutlined, CloseOutlined, FullscreenExitOutlined, FullscreenOutlined,
   InfoOutlined, MinusOutlined, PlayCircleOutlined, ProfileOutlined, RobotOutlined, SettingOutlined,
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
@@ -18,11 +18,12 @@ import type { HealthIssue } from '../../shared/types.ts'
 const RunsSection = lazy(() => import('./views/RunsSection.tsx'))
 const ProfileSection = lazy(() => import('./views/ProfileSection.tsx'))
 const PluginsSection = lazy(() => import('./views/PluginsSection.tsx'))
+const ExtensionsSection = lazy(() => import('./views/ExtensionsSection.tsx'))
 const SettingsSection = lazy(() => import('./views/SettingsSection.tsx'))
 const DshSection = lazy(() => import('./views/DshSection.tsx'))
 const AboutView = lazy(() => import('./views/AboutView.tsx'))
 
-type Tab = 'run' | 'profile' | 'plugins' | 'settings' | 'dsh' | 'about'
+type Tab = 'run' | 'profile' | 'plugins' | 'extensions' | 'settings' | 'dsh' | 'about'
 
 const { Content } = Layout
 
@@ -129,6 +130,7 @@ export default function App() {
     { key: 'run', label: t('app.tab.run'), icon: <PlayCircleOutlined /> },
     { key: 'profile', label: t('app.tab.profile'), icon: <ProfileOutlined /> },
     { key: 'plugins', label: t('app.tab.plugins'), icon: <AppstoreOutlined /> },
+    { key: 'extensions', label: t('app.tab.extensions'), icon: <ApiOutlined /> },
     { key: 'settings', label: t('app.tab.settings'), icon: <SettingOutlined /> },
     { key: 'about', label: t('app.tab.about'), icon: <InfoOutlined /> },
   ]
@@ -214,6 +216,7 @@ export default function App() {
           {tab === 'run' && <RunsSection />}
           {tab === 'profile' && <ProfileSection />}
           {tab === 'plugins' && <PluginsSection key={pluginsEpoch} />}
+          {tab === 'extensions' && <ExtensionsSection />}
           {tab === 'settings' && <SettingsSection />}
           {tab === 'dsh' && <DshSection />}
           {tab === 'about' && <AboutView />}

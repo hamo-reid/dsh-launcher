@@ -89,6 +89,13 @@ export const E = {
   pluginNotInstalled: 'plugin.notInstalled',
   // market
   marketEntryNotFound: 'market.entryNotFound',
+  // extensions (MCP rows)
+  extBadServerName: 'ext.badServerName',
+  extBadTransport: 'ext.badTransport',
+  extNeedCommand: 'ext.needCommand',
+  extNeedUrl: 'ext.needUrl',
+  extBadEnvName: 'ext.badEnvName',
+  extBadEnvValue: 'ext.badEnvValue',
   // dsh data import/export
   dataNotSelected: 'data.notSelected',
   // run

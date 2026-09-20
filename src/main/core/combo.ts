@@ -8,9 +8,10 @@ import { basename, join } from 'node:path'
 import { dshHome, homePatchPath, installAnchor, profileDir, profilesDir } from './home.ts'
 import { readManifest } from './manifest.ts'
 import { assertPatchDocValid, collectInsertIds, extractKeyValue, parseClassifiedRows, parseNamedRows, parsePatchRows } from './patch.ts'
+import { diagnoseMcpServers, readMcpServers } from './mcp.ts'
 import { child } from './logger.ts'
 import type { DshContext } from './appState.ts'
-import type { ComboPlugin, InsertConflict, InsertConflictLayer, ProfileLayer, ProfileValidation } from '../../shared/types.ts'
+import type { ComboPlugin, InsertConflict, InsertConflictLayer, McpServer, ProfileLayer, ProfileValidation } from '../../shared/types.ts'
 
 /** Domain-tagged logger for profile-composition work. */
 const cplog = child('combo')
@@ -268,6 +269,29 @@ export function defaultConfigText(ctx: DshContext, profile: string, id: string):
     if (value !== undefined) return value
   }
   return ''
+}
+
+/**
+ * Every MCP row a profile resolves, in application order, with field-level and
+ * cross-row problems folded on.
+ *
+ * Rows are `insert:` entries, so a later layer does NOT override an earlier one
+ * the way an id-targeted row does — two layers claiming one `serverName` are a
+ * real dsh load failure, which {@link diagnoseMcpServers} names per row.
+ */
+export function listMcpServers(ctx: DshContext, profile: string): McpServer[] {
+  const servers: McpServer[] = []
+  const { bundles } = readManifest(ctx, profile)
+  for (const bundle of bundles) {
+    const patchPath = resolveBundlePatch(ctx, bundle, profile)
+    if (patchPath === undefined) continue
+    servers.push(...readMcpServers(readFileSync(patchPath, 'utf8'), 'bundle', bundle))
+  }
+  const userText = readUserPatch(ctx, profile)
+  if (userText.trim() !== '') servers.push(...readMcpServers(userText, 'profile'))
+  const homePath = homePatchPath(ctx)
+  if (existsSync(homePath)) servers.push(...readMcpServers(readFileSync(homePath, 'utf8'), 'home'))
+  return diagnoseMcpServers(servers)
 }
 
 export function listUnclaimedBundles(ctx: DshContext, profile: string): string[] {
