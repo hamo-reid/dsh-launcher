@@ -61,4 +61,10 @@ git push origin release:main
 ## 发布后
 
 - 到 GitHub Releases 页确认正文与资产齐全；tag 页确认说明正常显示。
+- **确认预发布语义**：`-beta` / `-rc` 等预发布 tag 应显示为 **Pre-release** 且不占用 "Latest"
+  （`release.yml` 按 tag 是否含 `-` 自动加 `--prerelease --latest=false`）。
+  历史 beta 若漏标，用 `gh release edit <tag> --prerelease` 补正。
+- **确认三分支对齐**：`git ls-remote --heads origin dev release main` 三者应指向同一提交。
+- **用发布产物做升级实测**：下载 Release 里的便携版 exe，用旧版本的数据目录验证设置迁移与数据完整
+  （`typecheck` / `test` / `build` 只证明构建通过，不覆盖真实旧数据的迁移路径）。
 - 清理已并入但未删的 feature 分支（`git push origin --delete <branch>`），见 BRANCHING.md「待清理」。
