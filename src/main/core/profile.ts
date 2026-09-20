@@ -1,10 +1,10 @@
 /** Profile instance management: summaries, create, clone, soft-delete, export. */
 
 import {
-  cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync,
+  cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { listProfiles, profileDir, profilesDir } from './home.ts'
 import { pluginDir, profilesRootFor, type DshContext } from './appState.ts'
 import { readManifest } from './manifest.ts'
@@ -186,6 +186,53 @@ export async function removeDependency(ctx: DshContext, profile: string, pkg: st
   await runPnpm(dir, ['install', '--config.confirmModulesPurge=false'])
   reconcileBundles(ctx, profile)
   logger.info(`dependency removed: ${profile} · ${pkg}`)
+}
+
+/**
+ * Point a profile at a dev package dir with a live `link:` dependency. The
+ * source dir is never copied — the profile resolves it directly, so edits are
+ * picked up by the host (HMR). Verifies the resulting link actually resolves:
+ * pnpm can report success while leaving a missing/stale link
+ * (see TROUBLESHOOTING §1), so a silent success would be a lie.
+ */
+export async function linkDevToProfile(
+  ctx: DshContext, profile: string, pkg: string, dir: string,
+): Promise<{ ok: boolean; text: string }> {
+  if (!PACKAGE_NAME_RE.test(pkg)) throw new Error(`包名不合法：${pkg}`)
+  const target = resolve(dir)
+  if (!existsSync(join(target, 'package.json'))) throw new Error(`开发包不存在：${target}`)
+  await setDependency(ctx, profile, pkg, `link:${target}`)
+  if (!existsSync(join(profileDir(ctx, profile), 'node_modules', pkg, 'package.json'))) {
+    return { ok: false, text: `已写入 link:${target}，但 profile 的 node_modules 里没有 ${pkg}（pnpm 未重建链接，可用「重新链接」修复）` }
+  }
+  logger.info(`dev plugin linked: ${profile} · ${pkg} → ${target}`)
+  return { ok: true, text: `已链接 ${pkg} → ${target}` }
+}
+
+/**
+ * Rebuild a dev link in a profile. pnpm treats an existing-but-dangling junction
+ * as installed and no-ops, so the link is dropped first (a link only — never a
+ * real dir). `inSource` also installs in the dev package, repairing the
+ * `@deepseek-ai/*` peers a `link:` resolves from the source side.
+ */
+export async function repairDevLink(
+  ctx: DshContext, profile: string, pkg: string, opts: { inSource?: boolean } = {},
+): Promise<{ ok: boolean; text: string }> {
+  const dir = profileDir(ctx, profile)
+  const spec = readRawManifest(dir).dependencies?.[pkg]
+  if (spec === undefined || !spec.startsWith('link:')) throw new Error(`${pkg} 不是该 profile 的 link 依赖`)
+  const source = spec.slice(5)
+  const linkPath = join(dir, 'node_modules', pkg)
+  try {
+    if (lstatSync(linkPath).isSymbolicLink()) rmSync(linkPath, { force: true })
+  } catch { /* nothing to remove */ }
+  if (opts.inSource === true && existsSync(join(source, 'package.json'))) {
+    await runPnpm(source, ['install', '--config.confirmModulesPurge=false'])
+  }
+  await runPnpm(dir, ['install', '--config.confirmModulesPurge=false'])
+  const ok = existsSync(join(dir, 'node_modules', pkg, 'package.json'))
+  logger.info(`dev link repair: ${profile} · ${pkg} → ${ok ? 'ok' : 'still missing'}`)
+  return { ok, text: ok ? `已重新链接 ${pkg}` : `重新链接后仍未解析 ${pkg}（检查源目录的依赖）` }
 }
 
 /** Update the manifest's display name and/or patch-file lifecycle. */
@@ -434,24 +481,22 @@ function readStoreDeps(storeDir: string): Record<string, string> {
   }
 }
 
-/** Classify one bundle using BOTH the profile deps (`link:`) and the store's
- * recorded source: a `file:`/`link:` store entry means a real local plugin;
- * a version entry (e.g. `^1.4.0`) means it was downloaded from npm. Without
- * the store signal every `link:` would look local, which is wrong for npm
- * plugins that were merely installed into the profile as a link. */
+/** Classify one bundle by where its dependency spec actually points: a
+ * `link:`/`file:` into the store's `archive/` is a store-managed (npm-sourced)
+ * install; any other target is the user's own local/dev plugin. A version spec
+ * (e.g. `^1.4.0`) is npm. Without a dependency entry it is an in-box bundle. */
 function classifyBundle(
   pkg: string,
   profileDeps: Record<string, string>,
   storeDeps: Record<string, string>,
+  storeDir: string,
 ): ExportBundle {
   const spec = profileDeps[pkg]
   if (spec === undefined) return { name: pkg, source: 'dsh' }
   if (!spec.startsWith('link:') && !spec.startsWith('file:')) return { name: pkg, source: 'npm', spec }
-  const stored = storeDeps[pkg]
-  if (stored !== undefined && (stored.startsWith('file:') || stored.startsWith('link:'))) {
-    return { name: pkg, source: 'local' }
-  }
-  return { name: pkg, source: 'npm', spec: stored }
+  const archive = storeDir === '' ? '' : versionsRoot(storeDir)
+  if (archive === '' || pathOutsideRoot(archive, spec.slice(5))) return { name: pkg, source: 'local' }
+  return { name: pkg, source: 'npm', spec: storeDeps[pkg] }
 }
 
 /** Per-bundle version provenance for the profile's "replace version" UI: where
@@ -503,7 +548,7 @@ export function exportProfile(ctx: DshContext, name: string): string {
   }
   const deps = manifest.dependencies ?? {}
   const storeDeps = readStoreDeps(pluginDir())
-  const bundles: ExportBundle[] = (manifest.dsh?.profile?.bundles ?? []).map(raw => classifyBundle(String(raw), deps, storeDeps))
+  const bundles: ExportBundle[] = (manifest.dsh?.profile?.bundles ?? []).map(raw => classifyBundle(String(raw), deps, storeDeps, pluginDir()))
   const bundleNames = new Set(bundles.map(b => b.name))
   const dependencies: Record<string, string> = {}
   for (const [key, spec] of Object.entries(deps)) {
@@ -527,7 +572,8 @@ export function exportProfile(ctx: DshContext, name: string): string {
 }
 
 /** The locally-linked bundles of a profile (their on-disk code dirs), which the
- * export dialog offers to pack into a zip. `storeDir` is the plugin store root. */
+ * export dialog offers to pack into a zip. A dev link's dir is its `link:`
+ * target (the source package); a store-managed `file:` dep is not local. */
 export function listLocalBundles(ctx: DshContext, name: string, storeDir: string): { name: string; dir: string }[] {
   const manifest = JSON.parse(readFileSync(join(profilesRootFor(ctx), name, 'package.json'), 'utf8')) as {
     dependencies?: Record<string, string>
@@ -537,10 +583,22 @@ export function listLocalBundles(ctx: DshContext, name: string, storeDir: string
   const storeDeps = readStoreDeps(storeDir)
   const out: { name: string; dir: string }[] = []
   for (const pkg of manifest.dsh?.profile?.bundles ?? []) {
-    const info = classifyBundle(String(pkg), profileDeps, storeDeps)
-    if (info.source !== 'local') continue
-    const dir = join(storeDir, 'node_modules', pkg)
-    if (existsSync(dir)) out.push({ name: pkg, dir })
+    const key = String(pkg)
+    if (classifyBundle(key, profileDeps, storeDeps, storeDir).source !== 'local') continue
+    const spec = profileDeps[key] ?? ''
+    const target = spec.startsWith('link:') || spec.startsWith('file:') ? spec.slice(5) : ''
+    // A legacy flat store records a `link:` spec while the real package body
+    // lives under the store's own node_modules; a dev link points at its source
+    // dir directly. Prefer whichever actually holds a package.
+    const recorded = storeDeps[key]
+    const candidates = [
+      ...(recorded !== undefined && (recorded.startsWith('link:') || recorded.startsWith('file:'))
+        ? [join(storeDir, 'node_modules', key)]
+        : []),
+      ...(target !== '' ? [target] : []),
+    ]
+    const dir = candidates.find(d => existsSync(join(d, 'package.json')))
+    if (dir !== undefined) out.push({ name: key, dir })
   }
   return out
 }

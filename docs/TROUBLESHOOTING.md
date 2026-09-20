@@ -200,6 +200,42 @@ pnpm add '@deepseek-ai/dsh@<version>' --fetch-retries=3 --fetch-retry-maxtimeout
 
 ---
 
+## 10. 本地 / monorepo 插件开发（dev link · patch 解析 · peer 解析）
+
+开发中的插件不要走「下载 → 归档 → 装进 profile」那条拷贝链，否则改一次代码要重来一遍。
+用 **开发插件（Dev plugins）**：profile 直接以 `link:<源码目录>` 解析你的包，改代码即由 dsh
+的 HMR 热重载（`--expose-internals` 已常开），并且**与插件库独立管理**（不参与更新检查/版本管理，
+移除注册也**不会**删你的源码）。
+
+### 接入
+`插件管理 → 开发插件 → 接入文件夹…` 选**包目录**（不是 workspace 根）→ `安装到 profile…`
+选 DSH + profile + 方式：
+
+| 方式 | profile 依赖 | 行为 |
+|---|---|---|
+| **链接（开发）** | `link:<dir>` | 直接解析源码，改代码即生效 |
+| 复制（快照） | `file:<store>/…` | 先把当前状态归档到库再安装（冻结用） |
+
+### 解析是「按实际 patch」做的，不是扫目录
+开发包若是 bundle，`dsh.bundle.patch` 的每一行 `name:` 才是 dsh 真正加载的模块；
+launcher 用 Node 的解析链（从包锚点）逐行解析并报告：
+
+- **入口（构建产物）**：`exports`/`main` 指向的文件不存在 → `未构建`，点 `构建`
+  （在 workspace 根跑 `pnpm --filter <name> build`）。
+- **Patch 行**：某行 `name:` 解析不到 → 通常是 monorepo 没跑过 `pnpm install`（workspace link 缺失）。
+- **宿主 peer（`@deepseek-ai/*`）**：`link:` 的 peer 是**从开发包**解析的，不是从 profile。
+  - 修复 A（推荐）：`在仓库安装` —— 在 workspace 根 `pnpm install`（前提：peer 已声明）。
+  - 修复 B（兜底）：`补 peer（shim）` —— 把 dsh 安装里的 `@deepseek-ai/*` 以 junction 补进
+    `<包>/node_modules`（只写 `node_modules`，可一键移除）。⚠️ 在仓库里再跑 `pnpm install` 会清掉它。
+
+### 常见症状
+- `Cannot find package '@deepseek-ai/…'`：见上面 peer 一节（也是 §1 的同类问题）。
+- 改了代码没生效：确认装的是**链接**模式；HMR 覆盖不到 `package.json`/patch 变更时，重启 profile。
+- profile 的 `node_modules/<pkg>` 缺失但 pnpm 说 "Already up to date"：用 Bundle 层的
+  **`重新链接`**（删坏 junction → 重新 `pnpm install`），与 §1 是同一个坑。
+
+---
+
 ## 快速索引
 | 症状 | 章节 |
 |---|---|
@@ -212,3 +248,4 @@ pnpm add '@deepseek-ai/dsh@<version>' --fetch-retries=3 --fetch-retry-maxtimeout
 | 误删数据目录 / 破坏性命令防护 | §7 + `scripts/safe-remove.ps1` |
 | 隔离测试打包产物 | §8 |
 | 手动重装 / 接入 dsh | §9 |
+| 本地 / monorepo 插件开发 | §10 |

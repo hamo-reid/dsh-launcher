@@ -259,6 +259,66 @@ export interface ProfileBundleInfo {
   source: ProfileBundleSource
 }
 
+/** How a dev plugin is attached to a profile. `link` = live junction to the
+ * source dir (edits picked up, no copy); `copy` = snapshot into the store and
+ * real-install a fixed version. */
+export type DevLinkMode = 'link' | 'copy'
+
+/** A local development plugin: a package dir the launcher links (never copies)
+ * into profiles, managed separately from the plugin store. */
+export interface DevPlugin {
+  /** `package.json` name — also the profile dependency key. */
+  name: string
+  /** Package dir, the `link:` target. */
+  dir: string
+  /** Nearest pnpm workspace root (walked up for `pnpm-workspace.yaml`). */
+  workspaceRoot?: string
+  /** Version at registration (display only). */
+  version?: string
+  /** Whether it declares `dsh.bundle.patch` (so it joins the bundle layer). */
+  bundle: boolean
+  /** Peer names currently satisfied by a launcher-installed shim junction. */
+  shims?: string[]
+  addedAt: string
+}
+
+/** Which root satisfied a dev-plugin reference, for the diagnosis UI. */
+export type DevResolveRoot = 'monorepo' | 'host' | 'host-fallback' | 'home'
+
+/** One row of a dev bundle's patch, resolved to its on-disk package dir. */
+export interface DevPatchRow {
+  id: string
+  /** The `name:` the row loads (empty for a config-only row). */
+  name: string
+  /** Resolved package dir when the host's resolution chain finds it. */
+  dir?: string
+  /** Which root satisfied it (`monorepo` = the dev package's own tree). */
+  root?: DevResolveRoot
+}
+
+/** One `@deepseek-ai/*` peer the dev package needs, with its resolution result. */
+export interface DevPeer {
+  name: string
+  dir?: string
+  root?: DevResolveRoot
+}
+
+/** Resolution diagnosis for one dev plugin. */
+export interface DevDiagnosis {
+  /** The package's `exports`/`main` target is missing → needs a build. */
+  entryMissing: boolean
+  entry?: string
+  patch?: string
+  /** Patch rows (the modules dsh actually loads), each resolved or not. */
+  patchRows: DevPatchRow[]
+  missingPatchRows: string[]
+  /** `@deepseek-ai/*` peers, each resolved or not. */
+  peers: DevPeer[]
+  missingPeers: string[]
+  /** Peers currently satisfied by a launcher-installed shim junction. */
+  shimmed: string[]
+}
+
 /** What `profile:load` returns for one profile. */
 export interface ProfileDetail {
   /** Ordered `dsh.profile.bundles` layer list. */

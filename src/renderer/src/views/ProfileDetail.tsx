@@ -532,6 +532,18 @@ const loadSeq = useRef(0)
     })
   }
 
+  // Rebuild a local/dev `link:` dependency (pnpm can leave a stale junction and
+  // then treat `install` as a no-op — see TROUBLESHOOTING §1).
+  const relinkBundle = async (bundle: string): Promise<void> => {
+    setDepBusy(true)
+    const r = await window.api.plugins.devRepairLink(dshId, name, bundle)
+    setDepBusy(false)
+    if (!r.ok) { void message.error(apiErrorText(r)); return }
+    void message.success(r.value)
+    void load()
+    onChanged?.()
+  }
+
   const onDragEnd = (event: DragEndEvent): void => {
     const { active, over } = event
     if (over === null || active.id === over.id) return
@@ -804,6 +816,7 @@ const loadSeq = useRef(0)
                       info={detail?.bundleInfo?.[bundle]}
                       onRemove={removeBundleRow}
                       onReplace={replaceBundleVersion}
+                      onRelink={b => void relinkBundle(b)}
                     />
                   ))}
                 </SortableContext>
@@ -1040,11 +1053,12 @@ const loadSeq = useRef(0)
  * handle on the left; the version controls on the right stay click-only. Only a
  * store/npm-backed layer can be re-versioned; an in-box (`dsh`) or local layer
  * is read-only, with the reason in a tooltip. */
-function SortableBundle({ bundle, info, onRemove, onReplace }: {
+function SortableBundle({ bundle, info, onRemove, onReplace, onRelink }: {
   bundle: string
   info?: ProfileBundleInfo
   onRemove: (b: string) => void
   onReplace: (b: string) => void
+  onRelink: (b: string) => void
 }): JSX.Element {
   const { t } = useTranslation()
   const { token } = theme.useToken()
@@ -1092,6 +1106,9 @@ function SortableBundle({ bundle, info, onRemove, onReplace }: {
           <Button size="small" disabled={!replaceable} onClick={() => onReplace(bundle)}>{t('profile.bundle.replace')}</Button>
         </span>
       </Tooltip>
+      {source === 'local' && (
+        <Button size="small" onClick={() => onRelink(bundle)}>{t('profile.bundle.relink')}</Button>
+      )}
       <Button size="small" danger onClick={() => onRemove(bundle)}>{t('profile.detail.removeBundle')}</Button>
     </div>
   )

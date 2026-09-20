@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Alert, Badge, Button, Input, List, Menu, Modal, Pagination, Popover, Segmented, Select, Skeleton, Space, Tag, theme, message,
+  Alert, Badge, Button, Checkbox, Input, List, Menu, Modal, Pagination, Popover, Segmented, Select, Skeleton, Space, Tag, theme, message,
 } from 'antd'
 import { ArrowUpOutlined, ArrowDownOutlined, FilterOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
@@ -17,9 +17,10 @@ import PluginCard from './PluginCard.tsx'
 import { loadFilters, saveFilters, type Bucket, type SortKey } from '../lib/pluginFilters.ts'
 import { DownloadVersionModal, PluginDetailModal, InstallToProfileModal, toStoreMap } from './PluginsModals.tsx'
 import MarketSection from './MarketSection.tsx'
+import DevPluginsView from './DevPluginsView.tsx'
 import type { InstalledOverviewRow, MarketAnnotations, NpmSearchHit, PluginKind, PluginOrigin, PluginProvenance, PluginUpdateInfo } from '../../../shared/types.ts'
 
-type PluginView = 'overview' | 'download' | 'install' | 'market'
+type PluginView = 'overview' | 'download' | 'install' | 'market' | 'dev'
 
 const PAGE_SIZE = 25
 /** Cards per overview page (the grid paginates locally). */
@@ -51,6 +52,11 @@ export default function PluginsSection() {
   const [sizeLoading, setSizeLoading] = useState(false)
   // Store plugin names whose node_modules dir is missing on disk (stale).
   const [staleStoreNames, setStaleStoreNames] = useState<Set<string>>(new Set())
+
+  // Dev plugins live in their own registry + section; the overview hides them by
+  // default so "real" plugins stay a clean list.
+  const [devNames, setDevNames] = useState<Set<string>>(new Set())
+  const [showDev, setShowDev] = useState(false)
 
   // Classification filters — multi-condition (OR within a dimension, AND across),
   // plus the persisted sort. Loaded once from localStorage; saved on every change.
@@ -98,6 +104,7 @@ export default function PluginsSection() {
     { key: 'market' as const, label: t('plugin.view.market') },
     { key: 'download' as const, label: t('plugin.view.download') },
     { key: 'install' as const, label: t('plugin.view.install') },
+    { key: 'dev' as const, label: t('plugin.view.dev') },
   ]
 
   const load = async (): Promise<InstalledOverviewRow[] | undefined> => {
@@ -118,6 +125,12 @@ export default function PluginsSection() {
     if (r.ok) setStoreMap(toStoreMap(r.value))
   }, [])
 
+  // The registered dev-plugin names, so the overview can exclude them.
+  const refreshDevNames = useCallback(async (): Promise<void> => {
+    const d = await window.api.plugins.devList()
+    if (d.ok) setDevNames(new Set(d.value.plugins.map(p => p.name)))
+  }, [])
+
   // When any download session settles, refresh the in-store tags (a finished
   // download flips the plugin to "in store" without needing a manual reload).
   useEffect(() => window.api.downloads.onChange(() => { void refreshStoreNames() }), [refreshStoreNames])
@@ -126,9 +139,9 @@ export default function PluginsSection() {
     void (async () => {
       const d = await window.api.plugins.getDir()
       if (d.ok) { setDir(d.value.dir); setDirMissing(d.value.dir === '') }
-      await Promise.all([load(), refreshStoreNames()])
+      await Promise.all([load(), refreshStoreNames(), refreshDevNames()])
     })()
-  }, [refreshStoreNames])
+  }, [refreshStoreNames, refreshDevNames])
 
   // Catalog annotations (category / deprecation) for the overview — non-blocking;
   // degrades to none when the market is unreachable.
@@ -140,7 +153,7 @@ export default function PluginsSection() {
   // 见 —— view 切换不重挂载本组件，否则总览会一直持有旧的挂载时数据。
   const prevView = useRef<PluginView>(view)
   useEffect(() => {
-    if (view === 'overview' && prevView.current !== 'overview') void load()
+    if (view === 'overview' && prevView.current !== 'overview') { void load(); void refreshDevNames() }
     prevView.current = view
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view])
@@ -306,6 +319,8 @@ export default function PluginsSection() {
   // Within a dimension the selected values OR; across dimensions they AND.
   const filteredOverview = useMemo(() => {
     let rows = overview
+    // Dev plugins are managed in their own section; hide them here unless asked.
+    if (!showDev) rows = rows.filter(x => !devNames.has(x.name))
     if (overviewQ !== '') rows = rows.filter(x => x.name.toLowerCase().includes(overviewQ))
     if (bucket === 'used') rows = rows.filter(x => x.usage.length > 0)
     else if (bucket === 'unused') rows = rows.filter(x => x.inStore === true && x.usage.length === 0)
@@ -315,7 +330,7 @@ export default function PluginsSection() {
     if (kinds.length > 0) rows = rows.filter(x => kinds.includes(x.kind ?? 'dependency'))
     if (provenances.length > 0) rows = rows.filter(x => (x.provenances ?? []).some(p => provenances.includes(p)))
     return rows
-  }, [overview, overviewQ, bucket, origins, kinds, provenances, updates])
+  }, [overview, overviewQ, bucket, origins, kinds, provenances, updates, devNames, showDev])
 
   const catLabel = (id: string): string => {
     const labels = annotations?.categories[id]
@@ -465,6 +480,7 @@ export default function PluginsSection() {
                   <Button icon={<FilterOutlined />}>{t('plugin.overview.filters')}</Button>
                 </Badge>
               </Popover>
+              <Checkbox checked={showDev} onChange={e => setShowDev(e.target.checked)}>{t('plugin.overview.showDev')}</Checkbox>
               <Select
                 value={sortKey}
                 onChange={value => {
@@ -543,6 +559,8 @@ export default function PluginsSection() {
       )}
 
       {view === 'market' && <MarketSection />}
+
+      {view === 'dev' && <DevPluginsView />}
 
       {view === 'download' && (
         <Space orientation="vertical" style={{ width: '100%' }} size="middle">

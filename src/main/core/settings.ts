@@ -28,7 +28,7 @@ import { basename, dirname, join } from 'node:path'
 import initSqlJs, { type Database, type SqlJsStatic } from 'sql.js'
 import { logger } from './logger.ts'
 import type { DshEntry } from './dsh.ts'
-import type { LaunchOptions, MarketSource, RunMode } from '../../shared/types.ts'
+import type { DevPlugin, LaunchOptions, MarketSource, RunMode } from '../../shared/types.ts'
 
 /** The merged settings shape callers see (a union of the three stored rows). */
 export interface AppSettings {
@@ -61,6 +61,9 @@ export interface AppSettings {
   /** The user's GitHub token, encrypted at rest (see `core/github-auth.ts`).
    * A secret: never exported and never logged. */
   githubTokenEnc?: string
+  /** Registered local development plugins (linked, not archived). Launcher-only
+   * state: independent of the plugin store. */
+  devPlugins?: DevPlugin[]
   /** Saved default launch parameters, keyed `pid:<profileId>` (a stable id
    * stored in each profile dir; see `core/launch-config.ts`). Kept out of the
    * profile manifest on purpose so machine-specific patch paths never leak into
@@ -74,7 +77,7 @@ export interface AppSettings {
 /** The `prefs` row: user preferences (no registry / no per-profile config). */
 type PrefsSettings = Pick<AppSettings,
   'pluginDir' | 'dshVersionDir' | 'uiLanguage' | 'closeToTray' | 'askOnClose' |
-  'nodePreference' | 'onboarded' | 'marketSource' | 'marketUrl' | 'githubTokenEnc'>
+  'nodePreference' | 'onboarded' | 'marketSource' | 'marketUrl' | 'githubTokenEnc' | 'devPlugins'>
 /** The `dsh` row: the registered dsh installs. */
 type DshSettings = Pick<AppSettings, 'dshes'>
 /** The `launch` row: per-profile launch config. */
@@ -450,6 +453,7 @@ function splitPrefs(s: AppSettings): PrefsSettings {
     ...(s.marketSource !== undefined ? { marketSource: s.marketSource } : {}),
     ...(s.marketUrl !== undefined ? { marketUrl: s.marketUrl } : {}),
     ...(s.githubTokenEnc !== undefined ? { githubTokenEnc: s.githubTokenEnc } : {}),
+    ...(s.devPlugins !== undefined ? { devPlugins: s.devPlugins } : {}),
   }
 }
 
@@ -474,6 +478,30 @@ function isDshEntry(v: unknown): v is DshEntry {
 
 /** Coerce an arbitrary parsed value into a valid `AppSettings`, dropping bad
  * fields. Defends against hand-edited / partially-corrupt input. */
+/** Normalize the dev-plugin registry. Entries need a name + dir; the rest is
+ * best-effort, since settings may be hand-edited or written by an older build. */
+function readDevPlugins(raw: unknown): DevPlugin[] {
+  if (!Array.isArray(raw)) return []
+  const out: DevPlugin[] = []
+  for (const item of raw) {
+    if (!isRecord(item)) continue
+    const name = typeof item.name === 'string' ? item.name.trim() : ''
+    const dir = typeof item.dir === 'string' ? item.dir.trim() : ''
+    if (name === '' || dir === '') continue
+    const shims = Array.isArray(item.shims) ? item.shims.filter((s): s is string => typeof s === 'string') : []
+    out.push({
+      name,
+      dir,
+      ...(typeof item.workspaceRoot === 'string' && item.workspaceRoot !== '' ? { workspaceRoot: item.workspaceRoot } : {}),
+      ...(typeof item.version === 'string' && item.version !== '' ? { version: item.version } : {}),
+      bundle: item.bundle === true,
+      ...(shims.length > 0 ? { shims } : {}),
+      addedAt: typeof item.addedAt === 'string' && item.addedAt !== '' ? item.addedAt : new Date(0).toISOString(),
+    })
+  }
+  return out
+}
+
 export function normalizeSettings(raw: unknown): AppSettings {
   if (!isRecord(raw)) return {}
   const out: AppSettings = {}
@@ -500,6 +528,8 @@ export function normalizeSettings(raw: unknown): AppSettings {
   const githubTokenEnc = nonEmptyString(raw.githubTokenEnc)
   if (githubTokenEnc !== undefined) out.githubTokenEnc = githubTokenEnc
   if (Array.isArray(raw.dshes)) out.dshes = raw.dshes.filter(isDshEntry)
+  const devPlugins = readDevPlugins(raw.devPlugins)
+  if (devPlugins.length > 0) out.devPlugins = devPlugins
   if (isRecord(raw.launchOptions)) out.launchOptions = raw.launchOptions as Record<string, LaunchOptions>
   if (isRecord(raw.runModes)) {
     const modes: Record<string, RunMode> = {}

@@ -27,7 +27,7 @@ import { addLocalPlugin, addPlugin, installIntoProfile } from './plugins.ts'
 import { openDatabase, saveSettings } from './settings.ts'
 import { contextForEntry } from './appState.ts'
 import {
-  addBundle, cloneProfile, createProfile, exportProfile, importProfile,
+  addBundle, cloneProfile, createProfile, exportProfile, importProfile, linkDevToProfile,
   listLocalBundles, listProfileSummaries, profileBundleInfo, readProfileFile, removeBundle, removeDependency,
   renameProfile, reorderBundle, setDependency, setManifestMeta, softDeleteProfile, transferProfilePatch, writeProfileFile,
 } from './profile.ts'
@@ -395,6 +395,45 @@ describe('importProfile', () => {
     })
     const r = await importProfile(ctx(), payload, { name: 'flakey' })
     expect(r).toMatchObject({ ok: true, installed: [], missing: ['flake'] })
+  })
+})
+
+describe('linkDevToProfile', () => {
+  /** A dev package dir with a manifest. */
+  const makeDev = (): string => {
+    const dir = join(root, 'dev', 'foo')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'devfoo', version: '0.0.1' }))
+    return dir
+  }
+  /** Simulate what pnpm's `link:` install creates in the profile. */
+  const makeLink = (profile: string): void => {
+    const dir = join(profiles(), profile, 'node_modules', 'devfoo')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'devfoo', version: '0.0.1' }))
+  }
+
+  it('writes a link: dependency (never a copy) and reports an unresolved link', async () => {
+    createProfile(ctx(), 'p')
+    const dir = makeDev()
+    // runPnpm is mocked, so no real link appears — the write-verify must say so.
+    const r = await linkDevToProfile(ctx(), 'p', 'devfoo', dir)
+    expect(r.ok).toBe(false)
+    const manifest = JSON.parse(readFileSync(join(profiles(), 'p', 'package.json'), 'utf8'))
+    expect(manifest.dependencies.devfoo).toBe(`link:${dir}`)
+  })
+
+  it('succeeds once the link resolves', async () => {
+    createProfile(ctx(), 'p')
+    const dir = makeDev()
+    makeLink('p')
+    const r = await linkDevToProfile(ctx(), 'p', 'devfoo', dir)
+    expect(r.ok).toBe(true)
+  })
+
+  it('refuses a missing dev package', async () => {
+    createProfile(ctx(), 'p')
+    await expect(linkDevToProfile(ctx(), 'p', 'devfoo', join(root, 'nope'))).rejects.toThrow()
   })
 })
 

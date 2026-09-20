@@ -9,6 +9,10 @@ import {
   listProfileScopes, readPluginReadme, removePlugin, removePluginFromProfiles, storeVersions,
 } from '../core/plugins.ts'
 import { listComboPlugins } from '../core/combo.ts'
+import { linkDevToProfile, repairDevLink } from '../core/profile.ts'
+import {
+  buildDevPlugin, diagnoseDevPlugin, installDevDeps, listDevPlugins, registerDevPlugin, removeDevPlugin, shimDevPeers, unshimDevPeers,
+} from '../core/dev-plugins.ts'
 import {
   cancelPluginDownload, cleanupPluginDownloads, listPluginDownloads, onDownloadsChange, onDownloadsSettled, startPluginDownload,
 } from '../core/pluginDownloads.ts'
@@ -23,7 +27,7 @@ import { attachPluginSizes } from '../core/store-overview.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
 import { pathIdentifierInvalid, versionInvalid } from './validate.ts'
 import { handle } from './handle.ts'
-import type { ComboPlugin, DownloadSessionInfo, InstalledOverviewRow, IpcResult, NpmSearchHit, PackageVersionInfo, PluginApplyResult, PluginCleanupResult, PluginMigrationResult, PluginUpdateInfo, PluginUsagePoint } from '../../shared/types.ts'
+import type { ComboPlugin, DevDiagnosis, DevLinkMode, DevPlugin, DownloadSessionInfo, InstalledOverviewRow, IpcResult, NpmSearchHit, PackageVersionInfo, PluginApplyResult, PluginCleanupResult, PluginMigrationResult, PluginUpdateInfo, PluginUsagePoint } from '../../shared/types.ts'
 
 /** Validate + persist the plugin-store location (shared by `plugins:setDir`
  * and the onboarding wizard). On success the dir is made usable and saved. */
@@ -64,6 +68,15 @@ function ctxOf(dshId: unknown): DshContext | null {
   if (typeof dshId !== 'string') return null
   const entry = dshEntryById(dshId)
   return entry === undefined ? null : contextForEntry(entry)
+}
+
+/** A context for a dsh-agnostic operation (dev-plugin diagnosis/peers): the
+ * explicit id when given, else the first registered dsh. `null` when none. */
+function anyDshContext(dshId: unknown): DshContext | null {
+  const explicit = ctxOf(dshId)
+  if (explicit !== null) return explicit
+  const scope = dshScopes()[0]
+  return scope === undefined ? null : { execPath: scope.execPath ?? '', home: scope.home, version: scope.version ?? '' }
 }
 
 export function registerPluginsIpc(): void {
@@ -363,6 +376,187 @@ export function registerPluginsIpc(): void {
       if (dir === undefined) return fail(E.pluginNotInstalled, { name })
       shell.showItemInFolder(dir)
       return { ok: true, value: true }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // ── dev plugins (local source dirs, linked not archived) ───────────────────
+
+  /** The dev-plugin registry plus where each is used (derived from the overview,
+   * so a link that drifted out of a profile shows as unused). */
+  handle('plugins:devList', (): IpcResult<{ plugins: DevPlugin[]; usage: Record<string, PluginUsagePoint[]> }> => {
+    try {
+      const plugins = listDevPlugins()
+      const names = new Set(plugins.map(p => p.name))
+      const usage: Record<string, PluginUsagePoint[]> = {}
+      if (names.size > 0) {
+        for (const row of buildInstalledOverview(dshScopes(), pluginDir())) {
+          if (names.has(row.name)) usage[row.name] = row.usage
+        }
+      }
+      return { ok: true, value: { plugins, usage } }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Register a source dir as a dev plugin. No copy: the registry only records it.
+  handle('plugins:devAdd', async (): Promise<IpcResult<DevPlugin>> => {
+    try {
+      const picked = await dialog.showOpenDialog({ title: '选择开发插件包目录', properties: ['openDirectory'] })
+      if (picked.canceled || picked.filePaths.length === 0) return fail(E.commonCancelled)
+      return { ok: true, value: registerDevPlugin(picked.filePaths[0]) }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Unregister. Never touches the source dir or any profile.
+  handle('plugins:devRemove', (_event, name: string): IpcResult<boolean> => {
+    try {
+      if (pathIdentifierInvalid(name)) return fail(E.nameInvalid)
+      removeDevPlugin(name)
+      return { ok: true, value: true }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Resolution diagnosis: entry build output, the patch rows dsh loads, and the
+  // `@deepseek-ai/*` peers a `link:` must resolve from the dev package itself.
+  handle('plugins:devDiagnose', (_event, name: string, dshId?: string): IpcResult<DevDiagnosis> => {
+    try {
+      const dev = listDevPlugins().find(p => p.name === name)
+      if (dev === undefined) return fail(E.nameInvalid, [], `未注册的开发插件：${name}`)
+      const ctx = anyDshContext(dshId)
+      if (ctx === null) return fail(E.dshNotFound)
+      return { ok: true, value: diagnoseDevPlugin(dev, ctx) }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Fallback peer fix: junction the dsh install's `@deepseek-ai/*` into the dev
+  // package. Reversible; `pnpm install` in the repo will drop it again.
+  handle('plugins:devShimPeers', (_event, name: string, dshId?: string): IpcResult<{ added: string[]; skipped: string[] }> => {
+    try {
+      const dev = listDevPlugins().find(p => p.name === name)
+      if (dev === undefined) return fail(E.nameInvalid, [], `未注册的开发插件：${name}`)
+      const ctx = anyDshContext(dshId)
+      if (ctx === null) return fail(E.dshNotFound)
+      return { ok: true, value: shimDevPeers(dev, ctx) }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  handle('plugins:devUnshimPeers', (_event, name: string): IpcResult<{ removed: string[] }> => {
+    try {
+      const dev = listDevPlugins().find(p => p.name === name)
+      if (dev === undefined) return fail(E.nameInvalid, [], `未注册的开发插件：${name}`)
+      return { ok: true, value: { removed: unshimDevPeers(dev) } }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Build the package (in its workspace root when it has one) so a monorepo
+  // package's `exports` target exists. Returns pnpm's output either way.
+  handle('plugins:devBuild', async (_event, name: string, script?: string): Promise<IpcResult<{ ok: boolean; text: string }>> => {
+    try {
+      const dev = listDevPlugins().find(p => p.name === name)
+      if (dev === undefined) return fail(E.nameInvalid, [], `未注册的开发插件：${name}`)
+      const clean = typeof script === 'string' && script.trim() !== '' ? script.trim() : 'build'
+      if (!/^[A-Za-z0-9:_-]+$/.test(clean)) return fail(E.nameInvalid)
+      return { ok: true, value: await buildDevPlugin(dev, clean) }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Install the dev package's own deps (durable peer fix; prefers its workspace).
+  handle('plugins:devInstall', async (_event, name: string): Promise<IpcResult<{ ok: boolean; text: string }>> => {
+    try {
+      const dev = listDevPlugins().find(p => p.name === name)
+      if (dev === undefined) return fail(E.nameInvalid, [], `未注册的开发插件：${name}`)
+      return { ok: true, value: await installDevDeps(dev) }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Attach a dev plugin to a profile: `link` (live, edits picked up) or `copy`
+  // (snapshot into the store, then real-install a fixed version).
+  handle('plugins:devLinkToProfile', async (_event, dshId: string, profile: string, name: string, mode: DevLinkMode): Promise<IpcResult<string>> => {
+    try {
+      const ctx = ctxOf(dshId)
+      if (ctx === null) return fail(E.dshNotFound)
+      if (pathIdentifierInvalid(profile) || pathIdentifierInvalid(name)) return fail(E.nameInvalid)
+      if (isProfileRunning(dshId, profile)) return fail(E.runAlreadyRunning, { profile })
+      const dev = listDevPlugins().find(p => p.name === name)
+      if (dev === undefined) return fail(E.nameInvalid, [], `未注册的开发插件：${name}`)
+      if (mode === 'copy') {
+        const store = pluginDir()
+        if (store === '') return fail(E.storeNotConfigured)
+        const snap = await addLocalPlugin(store, dev.dir)
+        if (!snap.ok) return fail(E.storeInstallFailed, { detail: snap.text })
+        const version = storeVersions(store, name).at(-1)
+        const linked = await installIntoProfile(profilesRootFor(ctx), profile, name, store, version !== undefined ? { version } : {})
+        return linked.ok ? { ok: true, value: linked.text } : fail(E.storeOperationFailed, { detail: linked.text })
+      }
+      const result = await linkDevToProfile(ctx, profile, name, dev.dir)
+      return result.ok ? { ok: true, value: result.text } : fail(E.storeOperationFailed, { detail: result.text })
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  handle('plugins:devRepairLink', async (_event, dshId: string, profile: string, name: string, opts?: { inSource?: boolean }): Promise<IpcResult<string>> => {
+    try {
+      const ctx = ctxOf(dshId)
+      if (ctx === null) return fail(E.dshNotFound)
+      if (pathIdentifierInvalid(profile) || pathIdentifierInvalid(name)) return fail(E.nameInvalid)
+      if (isProfileRunning(dshId, profile)) return fail(E.runAlreadyRunning, { profile })
+      const result = await repairDevLink(ctx, profile, name, opts ?? {})
+      return result.ok ? { ok: true, value: result.text } : fail(E.storeOperationFailed, { detail: result.text })
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Graduate: archive the current source state into the store as a version, so
+  // it can be pinned/version-managed like a normal plugin.
+  handle('plugins:devSnapshot', async (_event, name: string): Promise<IpcResult<string>> => {
+    try {
+      const dev = listDevPlugins().find(p => p.name === name)
+      if (dev === undefined) return fail(E.nameInvalid, [], `未注册的开发插件：${name}`)
+      const store = pluginDir()
+      if (store === '') return fail(E.storeNotConfigured)
+      const result = await addLocalPlugin(store, dev.dir)
+      return result.ok ? { ok: true, value: result.text } : fail(E.storeInstallFailed, { detail: result.text })
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  handle('plugins:devReveal', async (_event, name: string): Promise<IpcResult<boolean>> => {
+    try {
+      const dev = listDevPlugins().find(p => p.name === name)
+      if (dev === undefined) return fail(E.nameInvalid, [], `未注册的开发插件：${name}`)
+      const error = await shell.openPath(dev.dir)
+      return error === '' ? { ok: true, value: true } : fail(E.shellOpenPath, { detail: error })
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  handle('plugins:devRevealWorkspace', async (_event, name: string): Promise<IpcResult<boolean>> => {
+    try {
+      const dev = listDevPlugins().find(p => p.name === name)
+      if (dev === undefined) return fail(E.nameInvalid, [], `未注册的开发插件：${name}`)
+      const error = await shell.openPath(dev.workspaceRoot ?? dev.dir)
+      return error === '' ? { ok: true, value: true } : fail(E.shellOpenPath, { detail: error })
     } catch (error) {
       return failFromError(error)
     }

@@ -13,6 +13,9 @@ import type {
   DshEntry,
   DshProfileInfo,
   DshUpdateInfo,
+  DevDiagnosis,
+  DevLinkMode,
+  DevPlugin,
   DownloadSessionInfo,
   GithubAuthState,
   GithubRateLimit,
@@ -170,6 +173,29 @@ export interface WindowApi {
     search: (query: string, opts?: { from?: number; size?: number }) => Promise<IpcResult<{ hits: NpmSearchHit[]; total: number }>>
     /** Full version list + dist-tags for the version picker. */
     pkgVersions: (name: string) => Promise<IpcResult<PackageVersionInfo>>
+    /** Local dev plugins: source dirs linked (not archived) into profiles, kept
+     * in their own registry and managed separately from the store. */
+    devList: () => Promise<IpcResult<{ plugins: DevPlugin[]; usage: Record<string, PluginUsagePoint[]> }>>
+    /** Pick a package dir and register it as a dev plugin (no copy). */
+    devAdd: () => Promise<IpcResult<DevPlugin>>
+    /** Unregister; never touches the source dir or any profile. */
+    devRemove: (name: string) => Promise<IpcResult<boolean>>
+    /** Resolution diagnosis (entry / patch rows / peers). */
+    devDiagnose: (name: string, dshId?: string) => Promise<IpcResult<DevDiagnosis>>
+    /** Junction the dsh install's peers into the dev package (reversible). */
+    devShimPeers: (name: string, dshId?: string) => Promise<IpcResult<{ added: string[]; skipped: string[] }>>
+    devUnshimPeers: (name: string) => Promise<IpcResult<{ removed: string[] }>>
+    /** Build the package (in its workspace root when it has one). */
+    devBuild: (name: string, script?: string) => Promise<IpcResult<{ ok: boolean; text: string }>>
+    /** Install the dev package's own deps (durable peer fix). */
+    devInstall: (name: string) => Promise<IpcResult<{ ok: boolean; text: string }>>
+    /** Attach to a profile: `link` (live) or `copy` (snapshot then install). */
+    devLinkToProfile: (dshId: string, profile: string, name: string, mode: DevLinkMode) => Promise<IpcResult<string>>
+    devRepairLink: (dshId: string, profile: string, name: string, opts?: { inSource?: boolean }) => Promise<IpcResult<string>>
+    /** Archive the current source state into the store (graduate). */
+    devSnapshot: (name: string) => Promise<IpcResult<string>>
+    devReveal: (name: string) => Promise<IpcResult<boolean>>
+    devRevealWorkspace: (name: string) => Promise<IpcResult<boolean>>
   }
 
   /** Cancellable, parallel plugin download sessions (global download panel). */

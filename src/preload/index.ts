@@ -10,6 +10,9 @@ import type {
   DshEntry,
   DshProfileInfo,
   DshUpdateInfo,
+  DevDiagnosis,
+  DevLinkMode,
+  DevPlugin,
   DownloadSessionInfo,
   GithubAuthState,
   GithubRateLimit,
@@ -202,6 +205,32 @@ const api = {
       ipcRenderer.invoke('plugins:search', query, opts),
     pkgVersions: (name: string): Promise<IpcResult<PackageVersionInfo>> =>
       ipcRenderer.invoke('plugins:pkgVersions', name),
+    devList: (): Promise<IpcResult<{ plugins: DevPlugin[]; usage: Record<string, PluginUsagePoint[]> }>> =>
+      ipcRenderer.invoke('plugins:devList'),
+    devAdd: (): Promise<IpcResult<DevPlugin>> =>
+      ipcRenderer.invoke('plugins:devAdd'),
+    devRemove: (name: string): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('plugins:devRemove', name),
+    devDiagnose: (name: string, dshId?: string): Promise<IpcResult<DevDiagnosis>> =>
+      ipcRenderer.invoke('plugins:devDiagnose', name, dshId),
+    devShimPeers: (name: string, dshId?: string): Promise<IpcResult<{ added: string[]; skipped: string[] }>> =>
+      ipcRenderer.invoke('plugins:devShimPeers', name, dshId),
+    devUnshimPeers: (name: string): Promise<IpcResult<{ removed: string[] }>> =>
+      ipcRenderer.invoke('plugins:devUnshimPeers', name),
+    devBuild: (name: string, script?: string): Promise<IpcResult<{ ok: boolean; text: string }>> =>
+      ipcRenderer.invoke('plugins:devBuild', name, script),
+    devInstall: (name: string): Promise<IpcResult<{ ok: boolean; text: string }>> =>
+      ipcRenderer.invoke('plugins:devInstall', name),
+    devLinkToProfile: (dshId: string, profile: string, name: string, mode: DevLinkMode): Promise<IpcResult<string>> =>
+      ipcRenderer.invoke('plugins:devLinkToProfile', dshId, profile, name, mode),
+    devRepairLink: (dshId: string, profile: string, name: string, opts?: { inSource?: boolean }): Promise<IpcResult<string>> =>
+      ipcRenderer.invoke('plugins:devRepairLink', dshId, profile, name, opts),
+    devSnapshot: (name: string): Promise<IpcResult<string>> =>
+      ipcRenderer.invoke('plugins:devSnapshot', name),
+    devReveal: (name: string): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('plugins:devReveal', name),
+    devRevealWorkspace: (name: string): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('plugins:devRevealWorkspace', name),
   },
 
   downloads: {
