@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Button, Descriptions, Modal, Radio, Segmented, Select, Space, Switch, message, theme } from 'antd'
+import { Alert, Button, Descriptions, Input, Modal, Radio, Segmented, Select, Space, Switch, Tag, message, theme } from 'antd'
 import { DownloadOutlined, FolderOpenOutlined, UploadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import Panel from '../components/Panel.tsx'
@@ -9,7 +9,7 @@ import { useThemeMode } from '../ThemeProvider.tsx'
 import { useAppLang } from '../i18n'
 import { apiErrorText } from '../lib/ipc.ts'
 import type { ThemeMode } from '../theme.ts'
-import type { NodeEnvironment } from '../../../shared/types.ts'
+import type { GithubAuthState, GithubRateLimit, NodeEnvironment } from '../../../shared/types.ts'
 
 /** 设置页：外观(主题 + 语言) + 目录配置(DSH 版本库 / 插件保存位置)。 */
 export default function SettingsSection() {
@@ -22,6 +22,10 @@ export default function SettingsSection() {
   const [closeToTray, setCloseToTray] = useState(true)
   const [askOnClose, setAskOnClose] = useState(true)
   const [nodeEnv, setNodeEnv] = useState<NodeEnvironment>()
+  const [githubAuth, setGithubAuth] = useState<GithubAuthState>()
+  const [githubInput, setGithubInput] = useState('')
+  const [githubBusy, setGithubBusy] = useState(false)
+  const [githubLimit, setGithubLimit] = useState<GithubRateLimit>()
 
   const load = async (): Promise<void> => {
     const v = await window.api.dsh.getVersionDir()
@@ -34,6 +38,8 @@ export default function SettingsSection() {
     if (a.ok) setAskOnClose(a.value)
     const n = await window.api.settings.getNodeEnvironment()
     if (n.ok) setNodeEnv(n.value)
+    const g = await window.api.settings.getGithubAuth()
+    if (g.ok) setGithubAuth(g.value)
   }
 
   useEffect(() => { void load() }, [])
@@ -55,6 +61,35 @@ export default function SettingsSection() {
     if (!res.ok) { void message.error(apiErrorText(res)); return }
     const n = await window.api.settings.getNodeEnvironment()
     if (n.ok) setNodeEnv(n.value)
+  }
+
+  const saveGithubToken = async (): Promise<void> => {
+    setGithubBusy(true)
+    const r = await window.api.settings.setGithubToken(githubInput.trim())
+    setGithubBusy(false)
+    if (!r.ok) { void message.error(apiErrorText(r)); return }
+    setGithubAuth(r.value)
+    setGithubInput('')
+    setGithubLimit(undefined)
+    void message.success(t('settings.github.saved'))
+  }
+
+  const clearGithubToken = async (): Promise<void> => {
+    setGithubBusy(true)
+    const r = await window.api.settings.setGithubToken('')
+    setGithubBusy(false)
+    if (!r.ok) { void message.error(apiErrorText(r)); return }
+    setGithubAuth(r.value)
+    setGithubLimit(undefined)
+    void message.success(t('settings.github.cleared'))
+  }
+
+  const testGithubToken = async (): Promise<void> => {
+    setGithubBusy(true)
+    const r = await window.api.settings.testGithubToken()
+    setGithubBusy(false)
+    if (!r.ok) { void message.error(apiErrorText(r)); return }
+    setGithubLimit(r.value)
   }
 
   const saveVersionDir = async (value: string): Promise<string> => {
@@ -191,6 +226,52 @@ export default function SettingsSection() {
             </Descriptions>
             <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, marginTop: token.paddingSM }}>
               {t('settings.runtime.desc')}
+            </div>
+          </div>
+        </Panel>
+
+        <Panel title={t('settings.section.github')}>
+          <div style={{ maxWidth: 620 }}>
+            <div style={{ fontWeight: 600 }}>{t('settings.github.title')}</div>
+            <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, margin: '4px 0 12px' }}>
+              {t('settings.github.desc')}
+            </div>
+            <Space size="small" wrap style={{ marginBottom: token.paddingSM }}>
+              <Tag color={githubAuth?.authenticated === true ? 'green' : 'default'}>
+                {githubAuth?.authenticated === true
+                  ? t(`settings.github.source.${githubAuth.source}`)
+                  : t('settings.github.source.none')}
+              </Tag>
+              {githubAuth?.encryption === 'plaintext' && <Tag color="orange">{t('settings.github.encryption.plaintext')}</Tag>}
+              {githubAuth?.rateLimited === true && <Tag color="red">{t('settings.github.rateLimited')}</Tag>}
+            </Space>
+            <Space.Compact style={{ width: '100%', maxWidth: 560 }}>
+              <Input.Password
+                value={githubInput}
+                onChange={e => setGithubInput(e.target.value)}
+                placeholder={t('settings.github.placeholder')}
+                autoComplete="off"
+              />
+              <Button type="primary" loading={githubBusy} disabled={githubInput.trim() === ''} onClick={() => void saveGithubToken()}>
+                {t('common.save')}
+              </Button>
+              <Button loading={githubBusy} onClick={() => void testGithubToken()}>{t('settings.github.test')}</Button>
+              <Button danger loading={githubBusy} disabled={githubAuth?.authenticated !== true} onClick={() => void clearGithubToken()}>
+                {t('settings.github.clear')}
+              </Button>
+            </Space.Compact>
+            {githubLimit !== undefined && (
+              <Alert
+                style={{ marginTop: token.paddingSM }}
+                type={githubLimit.ok ? 'success' : 'error'}
+                showIcon
+                title={githubLimit.ok
+                  ? t('settings.github.testOk', { login: githubLimit.login ?? '—', limit: githubLimit.limit, remaining: githubLimit.remaining })
+                  : t('settings.github.testFailed')}
+              />
+            )}
+            <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, marginTop: token.paddingSM }}>
+              {t('settings.github.hint')}
             </div>
           </div>
         </Panel>

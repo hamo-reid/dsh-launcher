@@ -11,11 +11,12 @@ import { failFromError } from '../core/errors.ts'
 import { handle } from './handle.ts'
 import { checkHealth } from '../core/health.ts'
 import { checkAppUpdate } from '../core/github-updates.ts'
+import { githubAuthState, probeGithubRateLimit, setGithubToken } from '../core/github-auth.ts'
 import { nodeEnvironment } from '../core/node-env.ts'
 import { nodePreferenceValue } from '../core/settings.ts'
 import { setPluginStoreDir } from './plugins.ts'
 import { setVersionDirValue } from './dsh.ts'
-import type { AppUpdateInfo, HealthIssue, IpcResult, NodeEnvironment, OnboardingPayload, OnboardingState } from '../../shared/types.ts'
+import type { AppUpdateInfo, GithubAuthState, GithubRateLimit, HealthIssue, IpcResult, NodeEnvironment, OnboardingPayload, OnboardingState } from '../../shared/types.ts'
 
 export function registerSettingsIpc(): void {
   handle('settings:getUiLanguage', (): IpcResult<string | null> => {
@@ -84,6 +85,33 @@ export function registerSettingsIpc(): void {
       const value = preference === 'bundled' ? 'bundled' : 'system'
       patchSettings({ nodePreference: value })
       return { ok: true, value: true }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  /** GitHub API auth for update detection: token source / encryption / rate limit. */
+  handle('settings:getGithubAuth', (): IpcResult<GithubAuthState> => {
+    try {
+      return { ok: true, value: githubAuthState() }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  /** Save (or clear, with `''`) the GitHub token; returns the new state. */
+  handle('settings:setGithubToken', (_event, value: string | null): IpcResult<GithubAuthState> => {
+    try {
+      return { ok: true, value: setGithubToken(typeof value === 'string' ? value : null) }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  /** Probe the live GitHub rate limit with the current token (Settings test). */
+  handle('settings:testGithubToken', async (): Promise<IpcResult<GithubRateLimit>> => {
+    try {
+      return { ok: true, value: await probeGithubRateLimit() }
     } catch (error) {
       return failFromError(error)
     }

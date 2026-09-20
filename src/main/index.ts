@@ -1,7 +1,7 @@
 /** Main process: window lifecycle + IPC wiring. Every handler lives in its own
  * domain module under `src/main/ipc/`; this file only assembles them. */
 
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, Tray } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, safeStorage, shell, Tray } from 'electron'
 import { join } from 'node:path'
 import os from 'node:os'
 import { listRuns, registerRunIpc, stopAllRuns, subscribeRunState } from './ipc/run.ts'
@@ -24,6 +24,7 @@ import { configureAppState, pluginDir } from './core/appState.ts'
 import { migrateLaunchConfigKeys } from './core/launch-config.ts'
 import { configurePnpmStore } from './core/pnpm.ts'
 import { repairArchiveLinks } from './core/plugins.ts'
+import { initGithubAuth, setTokenCipher } from './core/github-auth.ts'
 
 /** Domain-tagged logger for renderer-sourced messages (`{domain:"renderer"}`). */
 const rlog = child('renderer')
@@ -353,6 +354,14 @@ app.whenReady().then(async () => {
 
   // Open the SQLite settings database before any IPC touches it.
   await openDatabase(join(app.getPath('userData'), 'app.sqlite'))
+  // Encrypt the GitHub token at rest with the OS keychain (DPAPI on Windows),
+  // then resolve the effective token (saved setting → GH_TOKEN/GITHUB_TOKEN env).
+  setTokenCipher({
+    available: () => safeStorage.isEncryptionAvailable(),
+    encrypt: plain => safeStorage.encryptString(plain).toString('base64'),
+    decrypt: cipherText => safeStorage.decryptString(Buffer.from(cipherText, 'base64')),
+  })
+  initGithubAuth()
   // Give app-level state the Electron `userData` dir for its defaults.
   configureAppState(app.getPath('userData'))
   // One-time: re-key saved launch config from the legacy `<dshId>::<name>`

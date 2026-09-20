@@ -13,6 +13,7 @@ import { fetchPackageVersions } from './npm.ts'
 import { buildInstalledOverview } from './store-overview.ts'
 import { readPluginSourceSpec } from './store-sources.ts'
 import { compareVersionsLoose } from './version.ts'
+import { githubAuthHeaders, noteGithubResponse, resetGithubRateLimit } from './github-auth.ts'
 import { logger } from './logger.ts'
 import type { DshScope } from './appState.ts'
 import type { InstalledOverviewRow, PluginOrigin, PluginUpdateInfo } from '../../shared/types.ts'
@@ -71,15 +72,19 @@ async function latestNpmVersion(name: string): Promise<string | undefined> {
 }
 
 /** The highest semver-looking tag of a GitHub repo, or `undefined` (rate limit /
- * 404 / no semver tags). Unauthenticated GitHub allows 60 req/h — fine for the
- * handful of github-installed plugins a check inspects. */
+ * 404 / no semver tags). Sends the user's token when configured (60 req/h
+ * unauthenticated → 5000 authenticated); a rate-limited response is recorded so
+ * the UI can explain why github-origin plugins fell back to "manual". */
 async function latestGithubTag(repo: string): Promise<string | undefined> {
   try {
     const res = await fetch(`https://api.github.com/repos/${repo}/tags?per_page=100`, {
-      headers: { accept: 'application/vnd.github+json' },
+      headers: githubAuthHeaders(),
       signal: AbortSignal.timeout(GITHUB_TAGS_TIMEOUT_MS),
     })
-    if (!res.ok) return undefined
+    if (!res.ok) {
+      noteGithubResponse(res)
+      return undefined
+    }
     const tags = await res.json() as { name?: unknown }[]
     const versions = tags
       .map(tag => (typeof tag.name === 'string' ? tag.name.replace(/^v/i, '') : ''))
@@ -116,6 +121,8 @@ export async function checkPluginUpdates(
     return cache.list
   }
 
+  // A fresh network check starts with a clean rate-limit flag.
+  resetGithubRateLimit()
   const list: PluginUpdateInfo[] = new Array<PluginUpdateInfo>(rows.length)
   let next = 0
   const worker = async (): Promise<void> => {

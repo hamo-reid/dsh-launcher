@@ -58,6 +58,9 @@ export interface AppSettings {
   marketSource?: MarketSource
   /** Custom market catalog URL, used when `marketSource === 'custom'`. */
   marketUrl?: string
+  /** The user's GitHub token, encrypted at rest (see `core/github-auth.ts`).
+   * A secret: never exported and never logged. */
+  githubTokenEnc?: string
   /** Saved default launch parameters, keyed `pid:<profileId>` (a stable id
    * stored in each profile dir; see `core/launch-config.ts`). Kept out of the
    * profile manifest on purpose so machine-specific patch paths never leak into
@@ -71,7 +74,7 @@ export interface AppSettings {
 /** The `prefs` row: user preferences (no registry / no per-profile config). */
 type PrefsSettings = Pick<AppSettings,
   'pluginDir' | 'dshVersionDir' | 'uiLanguage' | 'closeToTray' | 'askOnClose' |
-  'nodePreference' | 'onboarded' | 'marketSource' | 'marketUrl'>
+  'nodePreference' | 'onboarded' | 'marketSource' | 'marketUrl' | 'githubTokenEnc'>
 /** The `dsh` row: the registered dsh installs. */
 type DshSettings = Pick<AppSettings, 'dshes'>
 /** The `launch` row: per-profile launch config. */
@@ -363,10 +366,13 @@ export function flushSettings(): void {
   snapshotBackup()
 }
 
-/** Export the settings plus a header, for backup / migration. */
+/** Export the settings plus a header, for backup / migration. The GitHub token
+ * is a secret and is deliberately left out of the export. */
 export function exportSettings(): string {
+  const app = loadSettings()
+  delete app.githubTokenEnc
   return JSON.stringify(
-    { schemaVersion, exportedAt: new Date().toISOString(), app: loadSettings() },
+    { schemaVersion, exportedAt: new Date().toISOString(), app },
     null, 2,
   )
 }
@@ -381,7 +387,9 @@ export function importSettings(json: string): void {
     throw new Error(`settings export is newer (v${fromVersion}) than this app (v${CURRENT_SCHEMA_VERSION})`)
   }
   const migrated = runMigrations(normalizeSettings(envelope.app), fromVersion).data
-  current = migrated
+  // An export never carries the token; keep the one already on this machine.
+  const existingToken = current.githubTokenEnc
+  current = existingToken !== undefined ? { ...migrated, githubTokenEnc: existingToken } : migrated
   schemaVersion = CURRENT_SCHEMA_VERSION
   lastSignature = ''
   persist()
@@ -441,6 +449,7 @@ function splitPrefs(s: AppSettings): PrefsSettings {
     ...(s.onboarded !== undefined ? { onboarded: s.onboarded } : {}),
     ...(s.marketSource !== undefined ? { marketSource: s.marketSource } : {}),
     ...(s.marketUrl !== undefined ? { marketUrl: s.marketUrl } : {}),
+    ...(s.githubTokenEnc !== undefined ? { githubTokenEnc: s.githubTokenEnc } : {}),
   }
 }
 
@@ -488,6 +497,8 @@ export function normalizeSettings(raw: unknown): AppSettings {
   if (raw.marketSource === 'official' || raw.marketSource === 'custom') out.marketSource = raw.marketSource
   const marketUrl = nonEmptyString(raw.marketUrl)
   if (marketUrl !== undefined) out.marketUrl = marketUrl
+  const githubTokenEnc = nonEmptyString(raw.githubTokenEnc)
+  if (githubTokenEnc !== undefined) out.githubTokenEnc = githubTokenEnc
   if (Array.isArray(raw.dshes)) out.dshes = raw.dshes.filter(isDshEntry)
   if (isRecord(raw.launchOptions)) out.launchOptions = raw.launchOptions as Record<string, LaunchOptions>
   if (isRecord(raw.runModes)) {

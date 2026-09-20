@@ -11,7 +11,7 @@ import rehypeRaw from 'rehype-raw'
 import rehypeSanitize from 'rehype-sanitize'
 import FieldLabel from '../components/FieldLabel.tsx'
 import { MODAL } from '../theme.ts'
-import type { InstalledOverviewRow, PackageVersionInfo, PluginApplyResult } from '../../../shared/types.ts'
+import type { GithubAuthState, InstalledOverviewRow, PackageVersionInfo, PluginApplyResult } from '../../../shared/types.ts'
 
 /** Render a plugin README with images resolved against its install dir. */
 function PluginReadme({ text, dir }: { text: string; dir: string }): JSX.Element {
@@ -421,13 +421,19 @@ export function PluginUpdatesModal(p: PluginUpdatesModalProps): JSX.Element {
   const [manual, setManual] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [results, setResults] = useState<PluginApplyResult[] | null>(null)
+  const [github, setGithub] = useState<GithubAuthState>()
 
   useEffect(() => {
     if (!p.open) return
     setResults(null); setItems([]); setManual([]); setLoading(true)
     void (async () => {
-      const [ov, up] = await Promise.all([window.api.plugins.overview(), window.api.plugins.checkUpdates()])
+      const [ov, up, ga] = await Promise.all([
+        window.api.plugins.overview(),
+        window.api.plugins.checkUpdates(),
+        window.api.settings.getGithubAuth(),
+      ])
       setLoading(false)
+      if (ga.ok) setGithub(ga.value)
       if (!ov.ok || !up.ok) { if (!up.ok) void message.error(apiErrorText(up)); return }
       const byName = new Map(up.value.map(u => [u.name, u]))
       const next: { name: string; current?: string; latest: string }[] = []
@@ -502,6 +508,13 @@ export function PluginUpdatesModal(p: PluginUpdatesModalProps): JSX.Element {
 
         {manual.length > 0 && (
           <Alert type="info" showIcon title={t('plugin.update.manualHint', { names: manual.join('、') })} />
+        )}
+
+        {github?.rateLimited === true && (
+          <Alert type="warning" showIcon title={t('plugin.update.githubRateLimited')} />
+        )}
+        {github?.rateLimited !== true && github?.authenticated === false && manual.length > 0 && (
+          <Alert type="info" showIcon title={t('plugin.update.githubHint')} />
         )}
       </Space>
     </Modal>

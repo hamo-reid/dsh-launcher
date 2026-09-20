@@ -11,6 +11,7 @@
  */
 import type { AppRelease } from '../../shared/types.ts'
 import { compareVersionsLoose } from './version.ts'
+import { githubAuthHeaders, noteGithubResponse } from './github-auth.ts'
 import { logger } from './logger.ts'
 
 /** GitHub releases API list endpoint. `per_page` up to 100; tags order newest-first. */
@@ -48,14 +49,20 @@ export function pickLatestRelease(list: AppRelease[]): AppRelease | null {
   return best
 }
 
-/** Fetch the repo's release list from the GitHub API. */
+/** Fetch the repo's release list from the GitHub API. Sends the user's token
+ * when configured (60 req/h unauthenticated → 5000 authenticated). */
 async function fetchGitHubReleases(repo: string): Promise<AppRelease[]> {
   logger.debug(`github releases: "${repo}"`)
   const res = await fetch(RELEASES_URL.replace('{repo}', repo), {
-    headers: { 'User-Agent': 'dsh-launcher', Accept: 'application/vnd.github+json' },
+    headers: githubAuthHeaders(),
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   })
-  if (!res.ok) throw new Error(`GitHub releases 查询失败：HTTP ${res.status}`)
+  if (!res.ok) {
+    if (noteGithubResponse(res)) {
+      throw new Error('GitHub releases 查询失败：已触发 API 速率限制（可在「设置」中配置访问令牌以提高配额）')
+    }
+    throw new Error(`GitHub releases 查询失败：HTTP ${res.status}`)
+  }
   const data = (await res.json()) as RawGitHubRelease[]
   if (!Array.isArray(data)) throw new Error('GitHub releases 返回异常')
   return data.map(normalizeRelease).filter((r): r is AppRelease => r !== null)

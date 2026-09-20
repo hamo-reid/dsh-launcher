@@ -14,6 +14,8 @@ import type {
   DshProfileInfo,
   DshUpdateInfo,
   DownloadSessionInfo,
+  GithubAuthState,
+  GithubRateLimit,
   HealthIssue,
   ImportProfileResult,
   ImportStep,
@@ -224,6 +226,12 @@ export interface WindowApi {
     getNodeEnvironment: () => Promise<IpcResult<NodeEnvironment>>
     /** Persist which node to use for launching dsh (`'system'` | `'bundled'`). */
     setNodePreference: (preference: 'system' | 'bundled') => Promise<IpcResult<boolean>>
+    /** GitHub API auth for update detection (token source / encryption / rate limit). */
+    getGithubAuth: () => Promise<IpcResult<GithubAuthState>>
+    /** Save (or clear, with `''`) the GitHub token; returns the new state. */
+    setGithubToken: (token: string) => Promise<IpcResult<GithubAuthState>>
+    /** Probe the live GitHub rate limit with the current token. */
+    testGithubToken: () => Promise<IpcResult<GithubRateLimit>>
     /** Export settings to a user-chosen JSON file (`''` = cancelled). */
     exportSettings: () => Promise<IpcResult<string>>
     /** Import settings from a JSON file (`false` = cancelled). */

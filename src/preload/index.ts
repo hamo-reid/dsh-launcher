@@ -11,6 +11,8 @@ import type {
   DshProfileInfo,
   DshUpdateInfo,
   DownloadSessionInfo,
+  GithubAuthState,
+  GithubRateLimit,
   HealthIssue,
   ImportProfileResult,
   InstalledPlugin,
@@ -254,6 +256,12 @@ const api = {
       ipcRenderer.invoke('settings:getNodeEnvironment'),
     setNodePreference: (preference: 'system' | 'bundled'): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('settings:setNodePreference', preference),
+    getGithubAuth: (): Promise<IpcResult<GithubAuthState>> =>
+      ipcRenderer.invoke('settings:getGithubAuth'),
+    setGithubToken: (token: string): Promise<IpcResult<GithubAuthState>> =>
+      ipcRenderer.invoke('settings:setGithubToken', token),
+    testGithubToken: (): Promise<IpcResult<GithubRateLimit>> =>
+      ipcRenderer.invoke('settings:testGithubToken'),
     exportSettings: (): Promise<IpcResult<string>> =>
       ipcRenderer.invoke('settings:export'),
     importSettings: (): Promise<IpcResult<boolean>> =>

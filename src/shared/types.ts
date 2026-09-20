@@ -409,6 +409,40 @@ export interface AppUpdateInfo {
   latest: AppRelease | null
 }
 
+// ── GitHub API authentication (update detection) ─────────────────────────────
+
+/** Where the effective GitHub token comes from. */
+export type GithubTokenSource = 'settings' | 'env' | 'none'
+/** How a saved token is protected at rest. `none` = no token saved yet. */
+export type GithubEncryption = 'safe' | 'plaintext' | 'none'
+
+/** GitHub API authentication status. Unauthenticated `api.github.com` allows
+ * 60 requests/hour per IP; a token raises that to 5000. */
+export interface GithubAuthState {
+  /** True when a token (from settings or the environment) is in effect. */
+  authenticated: boolean
+  /** Where the effective token came from. */
+  source: GithubTokenSource
+  /** How the saved token is protected at rest. */
+  encryption: GithubEncryption
+  /** True when the most recent GitHub API call was rejected by the rate limiter. */
+  rateLimited: boolean
+}
+
+/** Result of probing `api.github.com/rate_limit` with the current token. */
+export interface GithubRateLimit {
+  /** False when the request itself failed (offline / invalid token). */
+  ok: boolean
+  /** The authenticated login, when the token is valid. */
+  login?: string
+  /** Requests allowed per hour for the current auth mode. */
+  limit: number
+  /** Requests left in the current window. */
+  remaining: number
+  /** ISO timestamp when the window resets. */
+  resetAt?: string
+}
+
 // ── dsh official install ─────────────────────────────────────────────────────
 
 /** Successful official-install payload, returned to the renderer so the dialog
