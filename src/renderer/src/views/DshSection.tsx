@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   Alert, Button, Descriptions, Divider, Modal, Space, Tag, theme, Typography, message,
 } from 'antd'
@@ -14,7 +14,7 @@ import Panel from '../components/Panel.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
 import { AddDshModal, DataMirrorModal, DshRemoveModal, OfficialInstallModal, RenameDshModal, UpdateDshModal } from './DshModals.tsx'
 import { majorOfVersion } from '../../../shared/version.ts'
-import type { DshEntry } from '../../../shared/types.ts'
+import type { DownloadSessionInfo, DshEntry } from '../../../shared/types.ts'
 
 /** DSH 页：安装(官方安装) + 管理(列表)；弹窗在 `DshModals`。套统一 AppShell。
  *
@@ -49,7 +49,10 @@ export default function DshSection() {
   // 数据迁移弹窗（把所选 DSH 的 home 数据迁移到另一 DSH）
   const [mirrorOpen, setMirrorOpen] = useState(false)
 
-  const refresh = async (): Promise<void> => {
+  // Stable identity: the download-completion listener below depends on it, and a
+  // fresh function every render would re-subscribe — and reset that listener's
+  // tracking — on each render.
+  const refresh = useCallback(async (): Promise<void> => {
     const r = await window.api.dsh.list()
     if (!r.ok) { void message.error(apiErrorText(r)); return }
     setDshes(r.value.dshes)
@@ -65,9 +68,9 @@ export default function DshSection() {
     }
     // Keep the app-level health banner in sync with this page's mutations.
     requestHealthRefresh()
-  }
+  }, [])
 
-  useEffect(() => { void refresh() }, [])
+  useEffect(() => { void refresh() }, [refresh])
 
   // Which dsh currently have a live run, so destructive actions stay disabled.
   // Refreshed on mount and whenever a run starts/exits.
@@ -82,11 +85,27 @@ export default function DshSection() {
 
   // 后台的 dsh 下载/更新会话（已在统一下载中心展示）结束后联动刷新列表，
   // 让新版本 / 新安装即时反映到 DSH 页。
+  //
+  // 会话一旦进入终态就被主进程从活动列表移除（下载中心只展示进行中的工作），
+  // 因此带 `status: 'done'` 的快照永远不会下发 —— 改以「先前在列、现在消失」
+  // 判定一次会话结束，再刷新（安装/更新弹窗返回时只 kick off 了后台会话，
+  // 那一刻新版本还没注册，必须靠这里补上）。
   useEffect(() => {
-    const off = window.api.downloads.onChange(list => {
-      if (list.some(d => d.kind === 'dsh' && d.status === 'done')) void refresh()
+    let alive = true
+    let seen = new Set<string>()
+    const track = (list: DownloadSessionInfo[]): void => {
+      const current = new Set(list.filter(d => d.kind === 'dsh').map(d => d.id))
+      const settled = [...seen].some(id => !current.has(id))
+      seen = current
+      if (settled) void refresh()
+    }
+    const off = window.api.downloads.onChange(track)
+    // 页面是在安装进行中才挂载时，补种当前会话，别错过它的结束。
+    void window.api.downloads.list().then(r => {
+      if (!alive || !r.ok) return
+      for (const d of r.value) if (d.kind === 'dsh') seen.add(d.id)
     })
-    return off
+    return () => { alive = false; off() }
   }, [refresh])
 
   const selected = dshes.find(d => d.id === selectedId)
