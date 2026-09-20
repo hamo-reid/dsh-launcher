@@ -28,8 +28,8 @@ import { openDatabase, saveSettings } from './settings.ts'
 import { contextForEntry } from './appState.ts'
 import {
   addBundle, cloneProfile, createProfile, exportProfile, importProfile,
-  listLocalBundles, listProfileSummaries, readProfileFile, removeBundle, removeDependency, renameProfile,
-  reorderBundle, setDependency, setManifestMeta, softDeleteProfile, transferProfilePatch, writeProfileFile,
+  listLocalBundles, listProfileSummaries, profileBundleInfo, readProfileFile, removeBundle, removeDependency,
+  renameProfile, reorderBundle, setDependency, setManifestMeta, softDeleteProfile, transferProfilePatch, writeProfileFile,
 } from './profile.ts'
 
 let root: string
@@ -395,5 +395,58 @@ describe('importProfile', () => {
     })
     const r = await importProfile(ctx(), payload, { name: 'flakey' })
     expect(r).toMatchObject({ ok: true, installed: [], missing: ['flake'] })
+  })
+})
+
+describe('profileBundleInfo', () => {
+  /** Write a profile manifest (+ optional installed package versions). */
+  const writeProfile = (
+    name: string, bundles: string[], deps: Record<string, string>, versions: Record<string, string> = {},
+  ): void => {
+    const dir = join(profiles(), name)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({
+      name: `dsh-profile-${name}`, private: true, dependencies: deps, dsh: { profile: { bundles } },
+    }, null, 2) + '\n')
+    for (const [pkg, version] of Object.entries(versions)) {
+      const pkgDir = join(dir, 'node_modules', pkg)
+      mkdirSync(pkgDir, { recursive: true })
+      writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ name: pkg, version }))
+    }
+  }
+  const storeSpec = (pkg: string, version: string): string =>
+    `file:${join(store(), 'archive', pkg, version, 'node_modules', pkg)}`
+
+  it('marks a dependency-less layer as in-box and reads its resolved version', () => {
+    writeProfile('base', ['@deepseek-ai/dsh-base'], {}, { '@deepseek-ai/dsh-base': '0.1.1-rc.2' })
+    const info = profileBundleInfo(ctx(), 'base', ['@deepseek-ai/dsh-base'], {}, store())
+    expect(info['@deepseek-ai/dsh-base']).toEqual({ version: '0.1.1-rc.2', source: 'dsh' })
+  })
+
+  it('classifies a file: dependency inside the store archive as store', () => {
+    const spec = storeSpec('pkg', '1.2.3')
+    writeProfile('base', ['pkg'], { pkg: spec }, { pkg: '1.2.3' })
+    const info = profileBundleInfo(ctx(), 'base', ['pkg'], { pkg: spec }, store())
+    expect(info.pkg).toEqual({ spec, version: '1.2.3', source: 'store' })
+  })
+
+  it('classifies a link: outside the store as local', () => {
+    const spec = `link:${join(root, 'elsewhere', 'pkg')}`
+    writeProfile('base', ['pkg'], { pkg: spec })
+    const info = profileBundleInfo(ctx(), 'base', ['pkg'], { pkg: spec }, store())
+    expect(info.pkg).toEqual({ spec, source: 'local' })
+  })
+
+  it('classifies a plain version spec as npm and omits an unresolved version', () => {
+    writeProfile('base', ['pkg'], { pkg: '^1.4.0' })
+    const info = profileBundleInfo(ctx(), 'base', ['pkg'], { pkg: '^1.4.0' }, store())
+    expect(info.pkg).toEqual({ spec: '^1.4.0', source: 'npm' })
+  })
+
+  it('treats a store-shaped file: as local when no store is configured', () => {
+    const spec = storeSpec('pkg', '1.2.3')
+    writeProfile('base', ['pkg'], { pkg: spec })
+    const info = profileBundleInfo(ctx(), 'base', ['pkg'], { pkg: spec }, '')
+    expect(info.pkg.source).toBe('local')
   })
 })

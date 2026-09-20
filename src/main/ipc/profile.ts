@@ -19,8 +19,8 @@ import {
 } from '../core/combo.ts'
 import {
   addBundle, cloneProfile, createProfile, exportProfile, importProfile, listLocalBundles, listProfileSummaries,
-  mirrorProfile, PROFILE_TEMPLATES, profileDirPath, readProfileFile, removeBundle, removeDependency, renameProfile,
-  reorderBundle, setDependency, setManifestMeta, softDeleteProfile, transferProfilePatch, writeProfileFile,
+  mirrorProfile, PROFILE_TEMPLATES, profileBundleInfo, profileDirPath, readProfileFile, removeBundle, removeDependency,
+  renameProfile, reorderBundle, setDependency, setManifestMeta, softDeleteProfile, transferProfilePatch, writeProfileFile,
   type ProfileSummary,
 } from '../core/profile.ts'
 import { contextForEntry, dshEntryById, pluginDir, type DshContext } from '../core/appState.ts'
@@ -104,7 +104,11 @@ function loadProfileDetail(ctx: DshContext, name: string): ProfileDetail {
   }
   // The raw view keeps `''` (not `[]`) for a missing layer, unlike the write path.
   const patchText = existsSync(patchPathOf(ctx, name)) ? readFileSync(patchPathOf(ctx, name), 'utf8') : ''
-  return { bundles, dependencies, dependencySpecs, displayName, patchReload, rows: parsePatchRows(patchText), patchText }
+  return {
+    bundles, dependencies, dependencySpecs,
+    bundleInfo: profileBundleInfo(ctx, name, bundles, dependencySpecs, pluginDir()),
+    displayName, patchReload, rows: parsePatchRows(patchText), patchText,
+  }
 }
 
 /** A profile/bundle name from IPC must be a safe path token: it feeds

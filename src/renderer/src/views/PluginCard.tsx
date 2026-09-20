@@ -57,6 +57,10 @@ export interface PluginCardProps {
   stale: boolean
   onOpen: () => void
   onInstallToProfile: () => void
+  /** Download a specific version of this plugin into the store. */
+  onDownloadVersion: () => void
+  /** One-click download of the newest release into the store. */
+  onUpdate: () => void
   onUninstall: () => void
   onReveal: () => void
   onDeleteStale: () => void
@@ -77,6 +81,7 @@ export default function PluginCard(p: PluginCardProps): JSX.Element {
 
   const actions: MenuAction[] = [
     { key: 'reveal', label: t('plugin.detail.reveal') },
+    { key: 'download-version', label: t('plugin.overview.downloadVersion') },
     ...(row.inStore === true
       ? [{ key: 'uninstall', label: t('plugin.detail.removeAllVersions'), danger: true, confirmText: t('plugin.detail.removeAllVersionsConfirm', { name: row.name }) } as MenuAction]
       : []),
@@ -86,6 +91,7 @@ export default function PluginCard(p: PluginCardProps): JSX.Element {
   ]
   const onAction = (key: string): void => {
     if (key === 'reveal') p.onReveal()
+    else if (key === 'download-version') p.onDownloadVersion()
     else if (key === 'uninstall') p.onUninstall()
     else if (key === 'delete-stale') p.onDeleteStale()
   }
@@ -155,11 +161,24 @@ export default function PluginCard(p: PluginCardProps): JSX.Element {
       </div>
 
       {/* Footer actions. */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: token.paddingSM, paddingTop: token.paddingSM, borderTop: `1px solid ${token.colorSplit}` }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: token.paddingSM, paddingTop: token.paddingSM, borderTop: `1px solid ${token.colorSplit}` }}>
         {row.inStore === true
           ? <Button size="small" type="primary" onClick={p.onInstallToProfile}>{t('plugin.detail.installToProfile')}</Button>
           : <span />}
-        <ConfirmMenu actions={actions} onAction={onAction} />
+        <Space size={4}>
+          {update?.updateAvailable === true && update.latest !== undefined && (
+            <Button
+              size="small"
+              type="primary"
+              ghost
+              title={t('plugin.overview.updateTo', { version: update.latest })}
+              onClick={p.onUpdate}
+            >
+              {t('plugin.overview.update')}
+            </Button>
+          )}
+          <ConfirmMenu actions={actions} onAction={onAction} />
+        </Space>
       </div>
     </div>
   )

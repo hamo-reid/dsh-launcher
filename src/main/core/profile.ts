@@ -12,12 +12,14 @@ import { listComboPlugins, reconcileBundles, resolveBundlePatch } from './combo.
 import { appendRowBlock, assertPatchDocValid, extractRowBlock, parsePatchRows, removeRow } from './patch.ts'
 import { runPnpm, type PnpmResult } from './pnpm.ts'
 import { addLocalPlugin, addPlugin, installIntoProfile, installedStoreVersion } from './plugins.ts'
+import { readVersion, versionsRoot } from './store-layout.ts'
+import { pathOutsideRoot } from './name-guard.ts'
 import { satisfiesRange } from './version.ts'
 import { uniqueTrashName } from './trash.ts'
 import { writeNewProfileId } from './launch-config.ts'
 import { listBundleSubdepNames } from './bundle-subdeps.ts'
 import { isReservedProfileName, PROFILE_NAME_RE, RESERVED_PROFILE_NAMES, SHIPPED_BUNDLE_NAMES } from '../../shared/profile-name.ts'
-import type { ImportBundleSource, ImportProfileResult, ImportStep, ProfileFileKind, ProfilePatchReload, ProfileSummary } from '../../shared/types.ts'
+import type { ImportBundleSource, ImportProfileResult, ImportStep, ProfileBundleInfo, ProfileBundleSource, ProfileFileKind, ProfilePatchReload, ProfileSummary } from '../../shared/types.ts'
 import { logger } from './logger.ts'
 
 /** Re-export the shared profile-summary shape. */
@@ -450,6 +452,37 @@ function classifyBundle(
     return { name: pkg, source: 'local' }
   }
   return { name: pkg, source: 'npm', spec: stored }
+}
+
+/** Per-bundle version provenance for the profile's "replace version" UI: where
+ * each layer's version comes from, plus the version actually resolved in the
+ * profile's `node_modules` (best-effort — absent before a first install).
+ *
+ * `storeDir` is passed in rather than read from the app-state singleton, so the
+ * store-anchored classification stays unit-testable. A `link:`/`file:` target
+ * counts as `store` only when it sits inside the store's `archive/`; anything
+ * else is the user's own local plugin. */
+export function profileBundleInfo(
+  ctx: DshContext, profile: string, bundles: string[], specs: Record<string, string>, storeDir: string,
+): Record<string, ProfileBundleInfo> {
+  const archive = storeDir === '' ? '' : versionsRoot(storeDir)
+  const nodeModules = join(profileDir(ctx, profile), 'node_modules')
+  const out: Record<string, ProfileBundleInfo> = {}
+  for (const bundle of bundles) {
+    const spec = specs[bundle]
+    const version = readVersion(join(nodeModules, bundle))
+    let source: ProfileBundleSource
+    if (spec === undefined) source = 'dsh'
+    else if (spec.startsWith('link:') || spec.startsWith('file:')) {
+      source = archive !== '' && !pathOutsideRoot(archive, spec.slice(5)) ? 'store' : 'local'
+    } else source = 'npm'
+    out[bundle] = {
+      ...(spec !== undefined ? { spec } : {}),
+      ...(version !== undefined && version !== '' ? { version } : {}),
+      source,
+    }
+  }
+  return out
 }
 
 /** Leading major component of a semver (or `-1` when not parseable / empty). */

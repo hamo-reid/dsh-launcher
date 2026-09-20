@@ -11,7 +11,7 @@ import rehypeRaw from 'rehype-raw'
 import rehypeSanitize from 'rehype-sanitize'
 import FieldLabel from '../components/FieldLabel.tsx'
 import { MODAL } from '../theme.ts'
-import type { GithubAuthState, InstalledOverviewRow, PackageVersionInfo, PluginApplyResult } from '../../../shared/types.ts'
+import type { GithubAuthState, InstalledOverviewRow, PackageVersionInfo, PluginApplyResult, PluginUpdateInfo } from '../../../shared/types.ts'
 
 /** Render a plugin README with images resolved against its install dir. */
 function PluginReadme({ text, dir }: { text: string; dir: string }): JSX.Element {
@@ -58,12 +58,18 @@ function fmtBytes(n: number): string {
 interface PluginDetailModalProps {
   target: InstalledOverviewRow | null
   busy: boolean
+  /** Update-check result for this plugin, when a check has run. */
+  update?: PluginUpdateInfo
   /** Archived versions of the plugin in the store — the ones a single-version
    * delete operates on. */
   storeVersions: string[]
   /** Real on-disk size from the overview's manual size calc, when computed. */
   sizeBytes?: number
   onClose: () => void
+  /** Open the version picker to download another version into the store. */
+  onDownloadVersion: (name: string) => void
+  /** One-click download of the newest release into the store. */
+  onUpdate: (name: string) => void
   onUninstall: (name: string) => void
   onUninstallVersion: (name: string, version: string) => void
   onReveal: (name: string) => void
@@ -100,6 +106,12 @@ export function PluginDetailModal(p: PluginDetailModalProps): JSX.Element {
       footer={target !== null ? (
         <Space>
           <Button onClick={() => void p.onReveal(target.name)}>{t('plugin.detail.reveal')}</Button>
+          <Button onClick={() => p.onDownloadVersion(target.name)}>{t('plugin.detail.downloadVersion')}</Button>
+          {p.update?.updateAvailable === true && p.update.latest !== undefined && (
+            <Button type="primary" ghost onClick={() => p.onUpdate(target.name)}>
+              {t('plugin.overview.updateTo', { version: p.update.latest })}
+            </Button>
+          )}
           {target.inStore === true && (
             <>
               <Button danger type="primary" ghost loading={p.busy}
@@ -394,6 +406,129 @@ export function DownloadVersionModal(p: DownloadVersionModalProps): JSX.Element 
                 options={info.versions.map(v => ({ value: v, label: v }))} />
             </div>
           </>
+        )}
+      </Space>
+    </Modal>
+  )
+}
+
+// ── Replace one profile bundle's version ─────────────────────────────────────
+
+export interface BundleVersionTarget {
+  dshId: string
+  profile: string
+  bundle: string
+  /** Version currently resolved in the profile, when known. */
+  current?: string
+}
+
+interface BundleVersionModalProps {
+  target: BundleVersionTarget | null
+  onClose: () => void
+  /** Called after a successful replace, so the profile detail can reload. */
+  onDone: () => void | Promise<void>
+}
+
+/** Re-version one bundle layer of a profile. Store-archived versions come first;
+ * the npm registry list is merged in when reachable (a github/local-only name
+ * 404s here, which simply degrades to store-only). Applying reuses
+ * `plugins:applyUpdates`, which downloads a missing version and re-points the
+ * profile's dependency (keeping the layer activated). */
+export function BundleVersionModal(p: BundleVersionModalProps): JSX.Element {
+  const { t } = useTranslation()
+  const [storeVersions, setStoreVersions] = useState<string[]>([])
+  const [npm, setNpm] = useState<PackageVersionInfo | null>(null)
+  const [version, setVersion] = useState<string>()
+  const [loading, setLoading] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (p.target === null) { setStoreVersions([]); setNpm(null); setVersion(undefined); setError(''); return }
+    const bundle = p.target.bundle
+    let alive = true
+    setLoading(true)
+    setError('')
+    void (async () => {
+      const [list, versions] = await Promise.all([
+        window.api.plugins.list(),
+        window.api.plugins.pkgVersions(bundle),
+      ])
+      if (!alive) return
+      setLoading(false)
+      setStoreVersions(list.ok ? toStoreMap(list.value).get(bundle) ?? [] : [])
+      setNpm(versions.ok ? versions.value : null)
+    })()
+    return () => { alive = false }
+  }, [p.target])
+
+  const target = p.target
+  const npmVersions = (npm?.versions ?? []).filter(v => !storeVersions.includes(v))
+  // Default pick: the newest archived version, else the registry's latest.
+  const latestStore = storeVersions.length > 0 ? storeVersions[storeVersions.length - 1] : undefined
+  const fallback = latestStore ?? npm?.distTags.latest ?? npmVersions[npmVersions.length - 1]
+
+  useEffect(() => { setVersion(fallback) }, [target?.bundle, fallback])
+
+  const apply = async (): Promise<void> => {
+    if (target === null || version === undefined) return
+    setBusy(true)
+    const r = await window.api.plugins.applyUpdates(target.dshId, target.profile, [{ name: target.bundle, version }])
+    setBusy(false)
+    if (!r.ok) { setError(apiErrorText(r)); return }
+    const failed = r.value.results.find(x => !x.ok)
+    if (failed !== undefined) { setError(`${failed.name}@${failed.version}: ${failed.text}`); return }
+    void message.success(t('profile.bundle.replaced', { bundle: target.bundle, version }))
+    await p.onDone()
+    p.onClose()
+  }
+
+  const distTags = Object.entries(npm?.distTags ?? {})
+  const options = [
+    ...storeVersions.map(v => ({ value: v, label: `${v} · ${t('plugin.detail.storeTag')}` })),
+    ...npmVersions.map(v => ({ value: v, label: v })),
+  ]
+  return (
+    <Modal
+      title={t('profile.bundle.replaceTitle', { bundle: target?.bundle ?? '' })}
+      open={target !== null}
+      onCancel={p.onClose}
+      okText={t('profile.bundle.replace')}
+      onOk={() => void apply()}
+      confirmLoading={busy}
+      okButtonProps={{ disabled: version === undefined || version === target?.current }}
+      width={MODAL.narrow}
+    >
+      <Space orientation="vertical" style={{ width: '100%' }} size="small">
+        <div style={{ color: 'inherit', fontSize: 12 }}>{t('profile.bundle.replaceHint')}</div>
+        {target?.current !== undefined && target.current !== '' && (
+          <div>
+            <FieldLabel>{t('profile.bundle.current')}</FieldLabel>
+            <Tag style={{ fontFamily: 'monospace' }}>@{target.current}</Tag>
+          </div>
+        )}
+        {loading && <div><Spin size="small" />　{t('plugin.version.loading')}</div>}
+        {error !== '' && <Alert type="error" showIcon title={error} />}
+        {distTags.length > 0 && (
+          <div>
+            <FieldLabel>{t('plugin.version.distTags')}</FieldLabel>
+            <Space wrap size={4}>{distTags.map(([tag, ver]) => <Tag key={tag}>{tag}={ver}</Tag>)}</Space>
+          </div>
+        )}
+        <div>
+          <FieldLabel>{t('profile.bundle.version')}</FieldLabel>
+          <Select
+            showSearch
+            style={{ width: '100%' }}
+            value={version}
+            onChange={setVersion}
+            optionFilterProp="label"
+            placeholder={t('plugin.version.placeholder')}
+            options={options}
+          />
+        </div>
+        {!loading && options.length === 0 && (
+          <div style={{ color: 'inherit' }}>{t('profile.bundle.noVersions')}</div>
         )}
       </Space>
     </Modal>

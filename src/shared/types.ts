@@ -241,6 +241,24 @@ export interface InstalledOverviewRow {
   sizeBytes?: number
 }
 
+/** Where a profile bundle layer's version comes from — decides whether it can be
+ * re-versioned from the launcher. */
+export type ProfileBundleSource = 'dsh' | 'store' | 'npm' | 'local'
+
+/** One bundle layer's version provenance, for the "replace version" UI. */
+export interface ProfileBundleInfo {
+  /** The profile manifest's dependency spec, when it declares one. */
+  spec?: string
+  /** Version resolved in the profile's `node_modules`, when installed. */
+  version?: string
+  /** `dsh`   = in-box, follows the dsh install (read-only);
+   *  `store` = archived in the launcher plugin store;
+   *  `npm`   = a plain npm version spec;
+   *  `local` = a `link:`/`file:` target outside the store (read-only).
+   * Only `store`/`npm` layers can be re-versioned. */
+  source: ProfileBundleSource
+}
+
 /** What `profile:load` returns for one profile. */
 export interface ProfileDetail {
   /** Ordered `dsh.profile.bundles` layer list. */
@@ -249,6 +267,8 @@ export interface ProfileDetail {
   dependencies: string[]
   /** Manifest `dependencies` with their version/source specs, for editing. */
   dependencySpecs: Record<string, string>
+  /** Per-bundle version provenance, keyed by bundle name. */
+  bundleInfo: Record<string, ProfileBundleInfo>
   /** Manifest display name (`name`), falling back to the profile name. */
   displayName: string
   /** Manifest `dsh.profile.patchReload`, defaulting to `live`. */

@@ -269,6 +269,18 @@ export default function PluginsSection() {
     setUpdates(new Map(r.value.map(u => [u.name, u])))
   }
 
+  // Download a specific version into the store (the picker fetches the list).
+  const openDownloadVersion = (name: string): void => { setTarget(null); setDlPkg(name) }
+
+  // One-click: archive the newest release. The download panel streams progress
+  // and reports a failure; the in-store tag refreshes on settle.
+  const downloadUpdate = (name: string): void => {
+    const latest = updates.get(name)?.latest
+    if (latest === undefined) { openDownloadVersion(name); return }
+    void window.api.downloads.start(`${name}@${latest}`, name)
+    void message.info(t('plugin.overview.updateStarted', { spec: `${name}@${latest}` }))
+  }
+
   const install = (): void => {
     const s = source.trim()
     if (s === '') return
@@ -504,6 +516,8 @@ export default function PluginsSection() {
                           stale={staleStoreNames.has(r.name)}
                           onOpen={() => setTarget(r)}
                           onInstallToProfile={() => { setTarget(null); setInstallPkg(r.name) }}
+                          onDownloadVersion={() => openDownloadVersion(r.name)}
+                          onUpdate={() => downloadUpdate(r.name)}
                           onUninstall={() => void uninstall(r.name)}
                           onReveal={() => void revealDir(r.name)}
                           onDeleteStale={() => deleteStale(r.name)}
@@ -651,9 +665,12 @@ export default function PluginsSection() {
     <PluginDetailModal
       target={target}
       busy={busy}
+      update={target !== null ? updates.get(target.name) : undefined}
       storeVersions={target !== null ? storeMap.get(target.name) ?? [] : []}
       sizeBytes={target !== null ? sizeMap[target.name] : undefined}
       onClose={() => setTarget(null)}
+      onDownloadVersion={openDownloadVersion}
+      onUpdate={downloadUpdate}
       onUninstall={name => void uninstall(name)}
       onUninstallVersion={(name, version) => void uninstallVersion(name, version)}
       onReveal={name => void revealDir(name)}

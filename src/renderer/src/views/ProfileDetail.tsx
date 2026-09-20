@@ -1,6 +1,6 @@
 import { cloneElement, lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
-  Alert, Badge, Button, Input, Modal, Select, Space, Tag, theme, message,
+  Alert, Badge, Button, Input, Modal, Select, Space, Tag, Tooltip, theme, message,
 } from 'antd'
 import {
   ApartmentOutlined, AppstoreOutlined, CheckCircleFilled, CodeOutlined, FileTextOutlined,
@@ -12,7 +12,7 @@ import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-
 import { CSS } from '@dnd-kit/utilities'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
-import type { InsertConflict, InsertConflictLayer, ProfileDetail, ProfileLayer, ProfileValidation, RowCreateInput } from '../../../shared/types.ts'
+import type { InsertConflict, InsertConflictLayer, ProfileBundleInfo, ProfileDetail, ProfileLayer, ProfileValidation, RowCreateInput } from '../../../shared/types.ts'
 import ActionCard from '../components/ActionCard.tsx'
 import FieldLabel from '../components/FieldLabel.tsx'
 import Loadable from '../components/Loadable.tsx'
@@ -21,11 +21,19 @@ import Panel from '../components/Panel.tsx'
 import ScrollModal from '../components/ScrollModal.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
 import StatusTag from '../components/StatusTag.tsx'
-import { PluginUpdatesModal } from './PluginsModals.tsx'
+import { BundleVersionModal, PluginUpdatesModal, type BundleVersionTarget } from './PluginsModals.tsx'
 import { MODAL } from '../theme.ts'
 
 // The Monaco wrapper pulls the whole editor; keep it out of the first parse.
 const CodeEditor = lazy(() => import('../components/CodeEditor.tsx'))
+
+/** Tag colour per bundle version source (matches the plugin overview's palette). */
+const BUNDLE_SOURCE_COLORS: Record<ProfileBundleInfo['source'], string> = {
+  dsh: 'purple',
+  store: 'blue',
+  npm: 'geekblue',
+  local: 'default',
+}
 
 interface Props {
   /** The dsh this profile belongs to (no global active dsh). */
@@ -97,6 +105,9 @@ export default function ProfileDetailView({ dshId, name, onChanged, onRenamed }:
   // Bundle activation: installed-but-inactive bundles offered for activation.
   const [candidates, setCandidates] = useState<string[]>([])
   const [addBundlePkg, setAddBundlePkg] = useState<string>()
+
+  // Replace one bundle layer's version (store/npm-backed layers only).
+  const [bundleVersionTarget, setBundleVersionTarget] = useState<BundleVersionTarget | null>(null)
 
   // Rename.
   const [renameOpen, setRenameOpen] = useState(false)
@@ -511,6 +522,16 @@ const loadSeq = useRef(0)
     })
   }
 
+  // Open the version picker for one bundle layer. Only store/npm-backed layers
+  // reach here (in-box and local layers are read-only in the row).
+  const replaceBundleVersion = (bundle: string): void => {
+    const current = detail?.bundleInfo?.[bundle]?.version
+    setBundleVersionTarget({
+      dshId, profile: name, bundle,
+      ...(current !== undefined && current !== '' ? { current } : {}),
+    })
+  }
+
   const onDragEnd = (event: DragEndEvent): void => {
     const { active, over } = event
     if (over === null || active.id === over.id) return
@@ -776,7 +797,15 @@ const loadSeq = useRef(0)
             : (
               <DndContext collisionDetection={closestCenter} autoScroll={false} onDragEnd={onDragEnd}>
                 <SortableContext items={bundles} strategy={verticalListSortingStrategy}>
-                  {bundles.map(bundle => <SortableBundle key={bundle} bundle={bundle} onRemove={removeBundleRow} />)}
+                  {bundles.map(bundle => (
+                    <SortableBundle
+                      key={bundle}
+                      bundle={bundle}
+                      info={detail?.bundleInfo?.[bundle]}
+                      onRemove={removeBundleRow}
+                      onReplace={replaceBundleVersion}
+                    />
+                  ))}
                 </SortableContext>
               </DndContext>
             )}
@@ -989,6 +1018,12 @@ const loadSeq = useRef(0)
         </Space>
       </Modal>
 
+      <BundleVersionModal
+        target={bundleVersionTarget}
+        onClose={() => setBundleVersionTarget(null)}
+        onDone={() => { void load(); onChanged?.() }}
+      />
+
       <PluginUpdatesModal
         open={updatesOpen}
         dshId={dshId}
@@ -1002,11 +1037,21 @@ const loadSeq = useRef(0)
 }
 
 /** One sortable bundle row (dnd-kit) inside the Bundles modal — drag via the
- * handle on the left; the Remove button on the right stays click-only. */
-function SortableBundle({ bundle, onRemove }: { bundle: string; onRemove: (b: string) => void }): JSX.Element {
+ * handle on the left; the version controls on the right stay click-only. Only a
+ * store/npm-backed layer can be re-versioned; an in-box (`dsh`) or local layer
+ * is read-only, with the reason in a tooltip. */
+function SortableBundle({ bundle, info, onRemove, onReplace }: {
+  bundle: string
+  info?: ProfileBundleInfo
+  onRemove: (b: string) => void
+  onReplace: (b: string) => void
+}): JSX.Element {
   const { t } = useTranslation()
   const { token } = theme.useToken()
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: bundle })
+  const source = info?.source ?? 'dsh'
+  const replaceable = source === 'store' || source === 'npm'
+  const readonlyHint = source === 'dsh' ? t('profile.bundle.followInstall') : t('profile.bundle.localPath')
   return (
     <div
       ref={setNodeRef}
@@ -1034,6 +1079,19 @@ function SortableBundle({ bundle, onRemove }: { bundle: string; onRemove: (b: st
       <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {bundle}
       </span>
+      {info?.version !== undefined && info.version !== '' && (
+        <Tag style={{ flexShrink: 0, marginInlineEnd: 0, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' }}>@{info.version}</Tag>
+      )}
+      <Tooltip title={replaceable ? undefined : readonlyHint}>
+        <Tag color={BUNDLE_SOURCE_COLORS[source]} style={{ flexShrink: 0, marginInlineEnd: 0 }}>
+          {t(`profile.bundle.source.${source}`)}
+        </Tag>
+      </Tooltip>
+      <Tooltip title={replaceable ? undefined : readonlyHint}>
+        <span>
+          <Button size="small" disabled={!replaceable} onClick={() => onReplace(bundle)}>{t('profile.bundle.replace')}</Button>
+        </span>
+      </Tooltip>
       <Button size="small" danger onClick={() => onRemove(bundle)}>{t('profile.detail.removeBundle')}</Button>
     </div>
   )
