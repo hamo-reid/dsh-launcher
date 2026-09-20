@@ -201,4 +201,29 @@ describe('runPnpm store resolution', () => {
     await p
     expect(storeDirArg()).toBeUndefined()
   })
+
+  it('skips the injected --store-dir on request (pnpm run rejects it)', async () => {
+    const child = fakeChild()
+    spawnMock.mockReturnValue(child)
+    configurePnpmStore(() => configuredStore('pm-skip-'))
+    const p = runPnpm('/dir', ['--filter', 'pkg', 'run', 'build'], undefined, { skipStoreDir: true })
+    child.emit('close', 0)
+    await p
+    expect(storeDirArg()).toBeUndefined()
+  })
+
+  it('reports the exact invocation, quoting args with spaces', async () => {
+    const child = fakeChild()
+    spawnMock.mockReturnValue(child)
+    const p = runPnpm('/dir', ['--filter', 'pkg', 'run', 'build'])
+    child.emit('close', 0)
+    expect((await p).command).toBe('pnpm --filter pkg run build')
+
+    const child2 = fakeChild()
+    spawnMock.mockReturnValue(child2)
+    const store = 'C:/my store'
+    const p2 = runPnpm('/dir', ['install', '--config.confirmModulesPurge=false'], undefined, { storeDir: store })
+    child2.emit('close', 0)
+    expect((await p2).command).toBe(`pnpm --store-dir "${pnpmStoreDir(store)}" install --config.confirmModulesPurge=false`)
+  })
 })

@@ -10,9 +10,12 @@ import type {
   DshEntry,
   DshProfileInfo,
   DshUpdateInfo,
+  DevBuildTarget,
   DevDiagnosis,
   DevLinkMode,
   DevPlugin,
+  DevRunResult,
+  DevScriptOptions,
   DownloadSessionInfo,
   GithubAuthState,
   GithubRateLimit,
@@ -217,9 +220,11 @@ const api = {
       ipcRenderer.invoke('plugins:devShimPeers', name, dshId),
     devUnshimPeers: (name: string): Promise<IpcResult<{ removed: string[] }>> =>
       ipcRenderer.invoke('plugins:devUnshimPeers', name),
-    devBuild: (name: string, script?: string): Promise<IpcResult<{ ok: boolean; text: string }>> =>
-      ipcRenderer.invoke('plugins:devBuild', name, script),
-    devInstall: (name: string): Promise<IpcResult<{ ok: boolean; text: string }>> =>
+    devScripts: (name: string): Promise<IpcResult<{ options: DevScriptOptions; current?: DevBuildTarget }>> =>
+      ipcRenderer.invoke('plugins:devScripts', name),
+    devBuild: (name: string, target?: DevBuildTarget): Promise<IpcResult<DevRunResult>> =>
+      ipcRenderer.invoke('plugins:devBuild', name, target),
+    devInstall: (name: string): Promise<IpcResult<DevRunResult>> =>
       ipcRenderer.invoke('plugins:devInstall', name),
     devLinkToProfile: (dshId: string, profile: string, name: string, mode: DevLinkMode): Promise<IpcResult<string>> =>
       ipcRenderer.invoke('plugins:devLinkToProfile', dshId, profile, name, mode),

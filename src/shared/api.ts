@@ -13,9 +13,12 @@ import type {
   DshEntry,
   DshProfileInfo,
   DshUpdateInfo,
+  DevBuildTarget,
   DevDiagnosis,
   DevLinkMode,
   DevPlugin,
+  DevRunResult,
+  DevScriptOptions,
   DownloadSessionInfo,
   GithubAuthState,
   GithubRateLimit,
@@ -185,10 +188,12 @@ export interface WindowApi {
     /** Junction the dsh install's peers into the dev package (reversible). */
     devShimPeers: (name: string, dshId?: string) => Promise<IpcResult<{ added: string[]; skipped: string[] }>>
     devUnshimPeers: (name: string) => Promise<IpcResult<{ removed: string[] }>>
-    /** Build the package (in its workspace root when it has one). */
-    devBuild: (name: string, script?: string) => Promise<IpcResult<{ ok: boolean; text: string }>>
+    /** The build scripts this dev plugin can run (its own + its workspace root's). */
+    devScripts: (name: string) => Promise<IpcResult<{ options: DevScriptOptions; current?: DevBuildTarget }>>
+    /** Run a build script (the remembered/default target unless one is given). */
+    devBuild: (name: string, target?: DevBuildTarget) => Promise<IpcResult<DevRunResult>>
     /** Install the dev package's own deps (durable peer fix). */
-    devInstall: (name: string) => Promise<IpcResult<{ ok: boolean; text: string }>>
+    devInstall: (name: string) => Promise<IpcResult<DevRunResult>>
     /** Attach to a profile: `link` (live) or `copy` (snapshot then install). */
     devLinkToProfile: (dshId: string, profile: string, name: string, mode: DevLinkMode) => Promise<IpcResult<string>>
     devRepairLink: (dshId: string, profile: string, name: string, opts?: { inSource?: boolean }) => Promise<IpcResult<string>>

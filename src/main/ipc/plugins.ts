@@ -11,7 +11,8 @@ import {
 import { listComboPlugins } from '../core/combo.ts'
 import { linkDevToProfile, repairDevLink } from '../core/profile.ts'
 import {
-  buildDevPlugin, diagnoseDevPlugin, installDevDeps, listDevPlugins, registerDevPlugin, removeDevPlugin, shimDevPeers, unshimDevPeers,
+  buildDevPlugin, defaultDevBuild, devScriptOptions, diagnoseDevPlugin, installDevDeps, listDevPlugins, registerDevPlugin,
+  removeDevPlugin, shimDevPeers, unshimDevPeers,
 } from '../core/dev-plugins.ts'
 import {
   cancelPluginDownload, cleanupPluginDownloads, listPluginDownloads, onDownloadsChange, onDownloadsSettled, startPluginDownload,
@@ -27,7 +28,7 @@ import { attachPluginSizes } from '../core/store-overview.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
 import { pathIdentifierInvalid, versionInvalid } from './validate.ts'
 import { handle } from './handle.ts'
-import type { ComboPlugin, DevDiagnosis, DevLinkMode, DevPlugin, DownloadSessionInfo, InstalledOverviewRow, IpcResult, NpmSearchHit, PackageVersionInfo, PluginApplyResult, PluginCleanupResult, PluginMigrationResult, PluginUpdateInfo, PluginUsagePoint } from '../../shared/types.ts'
+import type { ComboPlugin, DevBuildTarget, DevDiagnosis, DevLinkMode, DevPlugin, DevRunResult, DevScriptOptions, DownloadSessionInfo, InstalledOverviewRow, IpcResult, NpmSearchHit, PackageVersionInfo, PluginApplyResult, PluginCleanupResult, PluginMigrationResult, PluginUpdateInfo, PluginUsagePoint } from '../../shared/types.ts'
 
 /** Validate + persist the plugin-store location (shared by `plugins:setDir`
  * and the onboarding wizard). On success the dir is made usable and saved. */
@@ -461,22 +462,37 @@ export function registerPluginsIpc(): void {
     }
   })
 
-  // Build the package (in its workspace root when it has one) so a monorepo
-  // package's `exports` target exists. Returns pnpm's output either way.
-  handle('plugins:devBuild', async (_event, name: string, script?: string): Promise<IpcResult<{ ok: boolean; text: string }>> => {
+  // The build scripts a dev plugin can run (its own + its workspace root's).
+  handle('plugins:devScripts', (_event, name: string): IpcResult<{ options: DevScriptOptions; current?: DevBuildTarget }> => {
     try {
       const dev = listDevPlugins().find(p => p.name === name)
       if (dev === undefined) return fail(E.nameInvalid, [], `未注册的开发插件：${name}`)
-      const clean = typeof script === 'string' && script.trim() !== '' ? script.trim() : 'build'
-      if (!/^[A-Za-z0-9:_-]+$/.test(clean)) return fail(E.nameInvalid)
-      return { ok: true, value: await buildDevPlugin(dev, clean) }
+      const current = dev.build ?? defaultDevBuild(dev)
+      return { ok: true, value: { options: devScriptOptions(dev), ...(current !== undefined ? { current } : {}) } }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Run a build script (the remembered/default target unless one is given).
+  handle('plugins:devBuild', async (_event, name: string, target?: DevBuildTarget): Promise<IpcResult<DevRunResult>> => {
+    try {
+      const dev = listDevPlugins().find(p => p.name === name)
+      if (dev === undefined) return fail(E.nameInvalid, [], `未注册的开发插件：${name}`)
+      let chosen: DevBuildTarget | undefined
+      if (target !== undefined) {
+        const script = typeof target.script === 'string' ? target.script.trim() : ''
+        if (!/^[A-Za-z0-9:_-]+$/.test(script)) return fail(E.nameInvalid)
+        chosen = { script, scope: target.scope === 'workspace' ? 'workspace' : 'package' }
+      }
+      return { ok: true, value: await buildDevPlugin(dev, chosen) }
     } catch (error) {
       return failFromError(error)
     }
   })
 
   // Install the dev package's own deps (durable peer fix; prefers its workspace).
-  handle('plugins:devInstall', async (_event, name: string): Promise<IpcResult<{ ok: boolean; text: string }>> => {
+  handle('plugins:devInstall', async (_event, name: string): Promise<IpcResult<DevRunResult>> => {
     try {
       const dev = listDevPlugins().find(p => p.name === name)
       if (dev === undefined) return fail(E.nameInvalid, [], `未注册的开发插件：${name}`)

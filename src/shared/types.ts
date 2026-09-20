@@ -264,6 +264,22 @@ export interface ProfileBundleInfo {
  * real-install a fixed version. */
 export type DevLinkMode = 'link' | 'copy'
 
+/** Where a dev-plugin build script runs: the package itself, or its workspace
+ * root (a monorepo often puts the aggregate `build` on the root). */
+export type DevBuildScope = 'package' | 'workspace'
+
+/** A remembered dev build target. */
+export interface DevBuildTarget {
+  script: string
+  scope: DevBuildScope
+}
+
+/** The scripts available to a dev plugin, per scope. */
+export interface DevScriptOptions {
+  package: string[]
+  workspace: string[]
+}
+
 /** A local development plugin: a package dir the launcher links (never copies)
  * into profiles, managed separately from the plugin store. */
 export interface DevPlugin {
@@ -277,6 +293,8 @@ export interface DevPlugin {
   version?: string
   /** Whether it declares `dsh.bundle.patch` (so it joins the bundle layer). */
   bundle: boolean
+  /** Remembered build target (which script, and where). */
+  build?: DevBuildTarget
   /** Peer names currently satisfied by a launcher-installed shim junction. */
   shims?: string[]
   addedAt: string
@@ -317,6 +335,15 @@ export interface DevDiagnosis {
   missingPeers: string[]
   /** Peers currently satisfied by a launcher-installed shim junction. */
   shimmed: string[]
+}
+
+/** Result of a dev-package command (build / install): pnpm's output plus the
+ * exact invocation, so the UI can show it and the user can reproduce it. */
+export interface DevRunResult {
+  ok: boolean
+  text: string
+  command: string
+  cwd: string
 }
 
 /** What `profile:load` returns for one profile. */

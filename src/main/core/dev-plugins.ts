@@ -25,7 +25,9 @@ import { resolveBundleSubdepDir } from './bundle-subdeps.ts'
 import { runPnpm } from './pnpm.ts'
 import { logger } from './logger.ts'
 import type { DshContext } from './appState.ts'
-import type { DevDiagnosis, DevPatchRow, DevPeer, DevPlugin, DevResolveRoot } from '../../shared/types.ts'
+import type {
+  DevBuildTarget, DevDiagnosis, DevPatchRow, DevPeer, DevPlugin, DevResolveRoot, DevRunResult, DevScriptOptions,
+} from '../../shared/types.ts'
 
 /** The manifest fields the dev-plugin helpers read. */
 interface DevManifest {
@@ -284,23 +286,63 @@ export function unshimDevPeers(dev: DevPlugin): string[] {
 
 // ── build ───────────────────────────────────────────────────────────────────
 
-/** Run the package's build script (in its workspace root when it has one), so a
- * monorepo package's `exports` target actually exists. */
-export async function buildDevPlugin(dev: DevPlugin, script = 'build'): Promise<{ ok: boolean; text: string }> {
-  const cwd = dev.workspaceRoot ?? dev.dir
-  const args = dev.workspaceRoot !== undefined
-    ? ['--filter', dev.name, 'run', script]
-    : ['run', script]
-  const result = await runPnpm(cwd, args)
-  logger.info(`dev plugin build: ${dev.name} (${script}) → ${result.ok ? 'ok' : 'failed'}`)
-  return { ok: result.ok, text: result.text }
+/** The package's declared script names (empty when it declares none). */
+export function readScripts(dir: string): string[] {
+  try {
+    const m = readManifest(dir) as DevManifest & { scripts?: Record<string, string> }
+    return Object.keys(m.scripts ?? {}).sort()
+  } catch {
+    return []
+  }
+}
+
+/** The scripts runnable for a dev plugin: its own, and its workspace root's. */
+export function devScriptOptions(dev: DevPlugin): DevScriptOptions {
+  return {
+    package: readScripts(dev.dir),
+    workspace: dev.workspaceRoot !== undefined ? readScripts(dev.workspaceRoot) : [],
+  }
+}
+
+/** The build target to use when the user has not chosen one: the package's own
+ * `build`, else the workspace root's (a monorepo often keeps the aggregate build
+ * there), else the first script of either. `undefined` when there are none. */
+export function defaultDevBuild(dev: DevPlugin): DevBuildTarget | undefined {
+  const opts = devScriptOptions(dev)
+  if (opts.package.includes('build')) return { script: 'build', scope: 'package' }
+  if (opts.workspace.includes('build')) return { script: 'build', scope: 'workspace' }
+  const pkg = opts.package[0]
+  if (pkg !== undefined) return { script: pkg, scope: 'package' }
+  const ws = opts.workspace[0]
+  if (ws !== undefined) return { script: ws, scope: 'workspace' }
+  return undefined
+}
+
+/** Run a build script for the dev plugin — its remembered target, else the
+ * default. `scope` picks where: the package (`--filter <name> run <script>`) or
+ * its workspace root (`run <script>`). The choice is remembered. */
+export async function buildDevPlugin(dev: DevPlugin, target?: DevBuildTarget): Promise<DevRunResult> {
+  const chosen = target ?? dev.build ?? defaultDevBuild(dev)
+  if (chosen === undefined) throw new Error('该包及其工作区都没有可运行的脚本')
+  const cwd = chosen.scope === 'workspace' ? (dev.workspaceRoot ?? dev.dir) : dev.dir
+  const args = chosen.scope === 'workspace'
+    ? ['run', chosen.script]
+    : ['--filter', dev.name, 'run', chosen.script]
+  // `run` rejects a bare `--store-dir`, and the user's own repo should use its
+  // own store — so no injection here.
+  const result = await runPnpm(cwd, args, undefined, { skipStoreDir: true })
+  updateDevPlugin(dev.name, p => ({ ...p, build: chosen }))
+  logger.info(`dev plugin build: ${dev.name} (${chosen.scope}:${chosen.script}) → ${result.ok ? 'ok' : 'failed'}`)
+  return { ok: result.ok, text: result.text, command: result.command ?? `pnpm ${args.join(' ')}`, cwd }
 }
 
 /** Install the dev package's own dependencies (in its workspace root when it has
- * one) — the durable fix for missing `@deepseek-ai/*` peers. */
-export async function installDevDeps(dev: DevPlugin): Promise<{ ok: boolean; text: string }> {
+ * one) — the durable fix for missing `@deepseek-ai/*` peers. Runs against the
+ * user's repo, so it uses that repo's pnpm store, not the launcher's. */
+export async function installDevDeps(dev: DevPlugin): Promise<DevRunResult> {
   const cwd = dev.workspaceRoot ?? dev.dir
-  const result = await runPnpm(cwd, ['install', '--config.confirmModulesPurge=false'])
+  const args = ['install', '--config.confirmModulesPurge=false']
+  const result = await runPnpm(cwd, args, undefined, { skipStoreDir: true })
   logger.info(`dev plugin install: ${dev.name} → ${result.ok ? 'ok' : 'failed'}`)
-  return { ok: result.ok, text: result.text }
+  return { ok: result.ok, text: result.text, command: result.command ?? `pnpm ${args.join(' ')}`, cwd }
 }

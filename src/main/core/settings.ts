@@ -489,12 +489,17 @@ function readDevPlugins(raw: unknown): DevPlugin[] {
     const dir = typeof item.dir === 'string' ? item.dir.trim() : ''
     if (name === '' || dir === '') continue
     const shims = Array.isArray(item.shims) ? item.shims.filter((s): s is string => typeof s === 'string') : []
+    const rawBuild = item.build
+    const build = isRecord(rawBuild) && typeof rawBuild.script === 'string' && rawBuild.script.trim() !== ''
+      ? { script: rawBuild.script.trim(), scope: rawBuild.scope === 'workspace' ? 'workspace' as const : 'package' as const }
+      : undefined
     out.push({
       name,
       dir,
       ...(typeof item.workspaceRoot === 'string' && item.workspaceRoot !== '' ? { workspaceRoot: item.workspaceRoot } : {}),
       ...(typeof item.version === 'string' && item.version !== '' ? { version: item.version } : {}),
       bundle: item.bundle === true,
+      ...(build !== undefined ? { build } : {}),
       ...(shims.length > 0 ? { shims } : {}),
       addedAt: typeof item.addedAt === 'string' && item.addedAt !== '' ? item.addedAt : new Date(0).toISOString(),
     })

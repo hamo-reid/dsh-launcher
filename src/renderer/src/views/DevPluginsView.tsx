@@ -9,7 +9,8 @@
  * relink), so a pnpm monorepo package can be made runnable without guessing.
  */
 import { useCallback, useEffect, useState } from 'react'
-import { Alert, Button, Empty, Input, Modal, Radio, Select, Space, Spin, Tag, Tooltip, theme, message } from 'antd'
+import { Alert, Button, Dropdown, Empty, Input, Modal, Radio, Select, Space, Spin, Tag, Tooltip, Typography, theme, message } from 'antd'
+import type { MenuProps } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
 import ConfirmMenu, { type MenuAction } from '../components/ConfirmMenu.tsx'
@@ -17,10 +18,13 @@ import FieldLabel from '../components/FieldLabel.tsx'
 import Panel from '../components/Panel.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
 import { MODAL } from '../theme.ts'
-import type { DevDiagnosis, DevLinkMode, DevPlugin, DevResolveRoot, IpcResult, PluginUsagePoint } from '../../../shared/types.ts'
+import type {
+  DevBuildScope, DevBuildTarget, DevDiagnosis, DevLinkMode, DevPlugin, DevResolveRoot, DevRunResult, DevScriptOptions,
+  IpcResult, PluginUsagePoint,
+} from '../../../shared/types.ts'
 
 /** A run result shown in the output modal (build / install). */
-interface RunOutput { name: string; ok: boolean; text: string }
+interface RunOutput { name: string; ok: boolean; text: string; command: string; cwd: string }
 
 export default function DevPluginsView(): JSX.Element {
   const { t } = useTranslation()
@@ -28,6 +32,8 @@ export default function DevPluginsView(): JSX.Element {
   const [plugins, setPlugins] = useState<DevPlugin[]>([])
   const [usage, setUsage] = useState<Record<string, PluginUsagePoint[]>>({})
   const [diags, setDiags] = useState<Record<string, DevDiagnosis>>({})
+  // Build scripts per plugin (its own + its workspace root's), for the picker.
+  const [buildTargets, setBuildTargets] = useState<Record<string, { options: DevScriptOptions; current?: DevBuildTarget }>>({})
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState('')
   const [detail, setDetail] = useState<{ name: string; diag: DevDiagnosis } | null>(null)
@@ -47,13 +53,20 @@ export default function DevPluginsView(): JSX.Element {
     if (!r.ok) { setLoading(false); void message.error(apiErrorText(r)); return }
     setPlugins(r.value.plugins)
     setUsage(r.value.usage)
-    // Diagnosis is filesystem-only (no network), so run it for every package to
-    // show a status badge up front.
-    const entries = await Promise.all(r.value.plugins.map(async p => {
-      const d = await window.api.plugins.devDiagnose(p.name)
-      return [p.name, d.ok ? d.value : null] as const
+    // Diagnosis + build scripts are filesystem-only (no network), so run both for
+    // every package to show a status badge and an actionable build menu up front.
+    const diagNext: Record<string, DevDiagnosis> = {}
+    const scriptNext: Record<string, { options: DevScriptOptions; current?: DevBuildTarget }> = {}
+    await Promise.all(r.value.plugins.map(async p => {
+      const [d, s] = await Promise.all([
+        window.api.plugins.devDiagnose(p.name),
+        window.api.plugins.devScripts(p.name),
+      ])
+      if (d.ok) diagNext[p.name] = d.value
+      if (s.ok) scriptNext[p.name] = s.value
     }))
-    setDiags(Object.fromEntries(entries.filter((e): e is readonly [string, DevDiagnosis] => e[1] !== null)))
+    setDiags(diagNext)
+    setBuildTargets(scriptNext)
     setLoading(false)
   }, [])
 
@@ -76,14 +89,42 @@ export default function DevPluginsView(): JSX.Element {
   }
 
   const runAction = async (
-    name: string, key: string, fn: () => Promise<IpcResult<{ ok: boolean; text: string }>>,
+    name: string, key: string, fn: () => Promise<IpcResult<DevRunResult>>,
   ): Promise<void> => {
     setBusy(`${key}:${name}`)
     const r = await fn()
     setBusy('')
     if (!r.ok) { void message.error(apiErrorText(r)); return }
     if (r.value.ok) void message.success(t('plugin.dev.actionDone', { name }))
-    setOutput({ name, ok: r.value.ok, text: r.value.text })
+    setOutput({ name, ok: r.value.ok, text: r.value.text, command: r.value.command, cwd: r.value.cwd })
+  }
+
+  /** Run the remembered/default build target, or one picked from the menu. */
+  const runBuild = async (name: string, target?: DevBuildTarget): Promise<void> => {
+    if (target === undefined && buildTargets[name]?.current === undefined) {
+      void message.warning(t('plugin.dev.noScripts'))
+      return
+    }
+    await runAction(name, 'build', () => window.api.plugins.devBuild(name, target))
+  }
+
+  /** Build menu: the package's scripts and its workspace root's, grouped. */
+  const buildMenuItems = (name: string): MenuProps['items'] => {
+    const info = buildTargets[name]
+    if (info === undefined) return []
+    const group = (
+      label: string, scope: DevBuildScope, scripts: string[],
+    ): NonNullable<MenuProps['items']>[number] | null =>
+      scripts.length === 0 ? null : { type: 'group', label, children: scripts.map(s => ({ key: `${scope}:${s}`, label: s })) }
+    return [
+      group(t('plugin.dev.buildScopePackage'), 'package', info.options.package),
+      group(t('plugin.dev.buildScopeWorkspace'), 'workspace', info.options.workspace),
+    ].filter((g): g is NonNullable<MenuProps['items']>[number] => g !== null)
+  }
+
+  const parseBuildKey = (key: string): DevBuildTarget => {
+    const at = key.indexOf(':')
+    return { script: key.slice(at + 1), scope: key.slice(0, at) === 'workspace' ? 'workspace' : 'package' }
   }
 
   const shim = async (name: string): Promise<void> => {
@@ -217,7 +258,14 @@ export default function DevPluginsView(): JSX.Element {
                     <Space size={4} wrap style={{ flexShrink: 0 }}>
                       <Button size="small" loading={busy === `diag:${p.name}`} onClick={() => void diagnose(p.name)}>{t('plugin.dev.diagnose')}</Button>
                       <Button size="small" type="primary" ghost onClick={() => void openLink(p)}>{t('plugin.dev.linkToProfile')}</Button>
-                      <Button size="small" loading={busy === `build:${p.name}`} onClick={() => void runAction(p.name, 'build', () => window.api.plugins.devBuild(p.name))}>{t('plugin.dev.build')}</Button>
+                      <Dropdown.Button
+                        size="small"
+                        loading={busy === `build:${p.name}`}
+                        onClick={() => void runBuild(p.name)}
+                        menu={{ items: buildMenuItems(p.name), onClick: ({ key }) => void runBuild(p.name, parseBuildKey(key)) }}
+                      >
+                        {t('plugin.dev.build')}
+                      </Dropdown.Button>
                       <ConfirmMenu actions={rowActions(p)} onAction={key => onRowAction(p, key)} />
                     </Space>
                   </div>
@@ -279,7 +327,13 @@ export default function DevPluginsView(): JSX.Element {
               {detail.diag.shimmed.length > 0 && (
                 <Button loading={busy === `unshim:${detail.name}`} onClick={() => void unshim(detail.name)}>{t('plugin.dev.fixUnshim')}</Button>
               )}
-              <Button loading={busy === `build:${detail.name}`} onClick={() => void runAction(detail.name, 'build', () => window.api.plugins.devBuild(detail.name))}>{t('plugin.dev.build')}</Button>
+              <Dropdown.Button
+                loading={busy === `build:${detail.name}`}
+                onClick={() => void runBuild(detail.name)}
+                menu={{ items: buildMenuItems(detail.name), onClick: ({ key }) => void runBuild(detail.name, parseBuildKey(key)) }}
+              >
+                {t('plugin.dev.build')}
+              </Dropdown.Button>
             </Space>
           </Space>
         )}
@@ -326,7 +380,8 @@ export default function DevPluginsView(): JSX.Element {
         </Space>
       </Modal>
 
-      {/* pnpm output for a build / install. */}
+      {/* pnpm output for a build / install, with the exact invocation shown so
+          it can be copied and re-run outside the launcher. */}
       <Modal
         title={t(output?.ok === true ? 'plugin.dev.runOk' : 'plugin.dev.runFailed', { name: output?.name ?? '' })}
         open={output !== null}
@@ -334,7 +389,28 @@ export default function DevPluginsView(): JSX.Element {
         footer={<Button onClick={() => setOutput(null)}>{t('common.close')}</Button>}
         width={MODAL.wide}
       >
-        <Input.TextArea readOnly value={output?.text ?? ''} autoSize={{ minRows: 6, maxRows: 20 }} style={{ fontFamily: 'monospace', fontSize: token.fontSizeSM }} />
+        <Space orientation="vertical" size="small" style={{ width: '100%' }}>
+          <div>
+            <FieldLabel>{t('plugin.dev.runCwd')}</FieldLabel>
+            <div style={{ fontFamily: 'monospace', fontSize: token.fontSizeSM, wordBreak: 'break-all' }}>{output?.cwd ?? ''}</div>
+          </div>
+          <div>
+            <FieldLabel>{t('plugin.dev.runCommand')}</FieldLabel>
+            <Typography.Text
+              copyable={{ text: output?.command ?? '' }}
+              code
+              style={{ fontSize: token.fontSizeSM, wordBreak: 'break-all' }}
+            >
+              {output?.command ?? ''}
+            </Typography.Text>
+          </div>
+          <Input.TextArea
+            readOnly
+            value={output?.text ?? ''}
+            autoSize={{ minRows: 8, maxRows: 22 }}
+            style={{ fontFamily: 'monospace', fontSize: token.fontSizeSM }}
+          />
+        </Space>
       </Modal>
     </>
   )

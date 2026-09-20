@@ -14,11 +14,19 @@ vi.mock('./home.ts', async (importActual) => {
   return { ...actual, installAnchor: vi.fn() }
 })
 
+// pnpm is stubbed so the build path never spawns a real process.
+vi.mock('./pnpm.ts', async (importActual) => {
+  const actual = await importActual<typeof import('./pnpm.ts')>()
+  return { ...actual, runPnpm: vi.fn() }
+})
+
 import { installAnchor } from './home.ts'
+import { runPnpm } from './pnpm.ts'
 import { openDatabase, saveSettings } from './settings.ts'
 import { contextForEntry } from './appState.ts'
 import {
-  diagnoseDevPlugin, findWorkspaceRoot, listDevPlugins, registerDevPlugin, removeDevPlugin, shimDevPeers, unshimDevPeers,
+  buildDevPlugin, defaultDevBuild, devScriptOptions, diagnoseDevPlugin, findWorkspaceRoot, listDevPlugins,
+  registerDevPlugin, removeDevPlugin, shimDevPeers, unshimDevPeers,
 } from './dev-plugins.ts'
 
 let root: string
@@ -68,6 +76,8 @@ beforeEach(() => {
   saveSettings({ dshes: [], pluginDir: join(root, 'store'), devPlugins: [] })
   vi.mocked(installAnchor).mockReset()
   vi.mocked(installAnchor).mockReturnValue(anchor())
+  vi.mocked(runPnpm).mockReset()
+  vi.mocked(runPnpm).mockResolvedValue({ ok: true, text: 'done', command: 'pnpm run build' })
 })
 
 describe('findWorkspaceRoot', () => {
@@ -193,5 +203,45 @@ describe('peer shim', () => {
     const dev = registerDevPlugin(pkgDir())
     expect(shimDevPeers(dev, ctx())).toEqual({ added: [], skipped: ['@deepseek-ai/dsh-base'] })
     expect(listDevPlugins()[0].shims ?? []).toEqual([])
+  })
+})
+
+describe('build target', () => {
+  it('prefers the package build, then the workspace root, then any script', () => {
+    makeMonorepo()
+    // Neither the package nor the repo root declares scripts.
+    expect(defaultDevBuild(registerDevPlugin(pkgDir()))).toBeUndefined()
+
+    // The aggregate case: the package declares none, the workspace root does.
+    writePkg(repo(), { name: 'repo', private: true, scripts: { build: 'tsdown', lint: 'eslint' } })
+    const ws = registerDevPlugin(pkgDir())
+    expect(devScriptOptions(ws)).toEqual({ package: [], workspace: ['build', 'lint'] })
+    expect(defaultDevBuild(ws)).toEqual({ script: 'build', scope: 'workspace' })
+
+    // A package-level build wins over the workspace one.
+    writePkg(pkgDir(), {
+      name: '@me/dsh-foo', version: '0.1.0', scripts: { test: 'vitest', build: 'tsc' },
+      dsh: { bundle: { patch: 'cordis.patch.yml' } },
+    })
+    const pkg = registerDevPlugin(pkgDir())
+    expect(devScriptOptions(pkg)).toEqual({ package: ['build', 'test'], workspace: ['build', 'lint'] })
+    expect(defaultDevBuild(pkg)).toEqual({ script: 'build', scope: 'package' })
+  })
+
+  it('runs at the workspace root when that is where the script lives, and remembers it', async () => {
+    makeMonorepo()
+    writePkg(repo(), { name: 'repo', private: true, scripts: { build: 'tsdown' } })
+    const dev = registerDevPlugin(pkgDir())
+
+    const result = await buildDevPlugin(dev)
+    expect(result.command).toBe('pnpm run build')
+    expect(result.cwd).toBe(repo())
+    expect(vi.mocked(runPnpm).mock.calls[0]?.[0]).toBe(repo())
+    expect(listDevPlugins()[0].build).toEqual({ script: 'build', scope: 'workspace' })
+  })
+
+  it('throws when neither the package nor its workspace declares scripts', async () => {
+    makeMonorepo()
+    await expect(buildDevPlugin(registerDevPlugin(pkgDir()))).rejects.toThrow()
   })
 })

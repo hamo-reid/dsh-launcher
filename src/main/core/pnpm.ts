@@ -27,6 +27,8 @@ export interface PnpmResult {
   text: string
   /** True when the run was cut short via the caller's AbortSignal. */
   aborted?: boolean
+  /** The exact invocation (`pnpm <args>`, space-quoted), for showing in the UI. */
+  command?: string
 }
 
 /** pnpm's JS entry, resolved from node_modules (inside the packaged asar at
@@ -167,17 +169,28 @@ export function ensurePnpmStore(storeDir: string | undefined): void {
 /** Run `pnpm <args>` with cwd, resolving on process exit. When `signal` is given
  * and the caller aborts it, the pnpm child (and its sub-process tree) is killed
  * and the promise resolves with `{ ok: false, aborted: true }`. A
- * `--store-dir <pluginDir>/.pnpm-store` is always injected — the caller's
+ * `--store-dir <pluginDir>/.pnpm-store` is injected by default — the caller's
  * explicit `storeDir` when given, else the configured library store — so installs
  * share one plugin-library store regardless of cwd and pnpm never computes its own
  * (which, on a volume different from the user's home, would drop an unmanaged
- * `<drive>\.pnpm-store` at the drive root). */
-export function runPnpm(cwd: string, args: readonly string[], signal?: AbortSignal, opts?: { storeDir?: string }): Promise<PnpmResult> {
+ * `<drive>\.pnpm-store` at the drive root).
+ *
+ * `skipStoreDir` opts out entirely: `pnpm run <script>` REJECTS a bare
+ * `--store-dir` (pnpm 10 parses it as an unknown `run` option), and a caller
+ * operating on the user's own repo should use that repo's store anyway. */
+export function runPnpm(
+  cwd: string, args: readonly string[], signal?: AbortSignal,
+  opts?: { storeDir?: string; skipStoreDir?: boolean },
+): Promise<PnpmResult> {
   return new Promise((resolve) => {
-    const storeBase = resolveStoreBase(opts?.storeDir) ?? resolveStoreBase(libraryStoreBase())
+    const storeBase = opts?.skipStoreDir === true
+      ? undefined
+      : resolveStoreBase(opts?.storeDir) ?? resolveStoreBase(libraryStoreBase())
     if (storeBase !== undefined) ensurePnpmStore(storeBase)
     const storeDir = storeBase !== undefined ? pnpmStoreDir(storeBase) : undefined
     const fullArgs = storeDir !== undefined ? ['--store-dir', storeDir, ...args] : args
+    // The exact invocation, for surfacing in the UI (quoted so it can be copied).
+    const command = ['pnpm', ...fullArgs.map(a => (/\s/.test(a) ? `"${a}"` : a))].join(' ')
     const started = Date.now()
     // Stream pnpm's live stdout/stderr when Debug monitoring is requested.
     const trace = tracePnpm()
@@ -199,7 +212,7 @@ export function runPnpm(cwd: string, args: readonly string[], signal?: AbortSign
       })
     } catch (error) {
       plog.error('pnpm failed to start', error)
-      resolve({ ok: false, text: error instanceof Error ? error.message : String(error) })
+      resolve({ ok: false, text: error instanceof Error ? error.message : String(error), command })
       return
     }
     // Structured spawn breadcrumb: confirm which node/entry drives pnpm, where,
@@ -232,7 +245,7 @@ export function runPnpm(cwd: string, args: readonly string[], signal?: AbortSign
     child.on('error', (error) => {
       signal?.removeEventListener('abort', onAbort)
       plog.warn(`pnpm failed to run: ${error.message}`)
-      resolve({ ok: false, text: error.message })
+      resolve({ ok: false, text: error.message, command })
     })
     child.on('close', (code) => {
       signal?.removeEventListener('abort', onAbort)
@@ -247,7 +260,7 @@ export function runPnpm(cwd: string, args: readonly string[], signal?: AbortSign
         const tail = summarizePnpmOut(out)
         plog.warn(`pnpm aborted @ ${cwd}`, { durMs })
         if (tail !== '') plog.warn(`pnpm partial output:\n${tail}`)
-        resolve({ ok: false, text: 'cancelled', aborted: true })
+        resolve({ ok: false, text: 'cancelled', aborted: true, command })
         return
       }
       // Real installs (even when exit != 0, e.g. ignored build scripts) count as ok.
@@ -259,7 +272,7 @@ export function runPnpm(cwd: string, args: readonly string[], signal?: AbortSign
         plog.warn(`pnpm failed (exit ${String(code)}, ${durMs}ms) @ ${cwd}`)
         if (tail !== '') plog.warn(`pnpm output:\n${tail}`)
       }
-      resolve({ ok, text: out.trim() })
+      resolve({ ok, text: out.trim(), command })
     })
   })
 }
