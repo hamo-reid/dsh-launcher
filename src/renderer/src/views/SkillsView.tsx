@@ -9,7 +9,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { Alert, Button, Empty, Popconfirm, Skeleton, Space, Tag, Tooltip, Typography, theme, message } from 'antd'
-import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
 import Panel from '../components/Panel.tsx'
@@ -100,6 +100,17 @@ export default function SkillsView(props: { dshId?: string }): JSX.Element {
     await load()
   }
 
+  const importZip = async (): Promise<void> => {
+    if (dshId === undefined) return
+    setBusy('import')
+    const r = await window.api.ext.skillImportZip(dshId)
+    setBusy('')
+    if (!r.ok) { void message.error(apiErrorText(r)); return }
+    if (r.value === null) return // dialog cancelled — not an error
+    void message.success(t('ext.skills.imported', { names: r.value.map(entry => entry.name).join(', ') }))
+    await load()
+  }
+
   const skills = listing?.skills ?? []
   const issues = listing?.issues ?? []
   const roots = listing?.roots ?? []
@@ -119,6 +130,15 @@ export default function SkillsView(props: { dshId?: string }): JSX.Element {
         </Button>
         <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={() => void load()}>
           {t('common.refresh')}
+        </Button>
+        <Button
+          size="small"
+          icon={<UploadOutlined />}
+          loading={busy === 'import'}
+          disabled={dshId === undefined}
+          onClick={() => void importZip()}
+        >
+          {t('ext.skills.import')}
         </Button>
         <span style={{ flex: 1 }} />
         <Typography.Text type="secondary" style={{ fontSize: token.fontSizeSM }}>

@@ -158,6 +158,9 @@ export interface WindowApi {
     skillSave: (dshId: string, previousName: string | null, text: string) => Promise<IpcResult<SkillEntry>>
     /** Move an editable skill to the OS recycle bin. */
     skillDelete: (dshId: string, name: string) => Promise<IpcResult<boolean>>
+    /** Pick a skill zip via a file dialog and install its skills into the
+     * writable root (all-or-nothing). `null` when the dialog was cancelled. */
+    skillImportZip: (dshId: string) => Promise<IpcResult<SkillEntry[] | null>>
   }
 
   run: {

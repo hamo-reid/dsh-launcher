@@ -115,6 +115,15 @@ config 行（`- id: … / name: '@deepseek-ai/dsh-skill-filesystem'`）从 home 
 - **删除**（`deleteSkill`）：由主进程自行解析条目（调用方无法把可写根之外的路径
   传进来），经注入的 `shell.trashItem` 移入系统回收站。注入模式与 cipher 一致，
   测试用 fake（rename 进临时目录）。
+- **ZIP 导入**（`importSkillZip`）：文件对话框选 zip → 解压到临时 staging →
+  校验 → 统一改名落入可写根。识别规则：zip 根带 `SKILL.md` 即整个压缩包是一个
+  bundle；否则**任意深度**的每个 `SKILL.md` 各是一个 skill（兼容 GitHub
+  `repo-main/` 包装层），嵌套在别的 skill 目录内的 `SKILL.md` 视为资源不单独
+  安装。安装目录名取 frontmatter `name`，skill 自带资源文件整体随迁。
+  **All-or-nothing**：先解析、查重（zip 内重名 + 与可写根冲突），全部通过后才
+  动可写根，任何失败不落一个文件。入口名先过 zip-slip 守卫（绝对路径 / 盘符 /
+  `..` 段，含反斜杠归一化）—— adm-zip 在写入侧会归一化恶意名，第三方包的读取
+  路径仍需自己的守卫，故守卫单独导出做单测。
 
 ## 6. 明确不做 / 后续
 
@@ -130,4 +139,5 @@ config 行（`- id: … / name: '@deepseek-ai/dsh-skill-filesystem'`）从 home 
   导出剥离；
 - `core/skills.test.ts`：根解析（config 行 + 默认根 + includeDefaultRoots）、
   frontmatter 接受规则（含旧键拒绝与布尔容错）、列表 + issue、创建/改名冲突/
-  回收站删除（仅可写根）。
+  回收站删除（仅可写根）、ZIP 导入（单包/根包/多包/包装层、无 SKILL.md、
+  zip-slip 守卫、重名冲突、all-or-nothing）。

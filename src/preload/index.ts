@@ -171,6 +171,8 @@ const api = {
       ipcRenderer.invoke('ext:skillSave', dshId, previousName, text),
     skillDelete: (dshId: string, name: string): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('ext:skillDelete', dshId, name),
+    skillImportZip: (dshId: string): Promise<IpcResult<SkillEntry[] | null>> =>
+      ipcRenderer.invoke('ext:skillImportZip', dshId),
   },
 
   run: {

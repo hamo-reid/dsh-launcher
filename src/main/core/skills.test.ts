@@ -4,13 +4,15 @@
  * / recycle-bin delete confined to the writable user-dsh root.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import AdmZip from 'adm-zip'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { contextForEntry } from './appState.ts'
+import { AppError } from './errors.ts'
 import {
-  deleteSkill, findEditableSkill, listSkills, parseSkillText, readSkillFile, renderSkillFile, scaffoldSkill,
-  setSkillTrash, skillRoots, writeSkill,
+  deleteSkill, findEditableSkill, importSkillZip, listSkills, parseSkillText, readSkillFile, renderSkillFile, scaffoldSkill,
+  setSkillTrash, skillRoots, writeSkill, zipEntryUnsafe,
 } from './skills.ts'
 import type { DshContext } from './appState.ts'
 
@@ -227,5 +229,105 @@ describe('write / rename / delete (writable root only)', () => {
     await deleteSkill(ctx(), 'flat-doomed')
     expect(existsSync(join(USER_DSH(), 'flat-doomed.md'))).toBe(false)
     expect(existsSync(join(USER_DSH(), 'alpha'))).toBe(true)
+  })
+})
+
+describe('zip import', () => {
+  /** Build a zip file from virtual entries and return its path. */
+  function writeZip(name: string, files: Record<string, string>): string {
+    const arc = new AdmZip()
+    for (const [path, content] of Object.entries(files)) arc.addFile(path, Buffer.from(content, 'utf8'))
+    const file = join(root, name)
+    arc.writeZip(file)
+    return file
+  }
+
+  /** The code an import throws, or a marker when it threw something else. */
+  function codeOf(zipPath: string): string {
+    try {
+      importSkillZip(ctx(), zipPath)
+      return '(no throw)'
+    } catch (error) {
+      return error instanceof AppError ? error.code : `not-app:${String(error)}`
+    }
+  }
+
+  it('installs a <dir>/SKILL.md bundle with its resources under the frontmatter name', () => {
+    const zip = writeZip('single.zip', {
+      'pdf-tools/SKILL.md': makeSkill('pdf-tools'),
+      'pdf-tools/scripts/run.ps1': 'Write-Output hi',
+    })
+    const installed = importSkillZip(ctx(), zip)
+    expect(installed).toHaveLength(1)
+    expect(installed[0]).toMatchObject({ name: 'pdf-tools', shape: 'bundle', editable: true, source: 'user-dsh' })
+    expect(existsSync(join(USER_DSH(), 'pdf-tools', 'scripts', 'run.ps1'))).toBe(true)
+    expect(findEditableSkill(ctx(), 'pdf-tools')?.entry.path).toBe(join(USER_DSH(), 'pdf-tools', 'SKILL.md'))
+  })
+
+  it('treats a root-level SKILL.md as one whole-archive bundle', () => {
+    const zip = writeZip('root.zip', { 'SKILL.md': makeSkill('root-skill'), 'NOTES.md': 'resources ride along' })
+    const installed = importSkillZip(ctx(), zip)
+    expect(installed).toHaveLength(1)
+    expect(existsSync(join(USER_DSH(), 'root-skill', 'NOTES.md'))).toBe(true)
+  })
+
+  it('installs every skill of a multi-skill zip, through a wrapper dir too', () => {
+    const zip = writeZip('pack.zip', {
+      'repo-main/one/SKILL.md': makeSkill('zip-one'),
+      'repo-main/two/SKILL.md': makeSkill('zip-two'),
+    })
+    const installed = importSkillZip(ctx(), zip)
+    expect(installed.map(e => e.name).sort()).toEqual(['zip-one', 'zip-two'])
+    expect(existsSync(join(USER_DSH(), 'zip-one', 'SKILL.md'))).toBe(true)
+    expect(existsSync(join(USER_DSH(), 'zip-two', 'SKILL.md'))).toBe(true)
+  })
+
+  it('rejects a zip with no SKILL.md', () => {
+    const zip = writeZip('empty.zip', { 'readme.txt': 'nothing here' })
+    expect(codeOf(zip)).toBe('ext.skillZipNoSkill')
+  })
+
+  it('guards zip-slip entry names (unit) without false-positive on sanitized ones', () => {
+    // adm-zip normalizes hostile names when WRITING, so a raw `../` entry can
+    // only reach the guard from a third-party archive on READ — the guard is
+    // therefore pinned by direct unit tests, not by a crafted archive.
+    expect(zipEntryUnsafe('../evil.txt')).toBe(true)
+    expect(zipEntryUnsafe('a/../../evil.txt')).toBe(true)
+    expect(zipEntryUnsafe('..\\evil.txt')).toBe(true)
+    expect(zipEntryUnsafe('/abs.txt')).toBe(true)
+    expect(zipEntryUnsafe('C:/evil.txt')).toBe(true)
+    expect(zipEntryUnsafe('ok/SKILL.md')).toBe(false)
+    expect(zipEntryUnsafe('evil.txt')).toBe(false)
+    // A name adm-zip sanitized on write reads back as `evil.txt` — the import
+    // must proceed normally instead of failing on a false positive.
+    const zip = writeZip('slip.zip', { 'ok/SKILL.md': makeSkill('ok'), '../evil.txt': 'nope' })
+    const installed = importSkillZip(ctx(), zip)
+    expect(installed.map(entry => entry.name)).toEqual(['ok'])
+  })
+
+  it('refuses a name collision and installs nothing', () => {
+    writeSkill(ctx(), null, makeSkill('taken'))
+    const before = existsSync(join(USER_DSH(), 'taken'))
+    const zip = writeZip('collide.zip', { 'taken/SKILL.md': makeSkill('taken') })
+    expect(codeOf(zip)).toBe('ext.skillExists')
+    expect(existsSync(join(USER_DSH(), 'taken'))).toBe(before)
+  })
+
+  it('is all-or-nothing: one bad skill fails the whole zip', () => {
+    const zip = writeZip('mixed.zip', {
+      'good/SKILL.md': makeSkill('zip-good'),
+      'bad/SKILL.md': '---\nname: zip-bad\n---\n', // no description
+    })
+    expect(codeOf(zip)).toBe('ext.badSkill')
+    expect(existsSync(join(USER_DSH(), 'zip-good'))).toBe(false)
+    expect(existsSync(join(USER_DSH(), 'zip-bad'))).toBe(false)
+  })
+
+  it('rejects duplicate skill names within one zip', () => {
+    const zip = writeZip('dupe.zip', {
+      'a/SKILL.md': makeSkill('zip-dupe'),
+      'b/SKILL.md': makeSkill('zip-dupe'),
+    })
+    expect(codeOf(zip)).toBe('ext.skillExists')
   })
 })

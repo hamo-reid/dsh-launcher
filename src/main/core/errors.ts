@@ -99,7 +99,10 @@ export const E = {
   // extensions (skills)
   extSkillNotFound: 'ext.skillNotFound',
   extSkillReadOnly: 'ext.skillReadOnly',
+  extSkillExists: 'ext.skillExists',
   extBadSkill: 'ext.badSkill',
+  extSkillZipNoSkill: 'ext.skillZipNoSkill',
+  extSkillZipUnsafe: 'ext.skillZipUnsafe',
   // dsh data import/export
   dataNotSelected: 'data.notSelected',
   // run

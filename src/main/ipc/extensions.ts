@@ -18,6 +18,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { dialog } from 'electron'
 import { join } from 'node:path'
 import { handle } from './handle.ts'
 import { contextForEntry, dshEntryById, type DshContext } from '../core/appState.ts'
@@ -26,7 +27,7 @@ import { listMcpServers } from '../core/combo.ts'
 import { addMcpServer, findMcpServer, mcpRowIds, removeMcpServer, SERVER_NAME_RE, updateMcpServer } from '../core/mcp.ts'
 import { listMcpSecretNames, setMcpSecret } from '../core/mcp-secrets.ts'
 import {
-  deleteSkill, findEditableSkill, listSkills, readSkillFile, scaffoldSkill, writeSkill,
+  deleteSkill, findEditableSkill, importSkillZip, listSkills, readSkillFile, scaffoldSkill, writeSkill,
 } from '../core/skills.ts'
 import { SKILL_NAME_RE } from '../../shared/skill.ts'
 import { assertPatchDocValid, setRowDisabled } from '../core/patch.ts'
@@ -246,6 +247,25 @@ export function registerExtensionsIpc(): void {
     try {
       await deleteSkill(ctx, name)
       return { ok: true, value: true }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Pick + install a skill zip. Cancel returns `null` (not an error). Install
+  // is all-or-nothing: validation happens on the staged copy before anything
+  // lands in the writable root.
+  handle('ext:skillImportZip', async (_event, dshId: string): Promise<IpcResult<SkillEntry[] | null>> => {
+    const ctx = ctxOf(dshId)
+    if (ctx === null) return fail(E.dshNotFound)
+    const picked = await dialog.showOpenDialog({
+      title: '选择要导入的 skill 压缩包',
+      properties: ['openFile'],
+      filters: [{ name: 'Skill 压缩包', extensions: ['zip'] }],
+    })
+    if (picked.canceled || picked.filePaths.length === 0) return { ok: true, value: null }
+    try {
+      return { ok: true, value: importSkillZip(ctx, picked.filePaths[0]) }
     } catch (error) {
       return failFromError(error)
     }

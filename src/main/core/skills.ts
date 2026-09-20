@@ -15,13 +15,15 @@
  * OS recycle bin through an injected `shell.trashItem` (Electron API), so a
  * mistake is reversible without a launcher-side restore UI.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
+import AdmZip from 'adm-zip'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { homePatchPath, readHomePatch } from './home.ts'
 import { extractKeyValue, parseNamedRows } from './patch.ts'
 import { loadYaml } from './yaml.ts'
 import { logger } from './logger.ts'
+import { E, throwE } from './errors.ts'
 import { SKILL_NAME_RE } from '../../shared/skill.ts'
 import type { DshContext } from './appState.ts'
 import type { SkillEntry, SkillIssue, SkillListing, SkillRootInfo, SkillSource } from '../../shared/types.ts'
@@ -399,19 +401,7 @@ export function writeSkill(ctx: DshContext, previousName: string | null, text: s
   writeFileSync(file, text)
   if (readFileSync(file, 'utf8') !== text) throw new Error('write verify failed')
   logger.info(`skills: wrote ${file}`)
-  return {
-    name,
-    description: parsed.skill.description,
-    ...(parsed.skill.whenToUse !== undefined ? { whenToUse: parsed.skill.whenToUse } : {}),
-    modelInvocable: parsed.skill.modelInvocable,
-    userInvocable: parsed.skill.userInvocable,
-    source: 'user-dsh',
-    rank: USER_DSH_RANK,
-    path: file,
-    dir,
-    shape: 'bundle',
-    editable: true,
-  }
+  return installedEntry(parsed.skill, writableSkillRoot(ctx))
 }
 
 /** Move an editable skill to the OS recycle bin. Resolves the entry itself so
@@ -423,6 +413,103 @@ export async function deleteSkill(ctx: DshContext, name: string): Promise<void> 
   const target = found.entry.shape === 'bundle' ? found.entry.dir : found.entry.path
   await trash(target)
   logger.info(`skills: moved to recycle bin ${target}`)
+}
+
+// ── zip import ───────────────────────────────────────────────────────────────
+
+/** The catalog entry for a skill just installed into the writable root. */
+function installedEntry(skill: ParsedSkill, root: string): SkillEntry {
+  const dir = join(root, skill.name)
+  return {
+    name: skill.name,
+    description: skill.description,
+    ...(skill.whenToUse !== undefined ? { whenToUse: skill.whenToUse } : {}),
+    modelInvocable: skill.modelInvocable,
+    userInvocable: skill.userInvocable,
+    source: 'user-dsh',
+    rank: USER_DSH_RANK,
+    path: join(dir, 'SKILL.md'),
+    dir,
+    shape: 'bundle',
+    editable: true,
+  }
+}
+
+/** Zip-slip guard: reject absolute paths, drive prefixes, and `..` segments
+ * (backslashes normalized first — Windows-made archives use them). Exported
+ * for tests: adm-zip normalizes hostile names on WRITE, so a slip entry can
+ * only reach this guard from a third-party archive on READ. */
+export function zipEntryUnsafe(entryName: string): boolean {
+  const path = entryName.replaceAll('\\', '/')
+  if (path.startsWith('/') || /^[A-Za-z]:/.test(path)) return true
+  return path.split('/').some(segment => segment === '..')
+}
+
+/**
+ * The directory each zip-carried skill lives in, relative to the zip root.
+ *
+ * A `SKILL.md` at the zip root makes the whole archive one bundle (everything
+ * else in it is that skill's resources); otherwise every `SKILL.md` — at any
+ * depth, so a GitHub-style `repo-main/` wrapper works — is one skill, carried
+ * with its own directory.
+ */
+function skillZipRoots(names: string[]): string[] {
+  if (names.includes('SKILL.md')) return ['']
+  const dirs: string[] = []
+  for (const name of names) {
+    if (!name.endsWith('/SKILL.md')) continue
+    const dir = name.slice(0, -'/SKILL.md'.length)
+    if (!dirs.includes(dir)) dirs.push(dir)
+  }
+  // A SKILL.md nested inside another carried skill's directory is that skill's
+  // resource, not a separate install — the outer directory moves whole.
+  return dirs
+    .filter(dir => !dirs.some(other => other !== dir && dir.startsWith(`${other}/`)))
+    .sort((a, b) => a.localeCompare(b))
+}
+
+/**
+ * Install every skill a zip carries into the writable root, all-or-nothing.
+ *
+ * The archive is extracted to a temp staging dir; every candidate is parsed and
+ * collision-checked (against the writable root AND the other candidates) BEFORE
+ * anything is installed, so a failure leaves the root untouched. The installed
+ * directory name is the frontmatter `name` — the same authority as the editor —
+ * and the skill's own directory (scripts, references, …) is carried over whole.
+ */
+export function importSkillZip(ctx: DshContext, zipPath: string): SkillEntry[] {
+  const arc = new AdmZip(zipPath)
+  const unsafe = arc.getEntries().find(entry => zipEntryUnsafe(entry.entryName))
+  if (unsafe !== undefined) throwE(E.extSkillZipUnsafe, { detail: unsafe.entryName })
+  const dirs = skillZipRoots(arc.getEntries().map(entry => entry.entryName.replaceAll('\\', '/')))
+  if (dirs.length === 0) throwE(E.extSkillZipNoSkill)
+  const staging = mkdtempSync(join(tmpdir(), 'pm-skill-import-'))
+  try {
+    arc.extractAllTo(staging, true)
+    // Pass 1 — validate everything: frontmatter, per-zip duplicates, collisions.
+    const installs: Array<{ skill: ParsedSkill; from: string }> = []
+    const seen = new Set<string>()
+    for (const dir of dirs) {
+      const label = dir === '' ? 'SKILL.md' : `${dir}/SKILL.md`
+      const parsed = parseSkillText(readFileSync(join(staging, dir, 'SKILL.md'), 'utf8'))
+      if (!parsed.ok) throwE(E.extBadSkill, { detail: label }, `${label}: ${parsed.reason}`)
+      const name = parsed.skill.name
+      if (seen.has(name) || findEditableSkill(ctx, name) !== undefined) {
+        throwE(E.extSkillExists, { detail: name })
+      }
+      seen.add(name)
+      installs.push({ skill: parsed.skill, from: join(staging, dir) })
+    }
+    // Pass 2 — install (renames inside staging → writable root).
+    const root = writableSkillRoot(ctx)
+    mkdirSync(root, { recursive: true })
+    return installs.map(({ skill, from }) => {
+      renameSync(from, join(root, skill.name))
+      return installedEntry(skill, root)
+    })
+  } finally {
+    rmSync(staging, { recursive: true, force: true })
+  }
 }
 
 /** The home-layer patch path a `skill-filesystem` config row lives in (for docs/UX). */
