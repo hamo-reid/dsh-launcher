@@ -78,6 +78,128 @@ ELECTRON_RUN_AS_NODE=1 "<项目>/node_modules/electron/dist/electron.exe" "<项�
 
 ---
 
+## 7. 误删真实数据目录（PowerShell 自动变量 + 无守卫的删除）· 事故复盘
+
+**事故**：一个「隔离测试」脚本把 `$home` 当自定义变量用：
+
+```powershell
+$home = "$root\home"                              # ← 失败：$home 是只读自动变量
+Remove-Item -Recurse -Force "$home\dsh-launcher"  # ← 用到的仍是真实 home
+```
+
+第一行**只报错、不中止**，脚本继续执行；于是第二行删掉了**真实的 `~/dsh-launcher`**
+（`app.sqlite`、`dsh/`、`plugins/`、`logs/`）。`Remove-Item` 不进回收站，无卷影副本则不可恢复。
+
+**两个根因**（必须同时防）：
+
+1. **变量名与 PowerShell 自动/只读变量冲突** —— `$home`、`$host`、`$profile`、`$args`、
+   `$input`、`$error`、`$matches`、`$psitem`、`$null`、`$true`、`$false`，以及 `$env:*`。
+   赋值失败但（默认）**不中止**。
+2. **破坏性命令没有路径守卫** —— `Remove-Item -Recurse -Force` 直接作用在变量拼出的路径上。
+
+**实测结论**（本机 Windows PowerShell 5.1，`-Command` 模式）：
+
+| 措施 | 能否拦住 |
+|---|---|
+| 默认 `$ErrorActionPreference` | ❌ 继续执行（事故根因） |
+| `$ErrorActionPreference = 'Stop'` | ✅ 立即中止 |
+| `Set-StrictMode -Version Latest` | ❌ 无效（变量本就已存在） |
+| 路径白名单守卫 | ✅ 直接拒绝 |
+
+**硬性规则**：
+
+- **R1** 任何 `Remove-Item -Recurse -Force` / `rm -rf` 之前，目标必须是 `Join-Path` 得到的
+  **绝对路径**，并通过**白名单根**校验 —— 用 [`scripts/safe-remove.ps1`](../scripts/safe-remove.ps1)，
+  不要手写裸删除。
+- **R2** 脚本开头一律 `$ErrorActionPreference = 'Stop'`（让失败的赋值/命令立即中止）。
+- **R3** 自定义变量避开自动变量名，用领域前缀：`$verifyRoot`、`$dataDir`、`$dshHome` —— **绝不用 `$home`**。
+- **R4** 破坏性命令先 `-WhatIf` 预演，或先 `Write-Output` 出解析后的绝对路径再执行。
+- **R5** 隔离测试必须断言目标在 `$env:TEMP` 之内；`~/dsh-launcher`、`~/.dsh` 等真实用户目录
+  **永不**作为测试目标。
+- **R6** 优先「移动到备份目录」而不是直接删除。
+
+**事后恢复顺序**：回收站（`Remove-Item` 不进）→ 卷影副本 / 还原点
+（`vssadmin list shadows`，需管理员）→ 文件恢复工具 → 重建（dsh 运行时、插件库都可再获取；
+`~/.dsh` 下的 profile 数据与此目录独立，通常不受影响）。
+
+---
+
+## 8. 安全地隔离测试打包产物（不碰真实数据）
+
+真实数据目录硬编码为 `~/dsh-launcher`（`app.setPath('userData', join(os.homedir(),'dsh-launcher'))`），
+**没有 env 覆盖**。Windows 上 `os.homedir()` 走 `USERPROFILE`，所以隔离靠改**子进程**的 `USERPROFILE`：
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$verifyRoot = Join-Path $env:TEMP 'dsh-verify'        # 绝不用 $home
+$verifyHome = Join-Path $verifyRoot 'home'
+if (-not $verifyHome.StartsWith($env:TEMP, [StringComparison]::OrdinalIgnoreCase)) { throw "REFUSE: outside TEMP" }
+
+# 起 GUI 前先确认没有真实实例在跑（portable 进程名同为 "Dsh Launcher"）
+Get-Process | Where-Object { $_.ProcessName -like '*Dsh*' } | Stop-Process -Force -ErrorAction SilentlyContinue
+
+$env:USERPROFILE = $verifyHome                        # 子进程继承
+Start-Process -FilePath "$verifyRoot\artifacts\Dsh-Launcher-<ver>-portable.exe"
+Start-Sleep -Seconds 30
+Get-Process | Where-Object { $_.ProcessName -like '*Dsh*' } | Stop-Process -Force
+```
+
+注意事项：
+
+- **旧版本首跑不写设置库**（要手动完成向导才会写）。要造「旧格式数据」，直接合成一个
+  **单行 `app` 行**的 `app.sqlite` 更可靠（v0.3.0 前的格式）。
+- 读设置库用项目自带 `sql.js`，**绝对路径** require（脚本放 TEMP 时相对 require 会失败）：
+  `require('C:/workspaces/profile-manager/node_modules/sql.js')`。
+- 清理隔离目录用 `scripts/safe-remove.ps1 -Path $verifyRoot -Root $env:TEMP`。
+
+---
+
+## 9. 手动重装 / 接入 dsh（无 GUI）
+
+启动器的官方安装布局（见 `core/dsh.ts`）：
+
+```
+<versionRepo>/<name>/node_modules/@deepseek-ai/dsh      # 安装本体（<name> 官方安装固定为 official）
+<versionRepo>/<name>/node_modules/.bin/dsh.cmd          # 可执行 shim（Windows）
+<versionRepo>/../homes/<name>                           # 官方安装的默认 home
+```
+
+`<versionRepo>` 默认 `~/dsh-launcher/dsh/versions`。**home 可以不是默认值** —— 如果用户的数据在
+`~/.dsh`（dsh 的默认 home），注册条目时把 `home` 指过去，profile 才会显示。
+
+**查出「原来装的是哪个版本」**（无需 GUI）：读某个 profile 的运行时链接目标，路径里带版本：
+
+```powershell
+(Get-Item "$env:USERPROFILE\.dsh\profiles\node_modules\@deepseek-ai\dsh" -Force).Target
+# → ...\.pnpm\@deepseek-ai+dsh@0.1.1-rc.2_<hash>\node_modules\@deepseek-ai\dsh
+```
+
+**重装**（用系统 pnpm 即可；启动器自身走 `runPnpm`，参数等价）：
+
+```powershell
+$target = Join-Path $env:USERPROFILE 'dsh-launcher\dsh\versions\official'
+New-Item -ItemType Directory -Force $target | Out-Null
+Set-Location $target
+pnpm add '@deepseek-ai/dsh@<version>' --fetch-retries=3 --fetch-retry-maxtimeout=60000
+& "$target\node_modules\.bin\dsh.CMD" --version   # 冒烟
+```
+
+**注册**：写 `app.sqlite` 的 `dsh` 行（`{"dshes":[entry]}`，entry 至少含
+`id/name/execPath/version/home`，managed 安装再加 `managed:true` + `versionDir`）。
+
+**坑：pnpm 的 peer-hash 会变。** 重装同一个版本，`.pnpm` 目录名里的 `_<hash>` 后缀可能不同
+（`…_7adf…` → `…_7b32…`），导致 `<home>/profiles/node_modules` 里的 junction 全部悬空。
+修法二选一：
+
+- **重指向**（外科、离线）：把悬空 junction 的目标里旧 hash 段替换成新 hash 段，重建 junction
+  （`cmd /c rmdir <link>` 只删链接，`New-Item -ItemType Junction` 重建）。
+- **交给 dsh**：删掉 `<home>/profiles/node_modules`，下次 boot 由 dsh 重新链接。
+
+> 校验要看**能否穿过链接读到文件**（`Test-Path <link>\package.json`），别只看 `Test-Path <link>`：
+> 新建的 junction 目标会被存成 `\??\C:\...`，`Test-Path` 对带该前缀的字符串返回 False，但解析是正常的。
+
+---
+
 ## 快速索引
 | 症状 | 章节 |
 |---|---|
@@ -87,3 +209,6 @@ ELECTRON_RUN_AS_NODE=1 "<项目>/node_modules/electron/dist/electron.exe" "<项�
 | 手动跑 pnpm | §4 |
 | ls/路径异常 | §5 |
 | 发版/Release 空正文 | §6 + RELEASE.md |
+| 误删数据目录 / 破坏性命令防护 | §7 + `scripts/safe-remove.ps1` |
+| 隔离测试打包产物 | §8 |
+| 手动重装 / 接入 dsh | §9 |
