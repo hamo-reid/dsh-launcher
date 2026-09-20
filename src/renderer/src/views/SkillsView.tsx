@@ -1,37 +1,37 @@
 /**
- * Skills for one dsh (dsh-scoped, not per-profile).
+ * Skills — the repository view of the skills track (dsh-scoped, not
+ * per-profile).
  *
  * The listing mirrors what dsh's `skill-filesystem` provider discovers: every
  * root in rank order, with the writable user-dsh root (`<dshHome>/skills`) as
  * the only place the launcher creates, edits, or deletes entries. A delete
  * moves the entry to the OS recycle bin; files dsh would silently ignore are
  * surfaced as issues instead.
+ *
+ * Layout mirrors the plugins section: a heading that carries the dsh picker
+ * and actions, then a searchable / filterable card grid with local pagination.
  */
-import { useCallback, useEffect, useState } from 'react'
-import { Alert, Button, Empty, Popconfirm, Skeleton, Space, Tag, Tooltip, Typography, theme, message } from 'antd'
-import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Alert, Button, Pagination, Segmented, Select, Skeleton, Space, Typography, theme, message } from 'antd'
+import { PlusOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
+import EmptyState from '../components/EmptyState.tsx'
 import Panel from '../components/Panel.tsx'
+import SearchInput from '../components/SearchInput.tsx'
+import SectionHeading from '../components/SectionHeading.tsx'
 import Toolbar from '../components/Toolbar.tsx'
+import SkillCard from './SkillCard.tsx'
 import { SkillEditorModal, SkillNameModal } from './ExtensionsModals.tsx'
 import type { SkillEntry, SkillListing } from '../../../shared/types.ts'
 
-/** Tag colour per root origin. */
-const SOURCE_COLOUR: Record<SkillEntry['source'], string> = {
-  'user-dsh': 'blue',
-  'user-agents': 'purple',
-  custom: 'orange',
-  bundled: 'default',
-}
+/** Cards per page (the grid paginates locally, like the plugin overview). */
+const CARDS_PER_PAGE = 24
 
-/** Source label key suffix (`ext.skills.source.<suffix>`). */
-const SOURCE_KEY: Record<SkillEntry['source'], 'userDsh' | 'userAgents' | 'custom' | 'bundled'> = {
-  'user-dsh': 'userDsh',
-  'user-agents': 'userAgents',
-  custom: 'custom',
-  bundled: 'bundled',
-}
+type Bucket = 'all' | 'editable' | 'readonly'
+
+/** One dsh and the profiles it holds, for the target picker. */
+interface DshScope { id: string; name: string; profiles: string[] }
 
 interface EditorState {
   open: boolean
@@ -40,16 +40,33 @@ interface EditorState {
   text: string
 }
 
-export default function SkillsView(props: { dshId?: string }): JSX.Element {
+export default function SkillsView(): JSX.Element {
   const { t } = useTranslation()
   const { token } = theme.useToken()
+
+  // Target context — the view owns its dsh picker.
+  const [scopes, setScopes] = useState<DshScope[]>([])
+  const [dshId, setDshId] = useState<string>()
+
   const [listing, setListing] = useState<SkillListing | null>(null)
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState('')
   const [nameModal, setNameModal] = useState(false)
   const [editor, setEditor] = useState<EditorState>({ open: false, previousName: null, text: '' })
 
-  const { dshId } = props
+  // Repository filters + local pagination.
+  const [search, setSearch] = useState('')
+  const [bucket, setBucket] = useState<Bucket>('all')
+  const [page, setPage] = useState(1)
+
+  useEffect(() => {
+    void (async () => {
+      const r = await window.api.plugins.installOptions()
+      if (!r.ok) return
+      setScopes(r.value)
+      setDshId(prev => (prev !== undefined && r.value.some(s => s.id === prev)) ? prev : r.value[0]?.id)
+    })()
+  }, [])
 
   const load = useCallback(async (): Promise<void> => {
     if (dshId === undefined) { setListing(null); return }
@@ -116,130 +133,175 @@ export default function SkillsView(props: { dshId?: string }): JSX.Element {
   const roots = listing?.roots ?? []
   const writable = roots.find(root => root.writable)
 
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return skills.filter(entry => {
+      if (bucket === 'editable' && !entry.editable) return false
+      if (bucket === 'readonly' && entry.editable) return false
+      if (q !== '') {
+        const hay = [entry.name, entry.description, entry.whenToUse ?? ''].join(' ').toLowerCase()
+        if (!hay.includes(q)) return false
+      }
+      return true
+    })
+  }, [skills, search, bucket])
+
+  // Reset to the first page whenever the filter changes.
+  useEffect(() => { setPage(1) }, [search, bucket])
+
+  const lastPage = Math.max(1, Math.ceil(filtered.length / CARDS_PER_PAGE))
+  const currentPage = Math.min(page, lastPage)
+  const paged = filtered.slice((currentPage - 1) * CARDS_PER_PAGE, currentPage * CARDS_PER_PAGE)
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-      <Toolbar>
-        <Button
-          type="primary"
-          size="small"
-          icon={<PlusOutlined />}
-          disabled={dshId === undefined}
-          onClick={() => setNameModal(true)}
-        >
-          {t('ext.skills.add')}
-        </Button>
-        <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={() => void load()}>
-          {t('common.refresh')}
-        </Button>
-        <Button
-          size="small"
-          icon={<UploadOutlined />}
-          loading={busy === 'import'}
-          disabled={dshId === undefined}
-          onClick={() => void importZip()}
-        >
-          {t('ext.skills.import')}
-        </Button>
-        <span style={{ flex: 1 }} />
-        <Typography.Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
-          {t('ext.skills.rootsHint')}
-        </Typography.Text>
-      </Toolbar>
+    <Space direction="vertical" style={{ width: '100%' }} size="middle">
+      <SectionHeading
+        title={t('ext.tab.skills')}
+        description={(
+          <span>
+            {listing !== null && (
+              <>
+                {t('ext.skills.summaryTotal', { total: skills.length })}
+                {issues.length > 0 ? ` · ${t('ext.skills.summaryIssues', { count: issues.length })}` : ''}
+                {' · '}
+              </>
+            )}
+            {writable !== undefined && (
+              <>
+                {t('ext.skills.writableRoot')}:{' '}
+                <Typography.Text code style={{ fontSize: token.fontSizeSM }}>{writable.path}</Typography.Text>
+              </>
+            )}
+          </span>
+        )}
+        extra={(
+          <Space size={8} wrap>
+            <Select
+              size="small"
+              style={{ minWidth: 170 }}
+              showSearch
+              optionFilterProp="label"
+              value={dshId}
+              placeholder={t('ext.target.dsh')}
+              onChange={id => setDshId(id)}
+              options={scopes.map(scope => ({ value: scope.id, label: scope.name }))}
+            />
+            <Button
+              size="small"
+              icon={<UploadOutlined />}
+              loading={busy === 'import'}
+              disabled={dshId === undefined}
+              onClick={() => void importZip()}
+            >
+              {t('ext.skills.import')}
+            </Button>
+            <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={() => void load()}>
+              {t('common.refresh')}
+            </Button>
+            <Button
+              type="primary"
+              size="small"
+              icon={<PlusOutlined />}
+              disabled={dshId === undefined}
+              onClick={() => setNameModal(true)}
+            >
+              {t('ext.skills.add')}
+            </Button>
+          </Space>
+        )}
+      />
 
       {dshId === undefined ? (
-        <Empty style={{ marginTop: 48 }} description={t('ext.target.noDsh')} />
+        <EmptyState title={t('ext.target.noDsh')} />
       ) : (
         <>
-          <div style={{ padding: `${token.paddingXS}px ${token.padding}px 0` }}>
-            {writable !== undefined && (
-              <Typography.Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
-                {t('ext.skills.writableRoot')}: <Typography.Text code style={{ fontSize: token.fontSizeSM }}>{writable.path}</Typography.Text>
-              </Typography.Text>
-            )}
-          </div>
+          {issues.map((issue, i) => (
+            <Alert
+              key={i}
+              type="warning"
+              showIcon
+              title={t('ext.skills.issueTitle')}
+              description={(
+                <div>
+                  <Typography.Text code style={{ fontSize: token.fontSizeSM }}>{issue.path}</Typography.Text>
+                  <div style={{ marginTop: 2 }}>{issue.reason}</div>
+                </div>
+              )}
+            />
+          ))}
 
-          <div style={{ flex: 1, overflow: 'auto', padding: token.padding }}>
-            {loading && listing === null ? (
-              <Skeleton active />
-            ) : skills.length === 0 && issues.length === 0 ? (
-              <Empty description={t('ext.skills.empty')} />
-            ) : (
-              <Space direction="vertical" size={10} style={{ width: '100%' }}>
-                {issues.map((issue, i) => (
-                  <Alert
-                    key={i}
-                    type="warning"
-                    showIcon
-                    title={t('ext.skills.issueTitle')}
-                    description={(
-                      <div>
-                        <Typography.Text code style={{ fontSize: token.fontSizeSM }}>{issue.path}</Typography.Text>
-                        <div style={{ marginTop: 2 }}>{issue.reason}</div>
-                      </div>
-                    )}
-                  />
-                ))}
-                <Panel pad>
-                  <Space direction="vertical" size={10} style={{ width: '100%' }}>
-                    {skills.map(entry => (
-                      <div
+          <Panel pad={false}>
+            <Toolbar>
+              <SearchInput
+                value={search}
+                onChange={setSearch}
+                placeholder={t('ext.skills.searchPlaceholder')}
+                ariaLabel={t('ext.skills.searchPlaceholder')}
+              />
+              <Segmented
+                value={bucket}
+                onChange={value => setBucket(value as Bucket)}
+                options={[
+                  { value: 'all', label: t('ext.skills.bucket.all') },
+                  { value: 'editable', label: t('ext.skills.bucket.editable') },
+                  { value: 'readonly', label: t('ext.skills.bucket.readonly') },
+                ]}
+              />
+            </Toolbar>
+
+            <div style={{ padding: token.padding }}>
+              {loading && listing === null ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: token.padding }}>
+                  {Array.from({ length: 6 }, (_, i) => (
+                    <div key={i} style={{ border: `1px solid ${token.colorBorder}`, borderRadius: token.borderRadiusLG, padding: token.padding }}>
+                      <Skeleton active title={false} paragraph={{ rows: 3 }} />
+                    </div>
+                  ))}
+                </div>
+              ) : skills.length === 0 && issues.length === 0 ? (
+                <EmptyState
+                  title={t('ext.skills.empty')}
+                  description={t('ext.skills.emptyDesc')}
+                  action={(
+                    <Space size={8}>
+                      <Button type="primary" icon={<PlusOutlined />} onClick={() => setNameModal(true)}>
+                        {t('ext.skills.add')}
+                      </Button>
+                      <Button icon={<UploadOutlined />} onClick={() => void importZip()}>
+                        {t('ext.skills.import')}
+                      </Button>
+                    </Space>
+                  )}
+                />
+              ) : filtered.length === 0 ? (
+                <EmptyState title={t('common.noData')} />
+              ) : (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: token.padding }}>
+                    {paged.map(entry => (
+                      <SkillCard
                         key={`${entry.source}:${entry.path}`}
-                        style={{
-                          border: `1px solid ${token.colorSplit}`,
-                          borderRadius: token.borderRadius,
-                          padding: token.paddingSM,
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                          <Typography.Text strong>{entry.name}</Typography.Text>
-                          <Tag color={SOURCE_COLOUR[entry.source]}>{t(`ext.skills.source.${SOURCE_KEY[entry.source]}`)}</Tag>
-                          {entry.shape === 'flat' && <Tag>{t('ext.skills.shape.flat')}</Tag>}
-                          {!entry.modelInvocable && <Tag color="default">{t('ext.skills.invocation.modelOff')}</Tag>}
-                          {!entry.userInvocable && <Tag color="default">{t('ext.skills.invocation.userOff')}</Tag>}
-                          {!entry.editable && <Tag color="default">{t('ext.skills.readonly')}</Tag>}
-                          <span style={{ flex: 1 }} />
-                          <Button
-                            size="small"
-                            icon={<EditOutlined />}
-                            disabled={!entry.editable}
-                            loading={busy === `edit:${entry.name}`}
-                            onClick={() => void openEdit(entry)}
-                          />
-                          <Popconfirm
-                            title={t('ext.skills.deleteConfirm', { name: entry.name })}
-                            okText={t('common.delete')}
-                            cancelText={t('common.cancel')}
-                            onConfirm={() => void remove(entry)}
-                          >
-                            <Button
-                              size="small"
-                              danger
-                              icon={<DeleteOutlined />}
-                              disabled={!entry.editable}
-                              loading={busy === `remove:${entry.name}`}
-                            />
-                          </Popconfirm>
-                        </div>
-                        <div style={{ color: token.colorTextTertiary, fontSize: token.fontSizeSM, marginTop: 4 }}>
-                          {entry.description}
-                        </div>
-                        {entry.whenToUse !== undefined && (
-                          <div style={{ color: token.colorTextTertiary, fontSize: token.fontSizeSM, marginTop: 2 }}>
-                            {t('ext.skills.whenToUse')}: {entry.whenToUse}
-                          </div>
-                        )}
-                        <Tooltip title={entry.path}>
-                          <div style={{ color: token.colorTextTertiary, fontSize: token.fontSizeSM, marginTop: 2 }}>
-                            {entry.path}
-                          </div>
-                        </Tooltip>
-                      </div>
+                        entry={entry}
+                        editBusy={busy === `edit:${entry.name}`}
+                        onOpen={() => void openEdit(entry)}
+                        onDelete={() => void remove(entry)}
+                      />
                     ))}
-                  </Space>
-                </Panel>
-              </Space>
-            )}
-          </div>
+                  </div>
+                  {lastPage > 1 && (
+                    <Pagination
+                      style={{ textAlign: 'center', marginTop: token.padding }}
+                      current={currentPage}
+                      pageSize={CARDS_PER_PAGE}
+                      total={filtered.length}
+                      showSizeChanger={false}
+                      onChange={setPage}
+                    />
+                  )}
+                </>
+              )}
+            </div>
+          </Panel>
         </>
       )}
 
@@ -258,6 +320,6 @@ export default function SkillsView(props: { dshId?: string }): JSX.Element {
         onCancel={() => setEditor({ open: false, previousName: null, text: '' })}
         onSubmit={() => void save()}
       />
-    </div>
+    </Space>
   )
 }
