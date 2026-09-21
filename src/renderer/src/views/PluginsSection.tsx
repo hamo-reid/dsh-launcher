@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  Alert, Button, Menu, Modal, Select, Space, theme, message,
+  Menu, Modal, theme, message,
 } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
@@ -11,7 +11,7 @@ import SectionHeading from '../components/SectionHeading.tsx'
 import { DownloadVersionModal, PluginDetailModal, InstallToProfileModal, UpdatePluginModal, type UpdatePluginTarget } from './PluginsModals.tsx'
 import { toStoreMap } from '../lib/storeMap.ts'
 import MarketSection from './MarketSection.tsx'
-import DevPluginsView from './DevPluginsView.tsx'
+import DevPluginsView from './plugins/DevPluginsView.tsx'
 import PluginsDownloadView from './plugins/PluginsDownloadView.tsx'
 import PluginsInstallView from './plugins/PluginsInstallView.tsx'
 import PluginsOverviewView from './plugins/PluginsOverviewView.tsx'
