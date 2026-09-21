@@ -13,7 +13,7 @@ import { join } from 'node:path'
 import { renderSkillFile, installedEntry, installZipSkills, parseSkillText, writableSkillRoot } from './skills.ts'
 import {
   deleteSkillLib, installSkillToDsh, listSkillLibrary, readSkillLibFile, scanSkillInstalls,
-  setSkillLibraryDir, setSkillLibraryTrash, skillLibraryDir, skillLibTextOf, writeSkillLib,
+  setSkillLibraryDir, setSkillLibraryTrash, skillLibraryDir, skillLibShape, skillLibTextOf, writeSkillLib,
 } from './skill-library.ts'
 import { contextForEntry, updateDshState } from './appState.ts'
 import { AppError } from './errors.ts'
@@ -98,6 +98,41 @@ describe('skill library CRUD', () => {
     // One skill, not two: the flat file no longer doubles the entry.
     expect(listSkillLibrary().skills.map(s => s.name)).toEqual(['flat-edit'])
     expect(readSkillLibFile('flat-edit').text).toContain('edited in place')
+  })
+
+  it('installs a flat library entry as a flat copy, and reinstalls across shapes', () => {
+    mkdirSync(lib, { recursive: true })
+    writeFileSync(join(lib, 'notes.md'), makeSkill('notes'))
+    const flat = listSkillLibrary().skills[0]
+    const target = writableSkillRoot(contextForEntry(ENTRY()))
+    const dest = installSkillToDsh(target, flat, false)
+    expect(dest).toBe(join(target, 'notes.md'))
+    // dsh discovers the flat copy, and the launcher reports it as fresh.
+    expect(scanSkillInstalls(flat)[0]).toMatchObject({ installed: true, stale: false })
+    // Reinstalling without overwrite is refused…
+    expect(() => installSkillToDsh(target, flat, false)).toThrow(AppError)
+    // …and with it, the fresh copy replaces the old one.
+    writeFileSync(join(lib, 'notes.md'), makeSkill('notes', 'the notes skill', 'updated'))
+    const updated = listSkillLibrary().skills[0]
+    expect(installSkillToDsh(target, updated, true)).toBe(join(target, 'notes.md'))
+    expect(readFileSync(join(target, 'notes.md'), 'utf8')).toContain('updated')
+    expect(scanSkillInstalls(updated)[0]).toMatchObject({ installed: true, stale: false })
+  })
+
+  it('a flat install replaces a bundle copy of the same name (and vice versa)', () => {
+    const bundle = writeSkillLib(null, makeSkill('greeter'))
+    const target = writableSkillRoot(contextForEntry(ENTRY()))
+    installSkillToDsh(target, bundle, false)
+    expect(existsSync(join(target, 'greeter', 'SKILL.md'))).toBe(true)
+    // The same name now exists in the library as a flat entry: installing it must
+    // replace the bundle copy, not sit next to it (dsh would see two skills).
+    rmSync(join(lib, 'greeter'), { recursive: true, force: true })
+    writeFileSync(join(lib, 'greeter.md'), makeSkill('greeter'))
+    const flat = listSkillLibrary().skills[0]
+    expect(skillLibShape(flat)).toBe('flat')
+    installSkillToDsh(target, flat, true)
+    expect(existsSync(join(target, 'greeter'))).toBe(false)
+    expect(existsSync(join(target, 'greeter.md'))).toBe(true)
   })
 
   it('delete moves the whole bundle to the recycle bin', async () => {
@@ -202,6 +237,25 @@ describe('drift detection (scanSkillInstalls)', () => {
     const installs = scanSkillInstalls(libEntry)
     expect(installs[0]).toMatchObject({ installed: true, stale: true })
     expect(installs[0].entry?.path).toBe(join(home, 'skills', 'greeter.md'))
+  })
+
+  it('scans a flat library entry without reading the library root as a bundle', () => {
+    // A hand-dropped `<name>.md` is a supported shape (editing one upgrades it
+    // to a bundle), and its `dir` is the library ROOT — so a scanner joining
+    // `dir` + SKILL.md reads `<root>/SKILL.md` and throws, which fails the
+    // whole overview call: every entry is scanned in one map.
+    mkdirSync(lib, { recursive: true })
+    writeFileSync(join(lib, 'notes.md'), makeSkill('notes'))
+    const entry = listSkillLibrary().skills.find(s => s.name === 'notes')
+    if (entry === undefined) throw new Error('flat entry was not listed')
+    expect(entry.dir).toBe(skillLibraryDir())
+    expect(skillLibTextOf(entry)).toContain('do notes')
+    // Installed by hand as a flat file as well: found, and judged fresh.
+    mkdirSync(join(home, 'skills'), { recursive: true })
+    writeFileSync(join(home, 'skills', 'notes.md'), makeSkill('notes'))
+    expect(scanSkillInstalls(entry)[0]).toMatchObject({ installed: true, stale: false })
+    // A bundle entry still reads its own SKILL.md.
+    expect(skillLibTextOf(writeSkillLib(null, makeSkill('greeter')))).toContain('do greeter')
   })
 
   it('drift is judged on the writable-root copy, even when a higher-precedence root shadows it', () => {

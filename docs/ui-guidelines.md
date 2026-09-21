@@ -115,8 +115,9 @@
 ### 3.6 表单与模态
 - 表单字段一律配 `FieldLabel`(含必填星标),建立稳定可访问的 label。
 - 弹窗内字段输入后,Enter 应可提交;提交按钮 `loading` 防重复提交。
-- 危险操作(软删、卸载、移除)用 `ConfirmMenu` 的 `confirmText` 做二次确认,**不做裸删除按钮**。
+- 危险操作(软删、卸载、移除)用 `ConfirmMenu` 的 `confirmText` 做二次确认,**不做裸删除按钮**。行操作少(≤2 项)时用显式按钮 + `confirmDanger`(`ConfirmMenu.tsx` 导出),别塞进 kebab——藏起来的操作等于不存在。
 - 长表单可提供 表单/JSON 双模式(用 `Segmented` 切换,`CodeEditor` 做 JSON  pane):结构化输入是唯一真相源,JSON 是它的投影;JSON 非法时禁用提交,绝不在 JSON 模式下把输入反序列化回文本(会打乱光标)。
+- 诊断/探测类操作(「测试」)失败是**结果**不是错误:IPC 返回 `value.ok:false` 并在原处内联展示成因与耗时,不要弹 `message.error`;异步结果行加 `role="status" aria-live="polite"`,否则读屏器对文字变化完全静默。
 
 ### 3.7 状态反馈
 成功 / 失败统一走 antd `message`:`message.success('已保存')`、`message.error(res.error)`。不要用 alert、console 或裸 toast 自造。

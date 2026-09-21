@@ -12,12 +12,12 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { Alert, Button, Empty, Space, Switch, Tag, Tooltip, theme, message } from 'antd'
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import { DeleteOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import { apiErrorText } from '../lib/ipc.ts'
 import Panel from '../components/Panel.tsx'
-import ConfirmMenu, { type MenuAction } from '../components/ConfirmMenu.tsx'
+import { confirmDanger } from '../components/ConfirmMenu.tsx'
 import McpServerModal from './ExtensionsModals.tsx'
 import { PickLibMcpModal } from './LibraryModals.tsx'
 import type { McpIssue, McpLibEntry, McpServer, McpServerInput } from '../../../shared/types.ts'
@@ -52,6 +52,9 @@ export interface McpManagePanelProps {
   withPanel?: boolean
   /** Panel title override (defaults to the per-scope label). */
   title?: string
+  /** Reports the row count after every load, so a caller (the profile detail
+   * page) can show it without fetching the same rows a second time. */
+  onCount?: (count: number) => void
 }
 
 export default function McpManagePanel(p: McpManagePanelProps): JSX.Element {
@@ -70,15 +73,18 @@ export default function McpManagePanel(p: McpManagePanelProps): JSX.Element {
 
   const load = useCallback(async (): Promise<void> => {
     setLoading(true)
+    let rows: McpServer[]
     if (homeOnly) {
       const r = await window.api.ext.mcpHomeList(p.dshId)
       if (!r.ok) { setLoading(false); void message.error(apiErrorText(r)); return }
-      setServers(r.value)
+      rows = r.value
     } else {
       const r = await window.api.ext.mcpList(p.dshId, p.profile ?? '')
       if (!r.ok) { setLoading(false); void message.error(apiErrorText(r)); return }
-      setServers(r.value.servers)
+      rows = r.value.servers
     }
+    setServers(rows)
+    p.onCount?.(rows.length)
     const [lib, secretNames] = await Promise.all([
       window.api.ext.libMcpOverview(),
       window.api.ext.mcpSecrets(),
@@ -86,7 +92,7 @@ export default function McpManagePanel(p: McpManagePanelProps): JSX.Element {
     setLoading(false)
     if (lib.ok) setLibEntries(lib.value.map(row => row.entry))
     if (secretNames.ok) setSecrets(secretNames.value)
-  }, [p.dshId, p.profile, homeOnly])
+  }, [p.dshId, p.profile, homeOnly, p.onCount])
 
   useEffect(() => { void load() }, [load])
 
@@ -158,12 +164,6 @@ export default function McpManagePanel(p: McpManagePanelProps): JSX.Element {
         const raw = server.rawConfig !== undefined
         const bundle = server.layer === 'bundle'
         const name = server.serverName || server.id
-        const actions: MenuAction[] = [
-          ...(!raw ? [{ key: 'edit', label: t('common.edit') } as MenuAction] : []),
-          ...(!bundle
-            ? [{ key: 'remove', label: t('common.delete'), danger: true, confirmText: t('ext.mcp.removeConfirm', { name }) } as MenuAction]
-            : []),
-        ]
         return (
           <div key={`${server.layer}:${server.id}`} style={{ borderBottom: `1px solid ${token.colorSplit}`, paddingBottom: 8, opacity: server.disabled ? 0.65 : 1 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -185,14 +185,38 @@ export default function McpManagePanel(p: McpManagePanelProps): JSX.Element {
                   onChange={checked => void setDisabled(server, !checked)}
                 />
               </Tooltip>
-              {actions.length > 0 && (
-                <ConfirmMenu
-                  actions={actions}
-                  onAction={key => {
-                    if (key === 'edit') { setEditing(server); setModalOpen(true) }
-                    else if (key === 'remove') void remove(server)
-                  }}
-                />
+              {/* Explicit buttons rather than a kebab: the row actions are few
+                  and hiding them made removal effectively undiscoverable. A
+                  bundle row is not editable — dsh owns its id, so saving would
+                  insert a duplicate same-name row into the profile layer
+                  instead of updating it (the label next to it says as much). */}
+              {!raw && !bundle && (
+                <Button size="small" onClick={() => { setEditing(server); setModalOpen(true) }}>
+                  {t('common.edit')}
+                </Button>
+              )}
+              {bundle ? (
+                <Tooltip title={t('ext.mcp.bundleHint')}>
+                  <span style={{ color: token.colorTextTertiary, fontSize: token.fontSizeSM }}>
+                    {t('ext.mcp.bundleLocked')}
+                  </span>
+                </Tooltip>
+              ) : (
+                <Button
+                  size="small"
+                  danger
+                  type="text"
+                  icon={<DeleteOutlined />}
+                  disabled={busy === `remove:${server.id}`}
+                  onClick={() => confirmDanger({
+                    title: t('common.delete'),
+                    content: t('ext.mcp.removeConfirm', { name }),
+                    okText: t('common.confirm'),
+                    onOk: () => void remove(server),
+                  })}
+                >
+                  {t('common.delete')}
+                </Button>
               )}
             </div>
             <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, wordBreak: 'break-all' }}>

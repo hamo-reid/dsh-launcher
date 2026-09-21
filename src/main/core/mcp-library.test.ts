@@ -76,6 +76,7 @@ describe('mcp library store', () => {
 
   it('save rejects an invalid input instead of storing it', () => {
     expect(() => saveMcpLibraryEntry(null, { ...stdioInput(), serverName: '' })).toThrow(/serverName/)
+    expect(() => saveMcpLibraryEntry(null, { ...stdioInput(), env: [{ name: 'KEY', mode: 'plain', value: 'a\nb' }] })).toThrow(/newline/)
     expect(listMcpLibrary()).toEqual([])
   })
 
@@ -108,6 +109,10 @@ describe('mcp library store', () => {
     expect(mcpInputProblem({ ...stdioInput(), command: ' ' })?.code).toBe('ext.needCommand')
     expect(mcpInputProblem({ ...stdioInput(), transport: 'streamable-http', command: undefined, url: ' ' })?.code).toBe('ext.needUrl')
     expect(mcpInputProblem({ ...stdioInput(), env: [{ name: 'A B', mode: 'plain', value: 'x' }] })?.code).toBe('ext.badEnvName')
+    // A plain value becomes a scalar in the patch file, so a newline can never
+    // be applied — the library must not hold such an entry at all.
+    expect(mcpInputProblem({ ...stdioInput(), env: [{ name: 'KEY', mode: 'plain', value: 'a\nb' }] })?.code).toBe('ext.badEnvValue')
+    expect(mcpInputProblem({ ...stdioInput(), headers: [{ name: 'KEY', mode: 'js', value: 'a\nb' }] })).toBeNull()
     expect(mcpInputProblem(stdioInput())).toBeNull()
   })
 
@@ -138,6 +143,25 @@ describe('drift detection (mcpRowMatches)', () => {
     expect(mcpRowMatches(entry, appliedRow({ ...stdioInput(), command: 'bunx' }))).toBe(false)
     expect(mcpRowMatches(entry, appliedRow(stdioInput(), { toolCallTimeoutMs: 5 }))).toBe(false)
     expect(mcpRowMatches(entry, appliedRow(stdioInput(), { failOnStartupError: true }))).toBe(false)
+  })
+
+  it('is key-order-insensitive for reconnect (the form builds it by spreading)', () => {
+    // `setReconnect` spreads patches, so the entry's key order follows the
+    // order the user filled the fields in, while the row side always rebuilds
+    // it enabled → initialDelayMs → maxDelayMs → maxAttempts. Comparing raw
+    // objects made a freshly applied row read as outdated, so sync rewrote it
+    // on every click and never converged.
+    const input: McpServerInput = { ...stdioInput(), reconnect: { maxAttempts: 3, initialDelayMs: 500 } }
+    const entry: McpLibEntry = { serverName: 'github', input, updatedAt: '' }
+    const row = appliedRow(input, { reconnect: { initialDelayMs: 500, maxAttempts: 3 } })
+    expect(mcpRowMatches(entry, row)).toBe(true)
+    // A real difference in the same field still drifts.
+    expect(mcpRowMatches(entry, appliedRow(input, { reconnect: { initialDelayMs: 500, maxAttempts: 4 } }))).toBe(false)
+    // Fields the row read drops cannot cause drift either.
+    expect(mcpRowMatches(
+      { ...entry, input: { ...input, reconnect: { maxAttempts: 3, initialDelayMs: 500, enabled: 'yes' as never } } },
+      row,
+    )).toBe(true)
   })
 
   it('is order-insensitive for env/headers, value-sensitive for args', () => {

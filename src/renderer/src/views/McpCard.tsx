@@ -1,14 +1,15 @@
 /** One MCP-library card for the repository grid — mirrors PluginCard: the upper
- * region opens the edit modal; the footer carries the "apply…" action and a
- * kebab for edit / sync / remove. The usage line summarizes where the entry is
- * materialized (applied rows are copies keyed by `serverName`). All colours
- * derive from theme tokens per docs/ui-guidelines.md. */
+ * region opens the edit modal; the footer carries the "apply…" and "test"
+ * actions plus a kebab for edit / sync / remove. The usage line summarizes
+ * where the entry is materialized (applied rows are copies keyed by
+ * `serverName`); a probe result, when there is one, reads inline under the
+ * body. All colours derive from theme tokens per docs/ui-guidelines.md. */
 import { useState } from 'react'
 import { Button, Tag, Tooltip, theme } from 'antd'
-import { SyncOutlined } from '@ant-design/icons'
+import { ApiOutlined, CheckCircleFilled, CloseCircleFilled, SyncOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import ConfirmMenu, { type MenuAction } from '../components/ConfirmMenu.tsx'
-import type { McpLibEntry } from '../../../shared/types.ts'
+import type { McpLibEntry, McpProbeResult } from '../../../shared/types.ts'
 
 export interface McpCardProps {
   entry: McpLibEntry
@@ -20,10 +21,19 @@ export interface McpCardProps {
   handwritten: number
   /** The sync action is in flight. */
   busy: boolean
+  /** A connectivity probe for THIS card is in flight. */
+  testing: boolean
+  /** Seconds the running probe has been going (for the count-up label). */
+  probeSeconds: number
+  /** A probe is running somewhere else, so this card must not start another. */
+  testBlocked: boolean
+  /** The last probe verdict, when there is one. */
+  probe?: McpProbeResult
   onEdit: () => void
   onApply: () => void
   onSync: () => void
   onRemove: () => void
+  onTest: () => void
 }
 
 export default function McpCard(p: McpCardProps): JSX.Element {
@@ -73,12 +83,28 @@ export default function McpCard(p: McpCardProps): JSX.Element {
         <CardBody entry={entry} applied={p.applied} stale={p.stale} handwritten={p.handwritten} />
       </div>
 
-      {/* Footer — "apply…" is the primary action; kebab carries edit / sync /
-          remove. */}
+      {p.probe !== undefined && <ProbeLine probe={p.probe} />}
+
+      {/* Footer — "apply…" and "test" are the visible actions; the kebab carries
+          edit / sync / remove. */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: token.paddingSM, paddingTop: token.paddingSM, borderTop: `1px solid ${token.colorSplit}` }}>
-        <Button size="small" type="primary" onClick={p.onApply}>
-          {t('ext.mcp.apply')}
-        </Button>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <Button size="small" type="primary" onClick={p.onApply}>
+            {t('ext.mcp.apply')}
+          </Button>
+          <Tooltip title={t('ext.mcp.probe.hint')}>
+            <Button
+              size="small"
+              icon={<ApiOutlined />}
+              loading={p.testing}
+              disabled={p.testBlocked}
+              onClick={p.onTest}
+              aria-label={t('ext.mcp.probe')}
+            >
+              {p.testing ? t('ext.mcp.probe.running', { sec: p.probeSeconds }) : t('ext.mcp.probe')}
+            </Button>
+          </Tooltip>
+        </span>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
           {p.stale > 0 && (
             <Tooltip title={t('ext.mcp.syncHint')}>
@@ -90,6 +116,61 @@ export default function McpCard(p: McpCardProps): JSX.Element {
           <ConfirmMenu actions={actions} onAction={onAction} />
         </span>
       </div>
+    </div>
+  )
+}
+
+/** The verdict line under a card's body. `role="status"` + `aria-live` because
+ * an inline text change is otherwise silent to a screen reader. */
+function ProbeLine({ probe }: { probe: McpProbeResult }): JSX.Element {
+  const { t } = useTranslation()
+  const { token } = theme.useToken()
+  const seconds = (probe.elapsedMs / 1000).toFixed(1)
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      style={{ display: 'flex', alignItems: 'flex-start', gap: 4, marginTop: 8, fontSize: token.fontSizeSM }}
+    >
+      {probe.ok
+        ? <CheckCircleFilled style={{ color: token.colorSuccess, marginTop: 3 }} />
+        : <CloseCircleFilled style={{ color: token.colorError, marginTop: 3 }} />}
+      <span style={{ minWidth: 0, wordBreak: 'break-word' }}>
+        {probe.ok
+          ? t('ext.mcp.probe.ok', { ms: probe.elapsedMs })
+          : `${t('ext.mcp.probe.fail', { sec: seconds })} · ${t(`ext.mcp.probe.stage.${probe.stage ?? 'handshake'}`)}`}
+        {probe.ok && probe.serverName !== undefined && (
+          <> · {t('ext.mcp.probe.serverInfo', { name: probe.serverName, version: probe.serverVersion ?? '—' })}</>
+        )}
+        {probe.requestedProtocolVersion !== undefined && (
+          <>
+            {' · '}
+            <Tooltip
+              title={t('ext.mcp.probe.negotiatedHint', {
+                version: probe.protocolVersion ?? '—',
+                requested: probe.requestedProtocolVersion,
+              })}
+            >
+              <span style={{ cursor: 'help' }}>
+                {t('ext.mcp.probe.negotiated', { version: probe.protocolVersion ?? '—' })}
+              </span>
+            </Tooltip>
+          </>
+        )}
+        {!probe.ok && probe.reason !== undefined && (
+          <>
+            {' · '}
+            <Tooltip title={probe.detail}>
+              <span style={{ color: token.colorTextSecondary, cursor: 'help' }}>{probe.reason}</span>
+            </Tooltip>
+          </>
+        )}
+        {(probe.unevaluated?.length ?? 0) > 0 && (
+          <div style={{ color: token.colorWarning }}>
+            {t('ext.mcp.probe.unevaluated', { count: probe.unevaluated?.length ?? 0 })}
+          </div>
+        )}
+      </span>
     </div>
   )
 }

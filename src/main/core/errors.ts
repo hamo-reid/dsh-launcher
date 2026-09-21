@@ -109,6 +109,7 @@ export const E = {
   // extensions (MCP library)
   extMcpExists: 'ext.mcpExists',
   extMcpNotInLib: 'ext.mcpNotInLib',
+  extMcpIdTaken: 'ext.mcpIdTaken',
   // dsh data import/export
   dataNotSelected: 'data.notSelected',
   // run

@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
-  addMcpServer, diagnoseMcpServers, readMcpServers, removeMcpServer, renderMcpConfigBody, updateMcpServer,
+  addMcpServer, diagnoseMcpServers, idTakenElsewhere, readMcpServers, removeMcpServer, renderMcpConfigBody, updateMcpServer,
 } from './mcp.ts'
 import type { McpIssue, McpServer, McpServerInput } from '../../shared/types.ts'
 
@@ -172,6 +172,23 @@ describe('diagnoseMcpServers', () => {
       server({ id: 'b', serverName: 'github', command: 'npx', layer: 'home', disabled: true }),
     ])
     expect(out.flatMap(row => row.issues)).toEqual([])
+  })
+
+  it('an id already resolved from another layer blocks an insert', () => {
+    // Rows in the TARGET layer are updated in place, so they are not a
+    // collision; a row from any other layer is (dsh merges by id, so an
+    // `insert:` would leave two rows of the same id in play).
+    const resolved = [
+      server({ id: 'mcp-github', serverName: 'github', layer: 'bundle' }),
+      server({ id: 'mcp-home', serverName: 'homely', layer: 'home' }),
+    ]
+    expect(idTakenElsewhere(resolved, 'profile', 'mcp-github')).toBe(true)
+    expect(idTakenElsewhere(resolved, 'profile', 'mcp-home')).toBe(true)
+    expect(idTakenElsewhere(resolved, 'bundle', 'mcp-github')).toBe(false)
+    expect(idTakenElsewhere(resolved, 'profile', 'mcp-fresh')).toBe(false)
+    // A disabled row still occupies the id: the merge happens before the off
+    // switch is honoured.
+    expect(idTakenElsewhere([server({ id: 'mcp-off', layer: 'home', disabled: true })], 'profile', 'mcp-off')).toBe(true)
   })
 
   it('names a bad serverName, a missing transport and a missing endpoint', () => {

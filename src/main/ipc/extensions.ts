@@ -18,13 +18,13 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { dialog } from 'electron'
+import { app, dialog } from 'electron'
 import { join } from 'node:path'
 import { handle } from './handle.ts'
 import { contextForEntry, dshEntryById, type DshContext } from '../core/appState.ts'
 import { homePatchPath, listProfiles, profileDir, readHomePatch } from '../core/home.ts'
 import { listMcpServers } from '../core/combo.ts'
-import { diagnoseMcpServers } from '../core/mcp.ts'
+import { diagnoseMcpServers, idTakenElsewhere } from '../core/mcp.ts'
 import { addMcpServer, findMcpServer, mcpRowIds, readMcpServers, removeMcpServer, SERVER_NAME_RE, updateMcpServer } from '../core/mcp.ts'
 import { listMcpSecretNames, setMcpSecret } from '../core/mcp-secrets.ts'
 import { logger } from '../core/logger.ts'
@@ -34,19 +34,20 @@ import {
 } from '../core/skills.ts'
 import {
   deleteSkillLib, installSkillToDsh, listSkillLibrary, readSkillLibFile, scanSkillInstalls, skillLibraryDir,
-  skillLibTextOf, writeSkillLib,
+  skillLibShape, skillLibTextOf, writeSkillLib,
 } from '../core/skill-library.ts'
 import {
   findMcpLibraryEntry, listMcpLibrary, mcpInputProblem, removeMcpLibraryEntry, saveMcpLibraryEntry, scanMcpUsages,
 } from '../core/mcp-library.ts'
+import { probeMcpServer } from '../core/mcp-probe.ts'
 import { SKILL_NAME_RE } from '../../shared/skill.ts'
 import { assertPatchDocValid, setRowDisabled } from '../core/patch.ts'
 import { verifyDisabledState } from '../core/app-util.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
 import { rowIdInvalid } from './validate.ts'
 import type {
-  IpcResult, McpApplyTarget, McpLayer, McpLibOverviewRow, McpListing, McpServer, McpServerInput, SkillEntry,
-  SkillLibEntry, SkillLibOverviewRow, SkillListing,
+  IpcResult, McpApplyTarget, McpLayer, McpLibOverviewRow, McpListing, McpProbeResult, McpServer, McpServerInput,
+  SkillEntry, SkillLibEntry, SkillLibOverviewRow, SkillListing,
 } from '../../shared/types.ts'
 
 /** A layer the extensions surface may write. `bundle` is read-only (shipped). */
@@ -117,6 +118,9 @@ function saveMcpRow(ctx: DshContext, profile: string, rawInput: McpServerInput, 
     // silently overwrite the first.
     const id = rawInput.id.trim() === '' ? `mcp-${rawInput.serverName.trim()}` : rawInput.id.trim()
     const input = { ...rawInput, id }
+    if (!mcpRowIds(current).includes(id) && idResolvesElsewhere(ctx, profile, layer, id)) {
+      return fail(E.extMcpIdTaken, { detail: id })
+    }
     const next = mcpRowIds(current).includes(id)
       ? updateMcpServer(current, input)
       : addMcpServer(current, input)
@@ -124,6 +128,29 @@ function saveMcpRow(ctx: DshContext, profile: string, rawInput: McpServerInput, 
   } catch (error) {
     return failFromError(error)
   }
+}
+
+/** Whether an `insert:` of this id would collide with a row that already
+ * resolves from another layer, in any profile the write reaches. Overriding such
+ * a row is the disable toggle's job — it writes an id-targeted update, never a
+ * second insert (see `ext:mcpSetDisabled`). */
+function idResolvesElsewhere(ctx: DshContext, profile: string, layer: McpWriteLayer, id: string): boolean {
+  // A home row is resolved by EVERY profile, so a home write has to consider
+  // them all; a profile write only ever lands in that one profile's resolution.
+  const profiles = layer === 'profile' ? [profile] : listProfiles(ctx)
+  for (const candidate of profiles) {
+    let resolved: McpServer[]
+    try {
+      resolved = listMcpServers(ctx, candidate)
+    } catch {
+      // An unreadable profile (no manifest, a corrupt one) has no rows to
+      // collide with — this guard is a safety net, never the reason a save
+      // fails; the write itself reports whatever is actually wrong.
+      continue
+    }
+    if (idTakenElsewhere(resolved, layer, id)) return true
+  }
+  return false
 }
 
 /** Register every `ext:*` channel. */
@@ -307,7 +334,10 @@ export function registerExtensionsIpc(): void {
     }
     const ctx = ctxOf(target.dshId)
     if (ctx === null) return fail(E.dshNotFound)
-    const rejected = rejectInput(entry.input)
+    // Validate the input as it will be WRITTEN: an entry's own `id` is
+    // discarded on apply (`saveMcpRow` derives it from the serverName), so
+    // checking it here would refuse an entry this path can happily apply.
+    const rejected = rejectInput({ ...entry.input, id: '' })
     if (rejected !== null) return rejected
     try {
       // A second row claiming one serverName is a real dsh load failure, so the
@@ -352,6 +382,17 @@ export function registerExtensionsIpc(): void {
     }
     if (updated > 0) logger.info(`mcp library: synced ${serverName} → ${updated} row(s)`)
     return { ok: true, value: { updated, skipped } }
+  })
+
+  // Connectivity probe for one library entry: a real initialize handshake against
+  // the server (stdio spawn or HTTP POST), reported inline as ok/reason/elapsed.
+  // The launcher never calls tools, and a dead server is a VALUE (`ok:false`),
+  // not an IPC failure — so the card shows the reason instead of a toast.
+  handle('ext:libMcpTest', async (_event, serverName: string): Promise<IpcResult<McpProbeResult>> => {
+    if (typeof serverName !== 'string' || serverName === '') return fail(E.extBadServerName, { detail: String(serverName) })
+    const entry = findMcpLibraryEntry(serverName)
+    if (entry === undefined) return fail(E.extMcpNotInLib, { detail: serverName })
+    return { ok: true, value: await probeMcpServer(entry.input, { clientVersion: app.getVersion() }) }
   })
 
   // ── Skill library (launcher-global bundles) ─────────────────────────────────
@@ -472,7 +513,7 @@ export function registerExtensionsIpc(): void {
       installSkillToDsh(root, lib, overwrite === true)
       const parsed = parseSkillText(skillLibTextOf(lib))
       if (!parsed.ok) return fail(E.extBadSkill, { detail: name })
-      return { ok: true, value: installedEntry(parsed.skill, root) }
+      return { ok: true, value: installedEntry(parsed.skill, root, skillLibShape(lib)) }
     } catch (error) {
       return failFromError(error)
     }

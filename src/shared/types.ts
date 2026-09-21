@@ -975,6 +975,35 @@ export interface McpListing {
   layers: McpLayer[]
 }
 
+/** Which leg of a probe failed — the UI localizes the label from this. */
+export type McpProbeStage = 'config' | 'spawn' | 'handshake' | 'timeout' | 'protocol' | 'http'
+
+/** The verdict of one MCP connectivity probe. A dead server is NOT an IPC
+ * failure — the call succeeded and the answer is "no": so this is returned as
+ * `IpcResult.value`, and `ok:false` carries the reason inline on the card
+ * (mirrors `GithubRateLimit`, and keeps the error-code table for request-level
+ * failures only). `elapsedMs` is always set, so the UI can answer
+ * "成/败 + 原因 + 耗时" without a second call. */
+export interface McpProbeResult {
+  ok: boolean
+  elapsedMs: number
+  /** Which leg failed; absent on success. */
+  stage?: McpProbeStage
+  /** Human-readable reason — the server's own message when it gave one. */
+  reason?: string
+  /** Server identity from the initialize result (proof of a real handshake). */
+  serverName?: string
+  serverVersion?: string
+  /** The protocol version the server actually negotiated. */
+  protocolVersion?: string
+  /** What we asked for, when the server negotiated down to something else. */
+  requestedProtocolVersion?: string
+  /** stderr tail (stdio) or `HTTP <status>` (http) — the diagnostic detail line. */
+  detail?: string
+  /** `js` env/header entries the launcher could not evaluate (best-effort). */
+  unevaluated?: string[]
+}
+
 // ── launcher-global libraries (dsh/profile-agnostic) ─────────────────────────
 
 /** One launcher-global MCP server definition. Applying it materializes a full

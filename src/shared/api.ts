@@ -61,6 +61,7 @@ import type {
   McpListing,
   McpApplyTarget,
   McpLibOverviewRow,
+  McpProbeResult,
   McpServer,
   McpServerInput,
   SkillEntry,
@@ -172,6 +173,11 @@ export interface WindowApi {
     libMcpApply: (serverName: string, target: McpApplyTarget) => Promise<IpcResult<boolean>>
     /** Rewrite every drifted, non-handwritten applied row from the library. */
     libMcpSync: (serverName: string) => Promise<IpcResult<{ updated: number; skipped: number }>>
+    /** Really connect to one library entry - a single initialize handshake, no
+     * tools called - and report ok/reason/elapsed. A server that answers nothing
+     * is a VALUE (`value.ok:false`), not an IPC failure, so the card can show
+     * the reason inline instead of a toast. */
+    libMcpTest: (serverName: string) => Promise<IpcResult<McpProbeResult>>
     // ── Skill library (launcher-global bundles; dsh roots hold copies) ──
     /** The library catalog plus every file that would not load (with reasons). */
     libSkillList: () => Promise<IpcResult<{ skills: SkillLibEntry[]; issues: SkillLibIssue[] }>>

@@ -154,54 +154,70 @@ export async function deleteSkillLib(name: string): Promise<void> {
   logger.info(`skill library: moved to recycle bin ${target}`)
 }
 
+/** Whether a library entry is a bundle (`<name>/SKILL.md`) or a flat
+ * `<name>.md` — a flat entry's `dir` is the library ROOT itself. */
+export function skillLibShape(lib: SkillLibEntry): 'bundle' | 'flat' {
+  return lib.dir === root() ? 'flat' : 'bundle'
+}
+
 /**
- * Copy a library skill into a dsh's writable root. With `overwrite` this is a
- * reinstall: the existing copy moves aside, the fresh bundle copies in, the
- * old one is dropped (a straight `cp` over would leave removed files behind).
+ * Copy a library skill into a dsh's writable root, in the entry's own shape
+ * (`<name>/` or `<name>.md` — dsh discovers both). With `overwrite` this is a
+ * reinstall: the existing copy moves aside, the fresh one copies in, the old
+ * one is dropped (a straight `cp` over would leave removed files behind). A
+ * copy of the OTHER shape moves aside too, so switching an entry between flat
+ * and bundle never leaves both behind.
  */
 export function installSkillToDsh(
   writableRoot: string,
   lib: SkillLibEntry,
   overwrite: boolean,
 ): string {
-  if (lib.dir === root()) throw new Error(`library skill "${lib.name}" is a flat file; expected a bundle`)
+  const shape = skillLibShape(lib)
   mkdirSync(writableRoot, { recursive: true })
-  const dest = join(writableRoot, lib.name)
-  const flatDest = join(writableRoot, `${lib.name}.md`)
-  if (existsSync(dest) || existsSync(flatDest)) {
+  const dest = shape === 'flat' ? join(writableRoot, `${lib.name}.md`) : join(writableRoot, lib.name)
+  const other = shape === 'flat' ? join(writableRoot, lib.name) : join(writableRoot, `${lib.name}.md`)
+  const copy = (): void => {
+    if (shape === 'flat') cpSync(lib.path, dest)
+    else cpSync(lib.dir, dest, { recursive: true })
+  }
+  if (existsSync(dest) || existsSync(other)) {
     if (!overwrite) throwE(E.extSkillExists, { detail: lib.name })
     // The old copy moves aside to a SIBLING temp dir — same volume, so the
     // rename stays atomic (a tmpdir aside would throw EXDEV across drives) —
-    // then the fresh bundle copies in and the old one is dropped. A failed
-    // copy restores the old copy instead of losing it.
+    // then the fresh copy goes in and the old one is dropped. A failed copy
+    // restores the old copy instead of losing it.
     const aside = mkdtempSync(join(writableRoot, '.pm-reinstall-'))
     const old = join(aside, 'old')
-    const oldFlat = join(aside, 'old-flat')
+    const oldOther = join(aside, 'old-other')
     try {
       if (existsSync(dest)) renameSync(dest, old)
-      if (existsSync(flatDest)) renameSync(flatDest, oldFlat)
+      if (existsSync(other)) renameSync(other, oldOther)
       try {
-        cpSync(lib.dir, dest, { recursive: true })
+        copy()
       } catch (error) {
         rmSync(dest, { recursive: true, force: true })
         if (existsSync(old)) renameSync(old, dest)
-        if (existsSync(oldFlat)) renameSync(oldFlat, flatDest)
+        if (existsSync(oldOther)) renameSync(oldOther, other)
         throw error
       }
     } finally {
       rmSync(aside, { recursive: true, force: true })
     }
   } else {
-    cpSync(lib.dir, dest, { recursive: true })
+    copy()
   }
   logger.info(`skill library: installed ${lib.name} → ${dest}`)
   return dest
 }
 
-/** Whether an installed copy is up to date with the library (SKILL.md text,
- * line endings normalized — zips made on Windows may carry CRLF). */
+/** Whether an installed copy is up to date with the library (skill text, line
+ * endings normalized — zips made on Windows may carry CRLF). Reads `path`, not
+ * `dir` + SKILL.md: a FLAT entry (`<name>.md` in the library root) has the root
+ * as its `dir`, so joining would read `<root>/SKILL.md` and throw — which would
+ * take down every caller that scans the whole library. */
 export function skillLibTextOf(lib: SkillLibEntry): string {
-  return readFileSync(join(lib.dir, 'SKILL.md'), 'utf8').replaceAll('\r\n', '\n')
+  return readFileSync(lib.path, 'utf8').replaceAll('\r\n', '\n')
 }
 
 /** Every dsh where the library skill is (or could be) installed, with drift

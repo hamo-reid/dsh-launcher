@@ -268,6 +268,18 @@ export function diagnoseMcpServers(servers: McpServer[]): McpServer[] {
   })
 }
 
+/**
+ * Whether a row carrying this id already comes from a layer OTHER than `layer`.
+ * dsh merges rows by id, so an `insert:` of an id that is already resolved from
+ * another layer leaves two rows of the same id in play — one of them silently
+ * loses (and the launcher diagnoses the pair as a duplicate). Rows in the target
+ * layer itself are not a collision: those are updated in place. Disabled rows
+ * count too — the merge happens before the off switch is honoured.
+ */
+export function idTakenElsewhere(resolved: McpServer[], layer: McpLayer, id: string): boolean {
+  return resolved.some(server => server.id === id && server.layer !== layer)
+}
+
 /** Add a new MCP row to a patch layer. */
 export function addMcpServer(text: string, input: McpServerInput): string {
   const id = input.id.trim() === '' ? defaultRowId(input.serverName) : input.id.trim()

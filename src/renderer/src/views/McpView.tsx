@@ -24,7 +24,7 @@ import Toolbar from '../components/Toolbar.tsx'
 import McpCard from './McpCard.tsx'
 import McpServerModal, { McpSecretModal, SecretsManageModal } from './ExtensionsModals.tsx'
 import { ApplyMcpModal, type DshScope } from './LibraryModals.tsx'
-import type { McpApplyTarget, McpLibEntry, McpLibOverviewRow, McpServerInput } from '../../../shared/types.ts'
+import type { McpApplyTarget, McpLibEntry, McpLibOverviewRow, McpProbeResult, McpServer, McpServerInput } from '../../../shared/types.ts'
 
 /** Cards per page (the grid paginates locally, like the plugin overview). */
 const CARDS_PER_PAGE = 24
@@ -46,6 +46,11 @@ export default function McpView(): JSX.Element {
   const [secrets, setSecrets] = useState<string[]>([])
   const [secretModal, setSecretModal] = useState(false)
   const [secretsOpen, setSecretsOpen] = useState(false)
+  // The last connectivity verdict per serverName, and the running probe's
+  // elapsed seconds (a cold `npx` can legitimately take tens of seconds, so the
+  // button counts up instead of looking hung).
+  const [probe, setProbe] = useState<Record<string, McpProbeResult>>({})
+  const [probeSeconds, setProbeSeconds] = useState(0)
 
   // Repository filters + local pagination.
   const [search, setSearch] = useState('')
@@ -61,10 +66,26 @@ export default function McpView(): JSX.Element {
     setLoading(false)
     if (!overview.ok) { void message.error(apiErrorText(overview)); return }
     setRows(overview.value)
+    // Keep the verdicts the user just collected; only drop entries that no
+    // longer exist (removed or renamed in the library).
+    setProbe(prev => {
+      const names = new Set(overview.value.map(row => row.entry.serverName))
+      return Object.fromEntries(Object.entries(prev).filter(([name]) => names.has(name)))
+    })
     if (secretNames.ok) setSecrets(secretNames.value)
   }, [])
 
   useEffect(() => { void load() }, [load])
+
+  // Tick the elapsed seconds while a probe runs, so a slow handshake reads as
+  // "still working" rather than "stuck".
+  useEffect(() => {
+    if (!busy.startsWith('test:')) return
+    setProbeSeconds(0)
+    const startedAt = Date.now()
+    const timer = setInterval(() => { setProbeSeconds(Math.floor((Date.now() - startedAt) / 1000)) }, 1000)
+    return () => clearInterval(timer)
+  }, [busy])
 
   // dsh/profile scopes for the apply dialog.
   useEffect(() => {
@@ -81,7 +102,22 @@ export default function McpView(): JSX.Element {
     if (!r.ok) { void message.error(apiErrorText(r)); return }
     void message.success(t('ext.mcp.saved', { name: input.serverName }))
     setModal({ open: false, editing: null })
+    // The definition changed, so any verdict collected against the old one is
+    // no longer evidence of anything.
+    setProbe(prev => Object.fromEntries(Object.entries(prev).filter(([name]) => name !== input.serverName)))
     await load()
+  }
+
+  // Really connect to the entry. Only one probe runs at a time (the shared
+  // `busy` key), which also makes a double click impossible; upgrading to
+  // concurrent probes would mean a Set of serverNames here.
+  const test = async (entry: McpLibEntry): Promise<void> => {
+    setBusy(`test:${entry.serverName}`)
+    setProbe(prev => Object.fromEntries(Object.entries(prev).filter(([name]) => name !== entry.serverName)))
+    const r = await window.api.ext.libMcpTest(entry.serverName)
+    setBusy('')
+    if (!r.ok) { void message.error(apiErrorText(r)); return }
+    setProbe(prev => ({ ...prev, [entry.serverName]: r.value }))
   }
 
   const remove = async (entry: McpLibEntry): Promise<void> => {
@@ -160,6 +196,23 @@ export default function McpView(): JSX.Element {
 
   const addServer = (): void => setModal({ open: true, editing: null })
 
+  // The library entry rendered as a row for the edit dialog. MEMOIZED on
+  // purpose: the dialog re-seeds its form whenever `editing` changes identity,
+  // so an inline object here would be new on every view render and would wipe
+  // what the user is typing — including on the once-a-second tick of a running
+  // connectivity probe.
+  const editingInput = useMemo<McpServer | null>(() => modal.editing === null
+    ? null
+    : {
+        // The form only edits the input fields; the layer picker is hidden here.
+        ...modal.editing.input,
+        id: '',
+        serverName: modal.editing.serverName,
+        layer: 'profile',
+        issues: [],
+        disabled: false,
+      }, [modal.editing])
+
   return (
     <Space direction="vertical" style={{ width: '100%' }} size="middle">
       <SectionHeading
@@ -235,10 +288,15 @@ export default function McpView(): JSX.Element {
                     stale={row.stale}
                     handwritten={row.handwritten}
                     busy={busy === `sync:${row.entry.serverName}`}
+                    testing={busy === `test:${row.entry.serverName}`}
+                    probeSeconds={probeSeconds}
+                    testBlocked={busy !== '' && busy !== `test:${row.entry.serverName}`}
+                    {...(probe[row.entry.serverName] !== undefined ? { probe: probe[row.entry.serverName] } : {})}
                     onEdit={() => setModal({ open: true, editing: row.entry })}
                     onApply={() => setApplyEntry(row.entry)}
                     onSync={() => void sync(row.entry)}
                     onRemove={() => void remove(row.entry)}
+                    onTest={() => void test(row.entry)}
                   />
                 ))}
               </div>
@@ -259,18 +317,7 @@ export default function McpView(): JSX.Element {
 
       <McpServerModal
         open={modal.open}
-        editing={modal.editing === null
-          ? null
-          : {
-              // A library entry rendered as a row: the form only edits the
-              // input fields, and the layer picker is hidden here.
-              ...modal.editing.input,
-              id: '',
-              serverName: modal.editing.serverName,
-              layer: 'profile',
-              issues: [],
-              disabled: false,
-            }}
+        editing={editingInput}
         layer="profile"
         onLayerChange={() => undefined}
         selectLayer={false}

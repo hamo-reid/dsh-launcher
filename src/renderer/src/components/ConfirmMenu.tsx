@@ -15,6 +15,30 @@ interface ConfirmMenuProps {
   onAction: (key: string) => void
 }
 
+/**
+ * The one confirm dialog behind every destructive row action — the kebab's
+ * `confirmText` path and the explicit danger buttons share it, so the wording,
+ * the danger styling, and the ok button can never drift between the two
+ * triggers. (docs/ui-guidelines.md §3.6: a destructive action is never bare.)
+ */
+export function confirmDanger(opts: {
+  title: string
+  content?: string
+  okText: string
+  /** Most callers destroy something; pass `false` for a merely consequential
+   * action (e.g. taking a dev-plugin snapshot) to keep the ok button neutral. */
+  danger?: boolean
+  onOk: () => void
+}): void {
+  Modal.confirm({
+    title: opts.title,
+    content: opts.content,
+    okText: opts.okText,
+    okButtonProps: { danger: opts.danger !== false },
+    onOk: opts.onOk,
+  })
+}
+
 /** Kebab (…) action menu with optional per-item confirm — the unified
  * row-action trigger used across lists. */
 export default function ConfirmMenu({ actions, onAction }: ConfirmMenuProps) {
@@ -22,11 +46,11 @@ export default function ConfirmMenu({ actions, onAction }: ConfirmMenuProps) {
   const { token } = theme.useToken()
   const run = (action: MenuAction): void => {
     if (action.confirmText !== undefined) {
-      Modal.confirm({
+      confirmDanger({
         title: action.label,
         content: action.confirmText,
         okText: t('common.confirm'),
-        okButtonProps: { danger: action.danger === true },
+        danger: action.danger === true,
         onOk: () => onAction(action.key),
       })
     } else {

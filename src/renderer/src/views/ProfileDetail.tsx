@@ -67,6 +67,10 @@ export default function ProfileDetailView({ dshId, name, onChanged, onRenamed }:
   const [detail, setDetail] = useState<ProfileDetail | null>(null)
   const [layers, setLayers] = useState<ProfileLayer[] | null>(null)
   const [conflicts, setConflicts] = useState<InsertConflict[]>([])
+  // Every row the profile resolves (bundle → profile → home), disabled and
+  // bundle-provided ones included — the same set the MCP section lists, so the
+  // navigation count can never disagree with the panel. `null` = not loaded yet.
+  const [mcpCount, setMcpCount] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
 
   const [openLayer, setOpenLayer] = useState<number | null>(null)
@@ -157,11 +161,12 @@ const loadSeq = useRef(0)
     const seq = ++loadSeq.current
     if (name === '') { setDetail(null); setLayers(null); setConflicts([]); setLoading(false); return }
     setLoading(true)
-    const [detailRes, layersRes, conflictsRes, candidatesRes] = await Promise.all([
+    const [detailRes, layersRes, conflictsRes, candidatesRes, mcpRes] = await Promise.all([
       window.api.loadProfile(dshId, name),
       window.api.layers(dshId, name),
       window.api.conflicts(dshId, name),
       window.api.missingBundles(dshId, name),
+      window.api.ext.mcpList(dshId, name),
     ])
     if (seq !== loadSeq.current) return // a newer load superseded this one
     if (detailRes.ok) {
@@ -172,6 +177,9 @@ const loadSeq = useRef(0)
     if (layersRes.ok) setLayers(layersRes.value)
     if (conflictsRes.ok) setConflicts(conflictsRes.value)
     if (candidatesRes.ok) setCandidates(candidatesRes.value)
+    // `mcpList` here only feeds the count — the panel fetches its own rows, and
+    // reports back through `onCount` so the number follows edits made inside it.
+    if (mcpRes.ok) setMcpCount(mcpRes.value.servers.length)
     setLoading(false)
   }
 
@@ -179,6 +187,7 @@ const loadSeq = useRef(0)
     setDetail(null)
     setLayers(null)
     setConflicts([])
+    setMcpCount(null)
     setLoading(true)
     if (name === '') { setLoading(false); return undefined }
     void load()
@@ -636,7 +645,7 @@ const loadSeq = useRef(0)
     { key: 'manifest', icon: <ProfileOutlined />, label: t('profile.workspace.manifest'), meta: null },
     { key: 'deps', icon: <ApartmentOutlined />, label: t('profile.workspace.deps'), meta: dependencies.length || null },
     { key: 'bundles', icon: <AppstoreOutlined />, label: t('profile.workspace.bundles'), meta: bundles.length || null },
-    { key: 'mcp', icon: <ApiOutlined />, label: t('profile.workspace.mcp'), meta: null },
+    { key: 'mcp', icon: <ApiOutlined />, label: t('profile.workspace.mcp'), meta: mcpCount === null || mcpCount === 0 ? null : mcpCount },
     { key: 'patch', icon: <CodeOutlined />, label: t('profile.workspace.patch'), meta: (profileLayer?.rows.length ?? 0) || null },
     { key: 'home', icon: <HomeOutlined />, label: t('profile.workspace.home'), meta: null },
     {
@@ -735,7 +744,21 @@ const loadSeq = useRef(0)
         </div>
 
         <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex' }}>
-          <Panel fill pad={false} title={t(`profile.workspace.${section}`)} extra={sectionActions()}>
+          <Panel
+            fill
+            pad={false}
+            title={section === 'mcp' && mcpCount !== null
+              ? (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  {t('profile.workspace.mcp')}
+                  <span style={{ color: token.colorTextTertiary, fontWeight: 400, fontSize: token.fontSizeSM }}>
+                    {t('profile.workspace.mcpCount', { count: mcpCount })}
+                  </span>
+                </span>
+              )
+              : t(`profile.workspace.${section}`)}
+            extra={sectionActions()}
+          >
             <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: token.padding }}>
       {section === 'manifest' && (
         <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: token.paddingSM }}>
@@ -841,7 +864,7 @@ const loadSeq = useRef(0)
       )}
 
       {section === 'mcp' && (
-        <McpManagePanel dshId={dshId} profile={name} withPanel={false} />
+        <McpManagePanel dshId={dshId} profile={name} withPanel={false} onCount={setMcpCount} />
       )}
 
       {section === 'patch' && (

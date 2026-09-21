@@ -59,6 +59,12 @@ export function mcpInputProblem(input: McpServerInput): McpInputProblem | null {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(entry.name)) {
       return { code: E.extBadEnvName, message: `invalid env/header name "${entry.name}"` }
     }
+    // A plain value is written into the patch file as a scalar, so a newline
+    // can never be applied (the row writer rejects it). Refusing it here keeps
+    // the library from holding an entry that can only ever fail to apply.
+    if (entry.mode === 'plain' && /[\r\n]/.test(entry.value ?? '')) {
+      return { code: E.extBadEnvValue, message: `a plain env/header value cannot contain a newline ("${entry.name}")` }
+    }
   }
   return null
 }
@@ -107,6 +113,22 @@ function kvCanon(list: McpKV[] | undefined): string {
         : { name: entry.name, js: entry.value ?? '' }))
 }
 
+/** Reconnect options in the fixed key order the row side always rebuilds them
+ * in (`readReconnect`), with non-boolean/non-number fields dropped the same way
+ * a row read drops them. The form builds the object by spreading patches, so
+ * its key order follows the order the user filled the fields in — comparing the
+ * raw objects would report drift for a mere key-order difference, and syncing
+ * would rewrite the row on every click without ever converging. */
+function reconnectCanon(reconnect: McpReconnect | undefined): McpReconnect | undefined {
+  if (reconnect === null || typeof reconnect !== 'object') return undefined
+  const canon: McpReconnect = {}
+  if (typeof reconnect.enabled === 'boolean') canon.enabled = reconnect.enabled
+  if (typeof reconnect.initialDelayMs === 'number' && Number.isFinite(reconnect.initialDelayMs)) canon.initialDelayMs = reconnect.initialDelayMs
+  if (typeof reconnect.maxDelayMs === 'number' && Number.isFinite(reconnect.maxDelayMs)) canon.maxDelayMs = reconnect.maxDelayMs
+  if (typeof reconnect.maxAttempts === 'number' && Number.isFinite(reconnect.maxAttempts)) canon.maxAttempts = reconnect.maxAttempts
+  return Object.keys(canon).length > 0 ? canon : undefined
+}
+
 /** The semantic config of a definition, in one comparable string. Fields the
  * other transport does not use are dropped so a transport switch always reads
  * as drifted (it is). */
@@ -130,7 +152,7 @@ function inputCanon(transport: string, input: {
         }),
     toolCallTimeoutMs: input.toolCallTimeoutMs,
     failOnStartupError: input.failOnStartupError === true ? true : undefined,
-    reconnect: input.reconnect,
+    reconnect: reconnectCanon(input.reconnect),
   })
 }
 

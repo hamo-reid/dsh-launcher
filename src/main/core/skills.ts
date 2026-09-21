@@ -423,9 +423,12 @@ export async function deleteSkill(ctx: DshContext, name: string): Promise<void> 
 
 // ── zip import ───────────────────────────────────────────────────────────────
 
-/** The catalog entry for a skill just installed as a bundle into `root`. */
-export function installedEntry(skill: ParsedSkill, root: string): SkillEntry {
-  const dir = join(root, skill.name)
+/** The catalog entry for a skill just installed into `root`, in the shape it
+ * landed as (`bundle` → `<name>/SKILL.md`, `flat` → `<name>.md`). */
+export function installedEntry(skill: ParsedSkill, root: string, shape: 'bundle' | 'flat' = 'bundle'): SkillEntry {
+  // A flat skill IS the `.md` file at the root, so its dir is the root itself
+  // (same convention `listSkills` uses for a discovered `<name>.md`).
+  const dir = shape === 'flat' ? root : join(root, skill.name)
   return {
     name: skill.name,
     description: skill.description,
@@ -434,9 +437,9 @@ export function installedEntry(skill: ParsedSkill, root: string): SkillEntry {
     userInvocable: skill.userInvocable,
     source: 'user-dsh',
     rank: USER_DSH_RANK,
-    path: join(dir, 'SKILL.md'),
+    path: shape === 'flat' ? join(root, `${skill.name}.md`) : join(dir, 'SKILL.md'),
     dir,
-    shape: 'bundle',
+    shape,
     editable: true,
   }
 }

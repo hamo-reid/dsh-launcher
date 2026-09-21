@@ -59,6 +59,7 @@ import type {
   McpListing,
   McpApplyTarget,
   McpLibOverviewRow,
+  McpProbeResult,
   McpServer,
   McpServerInput,
   SkillEntry,
@@ -183,6 +184,8 @@ const api = {
       ipcRenderer.invoke('ext:libMcpApply', serverName, target),
     libMcpSync: (serverName: string): Promise<IpcResult<{ updated: number; skipped: number }>> =>
       ipcRenderer.invoke('ext:libMcpSync', serverName),
+    libMcpTest: (serverName: string): Promise<IpcResult<McpProbeResult>> =>
+      ipcRenderer.invoke('ext:libMcpTest', serverName),
     libSkillList: (): Promise<IpcResult<{ skills: SkillLibEntry[]; issues: SkillLibIssue[] }>> =>
       ipcRenderer.invoke('ext:libSkillList'),
     libSkillOverview: (): Promise<IpcResult<SkillLibOverviewRow[]>> =>
