@@ -15,18 +15,27 @@
  * OS recycle bin through an injected `shell.trashItem` (Electron API), so a
  * mistake is reversible without a launcher-side restore UI.
  */
-import AdmZip from 'adm-zip'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { homePatchPath, readHomePatch } from './home.ts'
 import { extractKeyValue, parseNamedRows } from './patch.ts'
 import { loadYaml } from './yaml.ts'
 import { logger } from './logger.ts'
-import { E, throwE } from './errors.ts'
-import { SKILL_NAME_RE } from '../../shared/skill.ts'
+import { installZipSkills } from './skill-zip.ts'
+import { parseSkillText } from './skill-frontmatter.ts'
+import type { ParsedSkill } from './skill-frontmatter.ts'
 import type { DshContext } from './appState.ts'
 import type { SkillEntry, SkillIssue, SkillListing, SkillRootInfo, SkillSource } from '../../shared/types.ts'
+
+// The parse/render layer and the zip import live in their own modules; kept on this
+// module's public surface so importers of `./skills.ts` are unchanged.
+export { parseSkillText, renderSkillFile, scaffoldSkill } from './skill-frontmatter.ts'
+export type { ParsedSkill } from './skill-frontmatter.ts'
+export { installZipSkills, zipEntryUnsafe, zipImportProblem } from './skill-zip.ts'
+
+
 
 /** The package every skill-filesystem config row mounts. */
 export const SKILL_PACKAGE = '@deepseek-ai/dsh-skill-filesystem'
@@ -36,17 +45,6 @@ const CUSTOM_RANK = 300
 const USER_DSH_RANK = 400
 const USER_AGENTS_RANK = 500
 const BUNDLED_SKILL_RANK = 600
-
-/** The parsed frontmatter of one skill file (mirrors dsh's `ParsedSkill`). */
-export interface ParsedSkill {
-  name: string
-  description: string
-  whenToUse?: string
-  modelInvocable: boolean
-  userInvocable: boolean
-  /** Body after the closing `---`, trimmed (dsh trims it too). */
-  body: string
-}
 
 // ── config ───────────────────────────────────────────────────────────────────
 
@@ -118,157 +116,6 @@ export function skillRoots(ctx: DshContext): SkillRootInfo[] {
   const bundled = config.bundledSkillDir ?? process.env.DSH_BUNDLED_SKILL_DIR
   if (bundled !== undefined) push('bundled', 'bundled', BUNDLED_SKILL_RANK, resolve(bundled), false)
   return roots.sort((a, b) => a.rank - b.rank)
-}
-
-// ── parse / render ───────────────────────────────────────────────────────────
-
-interface Frontmatter {
-  data: Record<string, unknown>
-  body: string
-}
-
-/** Split a `---` fenced frontmatter (mirrors dsh's `parseFrontmatter`, CRLF
- * tolerant). `undefined` when the file does not open with a closed fence. */
-function splitFrontmatter(text: string): Frontmatter | undefined {
-  const firstLf = text.indexOf('\n')
-  if (firstLf < 0) return undefined
-  if (text.slice(0, firstLf).replace(/\r$/, '') !== '---') return undefined
-  let pos = firstLf + 1
-  while (pos <= text.length) {
-    const nl = text.indexOf('\n', pos)
-    const end = nl < 0 ? text.length : nl
-    if (text.slice(pos, end).replace(/\r$/, '') === '---') {
-      return { data: yamlMap(text.slice(firstLf + 1, pos)), body: nl < 0 ? '' : text.slice(nl + 1) }
-    }
-    if (nl < 0) return undefined
-    pos = nl + 1
-  }
-  return undefined
-}
-
-function yamlMap(yaml: string): Record<string, unknown> {
-  const parsed = loadYaml(yaml)
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('frontmatter is not a mapping')
-  }
-  return parsed as Record<string, unknown>
-}
-
-function stringField(data: Record<string, unknown>, key: string): string | undefined {
-  const value = data[key]
-  return typeof value === 'string' && value.length > 0 ? value : undefined
-}
-
-/** Boolean-ish frontmatter values dsh accepts (`true`/`1`/`'yes'`/…); a
- * present-but-unparseable value is an error, mirroring dsh. */
-function frontmatterBoolean(data: Record<string, unknown>, key: string): boolean | undefined {
-  if (!Object.hasOwn(data, key)) return undefined
-  const value = data[key]
-  if (typeof value === 'boolean') return value
-  if (value === 1 || value === '1') return true
-  if (value === 0 || value === '0') return false
-  if (typeof value === 'string') {
-    switch (value.toLowerCase()) {
-      case 'true': case 'yes': case 'on': return true
-      case 'false': case 'no': case 'off': return false
-    }
-  }
-  throw new Error(`frontmatter field "${key}" must be a boolean`)
-}
-
-/** The invocation policy: `disable-model-invocation` and `user-invocable`. The
- * camelCase legacy names dsh rejects are rejected here too, so a file the
- * launcher accepts is one dsh loads. */
-function parseInvocationPolicy(data: Record<string, unknown>): { modelInvocable: boolean; userInvocable: boolean } {
-  for (const [legacy, canonical] of [
-    ['disableModelInvocation', 'disable-model-invocation'],
-    ['modelInvocable', 'disable-model-invocation'],
-    ['userInvocable', 'user-invocable'],
-  ] as const) {
-    if (Object.hasOwn(data, legacy)) {
-      throw new Error(`frontmatter field "${legacy}" is unsupported; use "${canonical}"`)
-    }
-  }
-  const disableModelInvocation = frontmatterBoolean(data, 'disable-model-invocation')
-  const userInvocable = frontmatterBoolean(data, 'user-invocable')
-  return {
-    modelInvocable: disableModelInvocation !== true,
-    userInvocable: userInvocable !== false,
-  }
-}
-
-/**
- * Parse one skill file's text with dsh's exact acceptance rules. Every failure
- * mode dsh ignores a file for is a named reason here, so the launcher can show
- * why a file is not in the catalog.
- */
-export function parseSkillText(text: string): { ok: true; skill: ParsedSkill } | { ok: false; reason: string } {
-  let frontmatter: Frontmatter
-  try {
-    const split = splitFrontmatter(text)
-    if (split === undefined) return { ok: false, reason: 'missing YAML frontmatter (the file must open with --- and close with ---)' }
-    frontmatter = split
-  } catch (error) {
-    return { ok: false, reason: `invalid YAML frontmatter: ${error instanceof Error ? error.message : String(error)}` }
-  }
-  const name = stringField(frontmatter.data, 'name')
-  const description = stringField(frontmatter.data, 'description')
-  if (name === undefined || description === undefined) {
-    return { ok: false, reason: 'frontmatter requires non-empty name and description' }
-  }
-  if (!SKILL_NAME_RE.test(name)) {
-    return { ok: false, reason: `invalid skill name "${name}" — use lowercase kebab-case ([a-z0-9]+(?:-[a-z0-9]+)*)` }
-  }
-  let invocation: { modelInvocable: boolean; userInvocable: boolean }
-  try {
-    invocation = parseInvocationPolicy(frontmatter.data)
-  } catch (error) {
-    return { ok: false, reason: error instanceof Error ? error.message : String(error) }
-  }
-  return {
-    ok: true,
-    skill: {
-      name,
-      description,
-      ...stringField(frontmatter.data, 'whenToUse') !== undefined ? { whenToUse: stringField(frontmatter.data, 'whenToUse') } : {},
-      ...invocation,
-      body: frontmatter.body.trim(),
-    },
-  }
-}
-
-/** A YAML string rendered the way the launcher's scaffold writes one: bare when
- * unambiguous, single-quoted otherwise, block scalar for multi-line values. */
-function yamlString(value: string): string {
-  if (value.includes('\n')) {
-    return `|-\n${value.split('\n').map(line => `  ${line}`).join('\n')}`
-  }
-  if (/^[A-Za-z0-9_][A-Za-z0-9_ ./-]*$/.test(value) && !/^(true|false|null|yes|no|on|off)$/i.test(value)) {
-    return value
-  }
-  return `'${value.replace(/'/g, "''")}'`
-}
-
-/** Render a whole SKILL.md: frontmatter + body, in the shape dsh parses. */
-export function renderSkillFile(input: Pick<ParsedSkill, 'name' | 'description' | 'whenToUse' | 'modelInvocable' | 'userInvocable' | 'body'>): string {
-  const lines = ['---', `name: ${input.name}`, `description: ${yamlString(input.description)}`]
-  if (input.whenToUse !== undefined && input.whenToUse !== '') lines.push(`whenToUse: ${yamlString(input.whenToUse)}`)
-  if (!input.modelInvocable) lines.push('disable-model-invocation: true')
-  if (!input.userInvocable) lines.push('user-invocable: false')
-  lines.push('---', '', input.body.trim())
-  return `${lines.join('\n')}\n`
-}
-
-/** A scaffold for a new skill, ready for the editor. The placeholder
- * description parses, so saving the untouched scaffold is valid. */
-export function scaffoldSkill(name: string): string {
-  return renderSkillFile({
-    name,
-    description: `TODO: describe what ${name} does and when to use it`,
-    modelInvocable: true,
-    userInvocable: true,
-    body: '',
-  })
 }
 
 // ── listing ──────────────────────────────────────────────────────────────────
@@ -421,7 +268,17 @@ export async function deleteSkill(ctx: DshContext, name: string): Promise<void> 
   logger.info(`skills: moved to recycle bin ${target}`)
 }
 
-// ── zip import ───────────────────────────────────────────────────────────────
+/** Install every skill a zip carries into the dsh's writable root. */
+export function importSkillZip(ctx: DshContext, zipPath: string): SkillEntry[] {
+  const rootDir = writableSkillRoot(ctx)
+  return installZipSkills(rootDir, zipPath, name => findEditableSkill(ctx, name) !== undefined)
+    .map(({ skill }) => installedEntry(skill, rootDir))
+}
+
+/** The home-layer patch path a `skill-filesystem` config row lives in (for docs/UX). */
+export function skillConfigPath(ctx: DshContext): string {
+  return homePatchPath(ctx)
+}
 
 /** The catalog entry for a skill just installed into `root`, in the shape it
  * landed as (`bundle` → `<name>/SKILL.md`, `flat` → `<name>.md`). */
@@ -442,128 +299,4 @@ export function installedEntry(skill: ParsedSkill, root: string, shape: 'bundle'
     shape,
     editable: true,
   }
-}
-
-/** Zip-slip guard: reject absolute paths, drive prefixes, and `..` segments
- * (backslashes normalized first — Windows-made archives use them). Exported
- * for tests: adm-zip normalizes hostile names on WRITE, so a slip entry can
- * only reach this guard from a third-party archive on READ. */
-export function zipEntryUnsafe(entryName: string): boolean {
-  const path = entryName.replaceAll('\\', '/')
-  if (path.startsWith('/') || /^[A-Za-z]:/.test(path)) return true
-  return path.split('/').some(segment => segment === '..')
-}
-
-/** Pre-flight for an explicit zip path (drag & drop): extension + is-it-really
- * a file. Zip structure stays `installZipSkills`' job. Returns the error, or
- * `null` when the path may go to `installZipSkills`. */
-export function zipImportProblem(zipPath: string): { code: string; detail: string } | null {
-  if (!zipPath.toLowerCase().endsWith('.zip')) return { code: E.extSkillZipNotZip, detail: zipPath }
-  try {
-    if (!statSync(zipPath).isFile()) return { code: E.extSkillZipMissing, detail: zipPath }
-  } catch {
-    return { code: E.extSkillZipMissing, detail: zipPath }
-  }
-  return null
-}
-
-/**
- * The directory each zip-carried skill lives in, relative to the zip root.
- *
- * A `SKILL.md` at the zip root makes the whole archive one bundle (everything
- * else in it is that skill's resources); otherwise every `SKILL.md` — at any
- * depth, so a GitHub-style `repo-main/` wrapper works — is one skill, carried
- * with its own directory.
- */
-function skillZipRoots(names: string[]): string[] {
-  if (names.includes('SKILL.md')) return ['']
-  const dirs: string[] = []
-  for (const name of names) {
-    if (!name.endsWith('/SKILL.md')) continue
-    const dir = name.slice(0, -'/SKILL.md'.length)
-    if (!dirs.includes(dir)) dirs.push(dir)
-  }
-  // A SKILL.md nested inside another carried skill's directory is that skill's
-  // resource, not a separate install — the outer directory moves whole.
-  return dirs
-    .filter(dir => !dirs.some(other => other !== dir && dir.startsWith(`${other}/`)))
-    .sort((a, b) => a.localeCompare(b))
-}
-
-/**
- * Install every skill a zip carries into `targetRoot`, all-or-nothing.
- *
- * The archive is extracted to a temp staging dir; every candidate is parsed and
- * collision-checked (against `exists` AND the other candidates) BEFORE anything
- * is installed, so a failure leaves the target untouched. The installed
- * directory name is the frontmatter `name` — the same authority as the editor —
- * and the skill's own directory (scripts, references, …) is carried over whole.
- * Returns what landed, so callers can map to their own entry shapes.
- */
-export function installZipSkills(
-  targetRoot: string,
-  zipPath: string,
-  exists: (name: string) => boolean,
-): Array<{ skill: ParsedSkill; dir: string }> {
-  let arc: AdmZip
-  try {
-    arc = new AdmZip(zipPath)
-  } catch (error) {
-    // A dropped file may carry a `.zip` name with garbage bytes — surface that
-    // as a readable error instead of adm-zip's raw exception.
-    throwE(E.extSkillZipBad, { detail: zipPath }, error instanceof Error ? error.message : String(error))
-  }
-  const unsafe = arc.getEntries().find(entry => zipEntryUnsafe(entry.entryName))
-  if (unsafe !== undefined) throwE(E.extSkillZipUnsafe, { detail: unsafe.entryName })
-  const dirs = skillZipRoots(arc.getEntries().map(entry => entry.entryName.replaceAll('\\', '/')))
-  if (dirs.length === 0) throwE(E.extSkillZipNoSkill)
-  const staging = mkdtempSync(join(tmpdir(), 'pm-skill-import-'))
-  try {
-    arc.extractAllTo(staging, true)
-    // Pass 1 — validate everything: frontmatter, per-zip duplicates, collisions.
-    const installs: Array<{ skill: ParsedSkill; from: string }> = []
-    const seen = new Set<string>()
-    for (const dir of dirs) {
-      const label = dir === '' ? 'SKILL.md' : `${dir}/SKILL.md`
-      const parsed = parseSkillText(readFileSync(join(staging, dir, 'SKILL.md'), 'utf8'))
-      if (!parsed.ok) throwE(E.extBadSkill, { detail: label }, `${label}: ${parsed.reason}`)
-      const name = parsed.skill.name
-      if (seen.has(name) || exists(name)) {
-        throwE(E.extSkillExists, { detail: name })
-      }
-      seen.add(name)
-      installs.push({ skill: parsed.skill, from: join(staging, dir) })
-    }
-    // Pass 2 — install (copy out of staging → target root; a copy, not a
-    // rename, because staging may sit on another drive than the target, where
-    // a rename would throw EXDEV).
-    mkdirSync(targetRoot, { recursive: true })
-    const landed: string[] = []
-    try {
-      return installs.map(({ skill, from }) => {
-        const dir = join(targetRoot, skill.name)
-        cpSync(from, dir, { recursive: true })
-        landed.push(dir)
-        return { skill, dir }
-      })
-    } catch (error) {
-      // Roll back whatever landed so the import stays all-or-nothing.
-      for (const dir of landed) rmSync(dir, { recursive: true, force: true })
-      throw error
-    }
-  } finally {
-    rmSync(staging, { recursive: true, force: true })
-  }
-}
-
-/** Install every skill a zip carries into the dsh's writable root. */
-export function importSkillZip(ctx: DshContext, zipPath: string): SkillEntry[] {
-  const rootDir = writableSkillRoot(ctx)
-  return installZipSkills(rootDir, zipPath, name => findEditableSkill(ctx, name) !== undefined)
-    .map(({ skill }) => installedEntry(skill, rootDir))
-}
-
-/** The home-layer patch path a `skill-filesystem` config row lives in (for docs/UX). */
-export function skillConfigPath(ctx: DshContext): string {
-  return homePatchPath(ctx)
 }

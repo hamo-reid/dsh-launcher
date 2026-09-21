@@ -21,12 +21,22 @@
  * implementations, so nothing here needs wiring in `main/index.ts` (unlike the
  * crypto/trash deps, which the main process must inject).
  */
+
 import { spawn, type ChildProcess } from 'node:child_process'
 import { homedir } from 'node:os'
 import { mcpSecretsEnv } from './mcp-secrets.ts'
 import { killProcessTree } from './process-kill.ts'
 import { child } from './logger.ts'
-import type { McpKV, McpProbeResult, McpProbeStage, McpServerInput } from '../../shared/types.ts'
+import { consumeLines, consumeSseData, INIT_ID, isRecord, judgeResponse, messageOf, parseSseFrames, tail } from './mcp-framing.ts'
+import { quoteForShell, resolveJsExpr, resolveKv } from './mcp-env.ts'
+import type { ResponseVerdict } from './mcp-framing.ts'
+import type { McpProbeResult, McpProbeStage, McpServerInput } from '../../shared/types.ts'
+
+// The framing/envelope half and the `!!js` env half live in their own modules;
+// kept on this module's public surface so `mcp-probe.test.ts` is unchanged.
+export { consumeLines, consumeSseData, judgeResponse, parseSseFrames } from './mcp-framing.ts'
+export type { ResponseVerdict } from './mcp-framing.ts'
+export { quoteForShell, resolveJsExpr, resolveKv } from './mcp-env.ts'
 
 const mlog = child('mcp')
 
@@ -46,9 +56,6 @@ const MCP_PROBE_HTTP_TIMEOUT_MS = 10_000
 /** How much stderr (or SSE/JSON noise) to keep for the diagnostic detail line. */
 const STDERR_TAIL_CAP = 2048
 const NOISE_TAIL_CAP = 512
-
-/** The id of our one request; every other frame is somebody else's business. */
-const INIT_ID = 1
 
 // ── injected side effects (project convention: module-level, swappable) ──────
 
@@ -80,156 +87,6 @@ export function setMcpProbeDeps(next: Partial<McpProbeDeps>): void {
 /** Restore the real implementations. */
 export function resetMcpProbeDeps(): void {
   deps = { ...realDeps }
-}
-
-// ── pure helpers ────────────────────────────────────────────────────────────
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
-
-function tail(current: string, chunk: string, cap: number): string {
-  const next = current + chunk
-  return next.length > cap ? next.slice(next.length - cap) : next
-}
-
-/** One JSON-RPC frame per line — see the framing note in the module header. */
-export function consumeLines(rest: string, chunk: string): { lines: string[]; rest: string } {
-  const parts = (rest + chunk).split('\n')
-  const remainder = parts.pop() ?? ''
-  return {
-    lines: parts.map(line => (line.endsWith('\r') ? line.slice(0, -1) : line)).filter(line => line !== ''),
-    rest: remainder,
-  }
-}
-
-/** Complete `data:` payloads out of an SSE chunk. Lenient by design: `event:`
- * / `id:` / `retry:` / comment lines are skipped, and a frame split across two
- * chunks stays in `rest` until its newline arrives. */
-export function consumeSseData(rest: string, chunk: string): { payloads: string[]; rest: string } {
-  const { lines, rest: remainder } = consumeLines(rest, chunk)
-  const payloads: string[] = []
-  for (const line of lines) {
-    if (!line.startsWith('data:')) continue
-    // SSE allows one optional space after the colon.
-    const payload = line.slice('data:'.length).replace(/^ /, '')
-    if (payload !== '') payloads.push(payload)
-  }
-  return { payloads, rest: remainder }
-}
-
-/** Every JSON frame in an SSE body. A payload that is not JSON (a keep-alive
- * comment, a server's own chatter) is dropped rather than failing the probe. */
-export function parseSseFrames(text: string): unknown[] {
-  const { payloads } = consumeSseData('', text.endsWith('\n') ? text : `${text}\n`)
-  const frames: unknown[] = []
-  for (const payload of payloads) {
-    try {
-      frames.push(JSON.parse(payload))
-    } catch { /* not a JSON frame */ }
-  }
-  return frames
-}
-
-export type ResponseVerdict =
-  | { kind: 'ok'; result: Record<string, unknown> }
-  | { kind: 'error'; code?: number; message: string }
-
-/** Judge one frame as our initialize response. `null` means "not ours" — a
- * different id, not an object, or neither `result` nor `error` — so the caller
- * keeps waiting (a server may emit notifications before it answers). */
-export function judgeResponse(frame: unknown): ResponseVerdict | null {
-  if (!isRecord(frame)) return null
-  if (frame['id'] !== INIT_ID) return null
-  if (isRecord(frame['result'])) return { kind: 'ok', result: frame['result'] }
-  const error = frame['error']
-  if (isRecord(error)) {
-    const code = typeof error['code'] === 'number' ? error['code'] : undefined
-    return {
-      kind: 'error',
-      ...(code !== undefined ? { code } : {}),
-      message: typeof error['message'] === 'string' ? error['message'] : 'the server reported an error',
-    }
-  }
-  return null
-}
-
-/**
- * Best-effort textual resolution of a `!!js` value — never evaluation.
- *
- * Handles what the documented use cases need (a bearer template, a bare
- * `process.env.X` reference, a plain quoted literal) and returns `null` for
- * anything that would require running code. A `null` result means the entry is
- * reported as unevaluated and simply not sent, which is strictly safer than
- * guessing: a silently wrong value would surface as a misleading 401.
- */
-export function resolveJsExpr(expr: string, secrets: Record<string, string | undefined>): string | null {
-  let text = expr.trim()
-  // Strip one layer of wrapping: the template backticks, or the quotes
-  // `renderJsValue` adds to a non-bare expression.
-  const wrapped = /^`([\s\S]*)`$/.exec(text) ?? /^'([\s\S]*)'$/.exec(text) ?? /^"([\s\S]*)"$/.exec(text)
-  if (wrapped !== null) text = wrapped[1] ?? ''
-  const lookup = (name: string): string | undefined => secrets[name] ?? process.env[name]
-  // Interpolations first — replacing a bare `process.env.X` before `${...}`
-  // would leave a `${value}` for the next pass to rewrite again.
-  text = text.replace(
-    /\$\{\s*process\.env(?:\.([A-Za-z_]\w*)|\[\s*'([A-Za-z_]\w*)'\s*\])\s*\}/g,
-    (match, dot: string | undefined, bracket: string | undefined) => lookup(dot ?? bracket ?? '') ?? match,
-  )
-  text = text.replace(/\$\{\s*([A-Za-z_]\w*)\s*\}/g, (match, name: string) => lookup(name) ?? match)
-  text = text.replace(/process\.env\.([A-Za-z_]\w*)/g, (match, name: string) => lookup(name) ?? match)
-  text = text.replace(
-    /process\.env\[\s*(['"])([A-Za-z_]\w*)\1\s*\]/g,
-    (match, _quote: string, name: string) => lookup(name) ?? match,
-  )
-  // Anything still expression-shaped means we would have to evaluate it.
-  if (/\$\{|process\.env|[()]|=>/.test(text)) return null
-  return text
-}
-
-/** Resolve an `env` / `headers` list into the values a child would actually
- * see. A name whose value cannot be determined is left OUT of `values` (writing
- * `''` would be a different thing than dsh's `undefined`) and reported in
- * `missing`, which the UI surfaces as a caveat rather than a failure. */
-export function resolveKv(
-  list: McpKV[] | undefined,
-  secrets: Record<string, string | undefined>,
-): { values: Record<string, string>; missing: string[] } {
-  const values: Record<string, string> = {}
-  const missing: string[] = []
-  for (const entry of list ?? []) {
-    const name = entry.name.trim()
-    if (name === '') continue
-    if (entry.mode === 'plain') {
-      values[name] = entry.value ?? ''
-      continue
-    }
-    if (entry.mode === 'env') {
-      // dsh reads these from the launch environment, which is the launcher's
-      // secret store layered over its own env — mirror that order.
-      const value = secrets[name] ?? process.env[name]
-      if (value === undefined) { missing.push(name); continue }
-      values[name] = value
-      continue
-    }
-    const resolved = resolveJsExpr(entry.value ?? '', secrets)
-    if (resolved === null) { missing.push(name); continue }
-    values[name] = resolved
-  }
-  return { values, missing }
-}
-
-/** Quote one argv element for `shell: true`. Node only joins the array with
- * spaces when a shell is involved — it never quotes for us — so an argument
- * containing a space would be split by `cmd.exe`. Best effort: `cmd.exe` has
- * no exact escaping (`%`, `!`, `^` all misbehave), and the command line is
- * author-written in the first place. */
-export function quoteForShell(arg: string): string {
-  return /[\s"&|<>^()]/.test(arg) ? `"${arg.replaceAll('"', '""')}"` : arg
 }
 
 // ── the stdio handshake ─────────────────────────────────────────────────────
