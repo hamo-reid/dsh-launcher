@@ -157,18 +157,18 @@ export function registerPluginsIpc(): void {
     }
   })
 
-  // Install from a LOCAL source: pick a plugin folder or .zip, add it to the
-  // store via the same pnpm pipeline as a network download. `kind` picks the
-  // dialog mode so folder vs .zip are two explicit, unambiguous entries.
-  handle('plugins:addLocal', async (_event, kind: 'folder' | 'zip'): Promise<IpcResult<string>> => {
+  // Install from a local .zip: pick the archive, then add it through the same pnpm
+  // pipeline a network download uses. A bare DIRECTORY is no longer an entry point
+  // here — the dev-plugin flow registers a folder itself, and a profile import
+  // pulls its own local dirs — so the dialog only offers archives.
+  handle('plugins:addLocal', async (): Promise<IpcResult<string>> => {
     try {
       const store = pluginDir()
       if (store === '') return fail(E.storeNotConfigured)
-      const isZip = kind === 'zip'
       const picked = await dialog.showOpenDialog({
-        title: isZip ? '选择插件 .zip 包' : '选择插件文件夹',
-        properties: isZip ? ['openFile'] : ['openDirectory'],
-        filters: isZip ? [{ name: '插件包', extensions: ['zip'] }] : undefined,
+        title: '选择插件 .zip 包',
+        properties: ['openFile'],
+        filters: [{ name: '插件包', extensions: ['zip'] }],
       })
       if (picked.canceled || picked.filePaths.length === 0) return fail(E.commonCancelled)
       const result = await addLocalPlugin(store, picked.filePaths[0])

@@ -245,8 +245,8 @@ const api = {
       ipcRenderer.invoke('plugins:list'),
     add: (source: string, name?: string): Promise<IpcResult<string>> =>
       ipcRenderer.invoke('plugins:add', source, name),
-    addLocal: (kind: 'folder' | 'zip'): Promise<IpcResult<string>> =>
-      ipcRenderer.invoke('plugins:addLocal', kind),
+    addLocal: (): Promise<IpcResult<string>> =>
+      ipcRenderer.invoke('plugins:addLocal'),
     installToProfile: (dshId: string, profile: string, pkg: string, version?: string): Promise<IpcResult<string>> =>
       ipcRenderer.invoke('plugins:installToProfile', dshId, profile, pkg, version),
     installOptions: (): Promise<IpcResult<{ id: string; name: string; version?: string; profiles: string[] }[]>> =>

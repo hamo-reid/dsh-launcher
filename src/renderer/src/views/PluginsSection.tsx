@@ -98,7 +98,7 @@ export default function PluginsSection() {
   const [source, setSource] = useState('')
   const [busy, setBusy] = useState(false)
   /** Which install action is running, so only that button spins / the rest disable. */
-  const [busyAction, setBusyAction] = useState<null | 'network' | 'folder' | 'zip'>(null)
+  const [busyAction, setBusyAction] = useState<null | 'network' | 'zip'>(null)
   const [log, setLog] = useState('')
 
   // "Install into a profile" dialog.
@@ -311,9 +311,9 @@ export default function PluginsSection() {
     void message.info(t('plugin.download.started'))
   }
 
-  const addLocal = async (kind: 'folder' | 'zip'): Promise<void> => {
-    setBusyAction(kind)
-    const res = await window.api.plugins.addLocal(kind)
+  const addLocal = async (): Promise<void> => {
+    setBusyAction('zip')
+    const res = await window.api.plugins.addLocal()
     setBusyAction(null)
     if (!res.ok) { void message.error(apiErrorText(res)); return }
     setLog(res.value)
@@ -698,8 +698,7 @@ export default function PluginsSection() {
               {t('plugin.installSection.localHint')}
             </div>
             <Space>
-              <Button onClick={() => void addLocal('folder')} loading={busyAction === 'folder'} disabled={dirMissing || busyAction !== null}>{t('plugin.installSection.fromFolder')}</Button>
-              <Button onClick={() => void addLocal('zip')} loading={busyAction === 'zip'} disabled={dirMissing || busyAction !== null}>{t('plugin.installSection.fromZip')}</Button>
+              <Button onClick={() => void addLocal()} loading={busyAction === 'zip'} disabled={dirMissing || busyAction !== null}>{t('plugin.installSection.fromZip')}</Button>
             </Space>
           </Panel>
 

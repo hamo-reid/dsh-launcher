@@ -234,7 +234,7 @@ export interface WindowApi {
     setDir: (dir: string) => Promise<IpcResult<boolean>>
     list: () => Promise<IpcResult<InstalledPlugin[]>>
     add: (source: string, name?: string) => Promise<IpcResult<string>>
-    addLocal: (kind: 'folder' | 'zip') => Promise<IpcResult<string>>
+    addLocal: () => Promise<IpcResult<string>>
     installOptions: () => Promise<IpcResult<{ id: string; name: string; version?: string; profiles: string[] }[]>>
     installToProfile: (dshId: string, profile: string, pkg: string, version?: string) => Promise<IpcResult<string>>
     remove: (name: string, version?: string) => Promise<IpcResult<string>>
