@@ -5,7 +5,7 @@ import {
 import {
   ApartmentOutlined, ApiOutlined, AppstoreOutlined, CheckCircleFilled, CodeOutlined, FileTextOutlined,
   FolderOpenOutlined, HomeOutlined, PlusOutlined, ProfileOutlined, ReloadOutlined,
-  SafetyCertificateOutlined, SwapOutlined,
+  SafetyCertificateOutlined, SwapOutlined, UpOutlined,
 } from '@ant-design/icons'
 import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
@@ -667,7 +667,15 @@ const loadSeq = useRef(0)
       return (
         <Space size={8}>
           <Button size="small" icon={<ReloadOutlined />} onClick={() => setUpdatesOpen(true)}>{t('plugin.update.check')}</Button>
-          <Button size="small" icon={<PlusOutlined />} onClick={() => setDepsAddOpen(v => !v)}>{t('profile.workspace.depAdd')}</Button>
+          {/* A toggle, not the action itself: the label flips to "collapse" so it
+              cannot be mistaken for the form's own submit button below. */}
+          <Button
+            size="small"
+            icon={depsAddOpen ? <UpOutlined /> : <PlusOutlined />}
+            onClick={() => setDepsAddOpen(v => !v)}
+          >
+            {depsAddOpen ? t('common.collapse') : t('profile.workspace.depAdd')}
+          </Button>
         </Space>
       )
     }
@@ -675,8 +683,16 @@ const loadSeq = useRef(0)
       return (
         <Space size={8}>
           <Button size="small" icon={<ReloadOutlined />} loading={reconciling} onClick={() => void reconcileNow()}>{t('profile.detail.reconcile')}</Button>
+          {/* Same toggle/submit split as the dependency form above. */}
           {candidates.length > 0 && (
-            <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => setBundleActivateOpen(v => !v)}>{t('profile.workspace.bundleActivate')}</Button>
+            <Button
+              size="small"
+              type="primary"
+              icon={bundleActivateOpen ? <UpOutlined /> : <PlusOutlined />}
+              onClick={() => setBundleActivateOpen(v => !v)}
+            >
+              {bundleActivateOpen ? t('common.collapse') : t('profile.workspace.bundleActivate')}
+            </Button>
           )}
         </Space>
       )
@@ -690,9 +706,9 @@ const loadSeq = useRef(0)
         </Space>
       )
     }
-    if (section === 'diagnostics') {
-      return <Button size="small" onClick={revalidate} loading={validating}>{t('profile.workspace.validate')}</Button>
-    }
+    // Diagnostics adds no action of its own: "validate" is a page-level action,
+    // shown in the header from every section, so a second copy here was the same
+    // button twice on one screen.
     return null
   }
 
@@ -737,9 +753,25 @@ const loadSeq = useRef(0)
             selectedKey={section}
             onSelect={item => setSection(item.key)}
             renderTitle={item => (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>{item.icon}{item.label}</span>
+              // ONE row per section: icon + label on the left, the count (or the
+              // validity mark) pushed to the right edge. The count used to be a
+              // subtitle line, which made rows that had one taller than rows that
+              // did not — the rail never lined up.
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                  {item.icon}
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.label}</span>
+                </span>
+                {item.meta !== null && (
+                  <span style={{
+                    flex: '0 0 auto', marginInlineStart: 'auto',
+                    color: token.colorTextTertiary, fontSize: token.fontSizeSM, fontWeight: 400,
+                  }}>
+                    {item.meta}
+                  </span>
+                )}
+              </span>
             )}
-            renderMeta={item => item.meta}
           />
         </div>
 
@@ -868,24 +900,22 @@ const loadSeq = useRef(0)
       )}
 
       {section === 'patch' && (
-        <>
-          <div style={{ marginBottom: token.paddingSM, display: 'flex', gap: 8 }}>
-            <Button size="small" icon={<CodeOutlined />} onClick={() => void openSource()}>{t('profile.detail.sourceEdit')}</Button>
-            <Button size="small" onClick={() => void openTransfer()}>{t('profile.workspace.transfer')}</Button>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: token.paddingSM }}>
-            {(layers ?? []).map((layer, i) => cloneElement(
-              blockButton(
-                `${i + 1}. ${layerLabel(layer)}`,
-                layer.source === 'profile' ? t('profile.detail.layerMetaEditable', { count: layer.rows.length }) : t('profile.detail.layerMeta', { count: layer.rows.length }),
-                () => setOpenLayer(i),
-              ),
-              // Stable key derived from the layer's identity, so a bundle reorder
-              // doesn't remount the cards (index would shuffle the keys).
-              { key: layer.source === 'bundle' ? `bundle:${layer.bundle}` : layer.source === 'profile' ? `profile:${layer.label}` : 'home' },
-            ))}
-          </div>
-        </>
+        // The section's actions live in the panel header (source edit / open the
+        // file / transfer). This body used to repeat two of them, so the same
+        // button showed up twice on screen — and the copy here was missing the
+        // third one.
+        <div style={{ display: 'flex', flexDirection: 'column', gap: token.paddingSM }}>
+          {(layers ?? []).map((layer, i) => cloneElement(
+            blockButton(
+              `${i + 1}. ${layerLabel(layer)}`,
+              layer.source === 'profile' ? t('profile.detail.layerMetaEditable', { count: layer.rows.length }) : t('profile.detail.layerMeta', { count: layer.rows.length }),
+              () => setOpenLayer(i),
+            ),
+            // Stable key derived from the layer's identity, so a bundle reorder
+            // doesn't remount the cards (index would shuffle the keys).
+            { key: layer.source === 'bundle' ? `bundle:${layer.bundle}` : layer.source === 'profile' ? `profile:${layer.label}` : 'home' },
+          ))}
+        </div>
       )}
 
       {section === 'home' && (
