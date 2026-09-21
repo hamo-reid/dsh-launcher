@@ -22,7 +22,8 @@ import SectionHeading from '../components/SectionHeading.tsx'
 import Toolbar from '../components/Toolbar.tsx'
 import FieldLabel from '../components/FieldLabel.tsx'
 import { MODAL } from '../theme.ts'
-import { DownloadVersionModal, InstallToProfileModal, toStoreMap } from './PluginsModals.tsx'
+import { DownloadVersionModal, InstallToProfileModal } from './PluginsModals.tsx'
+import { toStoreMap } from '../lib/storeMap.ts'
 import type { MarketPlugin, MarketSort, MarketSourceState } from '../../../shared/types.ts'
 
 export default function MarketSection(): JSX.Element {
