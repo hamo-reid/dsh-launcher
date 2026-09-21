@@ -1,7 +1,7 @@
 /**
  * The live frontmatter preview for the skill editor.
  *
- * This is deliberately NOT `core/skills.ts`'s parser. That one is authoritative:
+ * This is deliberately NOT `core/skills/skills.ts`'s parser. That one is authoritative:
  * it runs YAML, types its values, and throws on anything it cannot accept — which
  * is right on save and useless while typing. This one runs on every keystroke over
  * text that is expected to be half-written, so it does the opposite: line-prefix
@@ -24,7 +24,7 @@ export interface LiveHeader {
  * "nothing yet" rather than as an error — the editor is mid-typing, and the
  * authoritative answer comes from the save-time validation.
  *
- * The fence must sit at column 0, unindented, because `core/skills.ts` requires
+ * The fence must sit at column 0, unindented, because `core/skills/skills.ts` requires
  * exactly that: a preview that accepted `  ---` would show a green header for a
  * file the save path then rejects, which is worse than showing nothing. */
 export function liveHeader(text: string): LiveHeader {

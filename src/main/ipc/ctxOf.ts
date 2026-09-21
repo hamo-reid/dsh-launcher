@@ -11,7 +11,7 @@
  * boundary projection of two `core` primitives (`dshEntryById` +
  * `contextForEntry`), and `core` should never accept an `unknown` dsh id.
  */
-import { contextForEntry, dshEntryById, type DshContext } from '../core/appState.ts'
+import { contextForEntry, dshEntryById, type DshContext } from '../core/profile/appState.ts'
 
 export function ctxOf(dshId: unknown): DshContext | null {
   if (typeof dshId !== 'string') return null

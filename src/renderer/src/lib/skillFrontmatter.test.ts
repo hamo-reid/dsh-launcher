@@ -20,7 +20,7 @@ describe('liveHeader', () => {
   })
 
   it('does not accept an indented fence, because the save path will not', () => {
-    // `core/skills.ts` splits on a `---` at column 0. A preview that accepted this
+    // `core/skills/skills.ts` splits on a `---` at column 0. A preview that accepted this
     // would show a valid-looking header for a file the save path then rejects.
     expect(liveHeader('  ---\nname: x\n---\n')).toEqual({})
     expect(liveHeader('---\nname: x\n  ---\n')).toEqual({})

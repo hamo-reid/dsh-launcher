@@ -9,8 +9,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { openDatabase } from '../core/settings.ts'
-import { updateDshState } from '../core/appState.ts'
+import { openDatabase } from '../core/settings/settings.ts'
+import { updateDshState } from '../core/profile/appState.ts'
 import { ctxOf } from './ctxOf.ts'
 
 let root: string

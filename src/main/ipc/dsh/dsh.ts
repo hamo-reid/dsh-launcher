@@ -1,0 +1,368 @@
+/** IPC for dsh installs (`dsh:*`): registry, home, and official installation. */
+
+import { shell } from 'electron'
+import { existsSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
+import { dirname, join, resolve, sep } from 'node:path'
+import {
+  baseLaunch, checkForDshUpdate, defaultHome, discoverVersionRepo, entryFromPath, existsExecutable, installDir,
+  installOfficialDsh, isDeletableDsh, probeDshs, readVersionFromPath, registerInstalledDsh, resolveDshPackage,
+  updateDsh, versionExists, type DshEntry,
+} from '../../core/dsh/dsh.ts'
+import {
+  contextForEntry, dshEntryById, dshVersionDir, effectiveProfileDir, legacyProfilesDir, readDshState, updateDshState,
+  writeDshState,
+} from '../../core/profile/appState.ts'
+import { listProfileInfos } from '../../core/profile/home.ts'
+import { startDshDownload } from '../../core/store/downloads.ts'
+import { clearDshLaunchConfig } from '../../core/profile/launch-config.ts'
+import { listRuns } from './run.ts'
+import { patchSettings } from '../../core/settings/settings.ts'
+import { fetchPackageVersions } from '../../core/store/npm.ts'
+import { majorOfVersion } from '../../core/shared/version.ts'
+import { fail, failFromError, E } from '../../core/shared/errors.ts'
+import { logger } from '../../core/shared/logger.ts'
+import { ctxOf } from '../ctxOf.ts'
+import { handle } from '../handle.ts'
+import type {
+  DownloadStep, DshInstallStep, DshProfileInfo, DshUpdateInfo, IpcResult, PackageVersionInfo,
+} from '../../../shared/types.ts'
+
+/** A filesystem-safe version name (defaults to `official`). Strips path/shell
+ * metacharacters and whitespace, and refuses leading/trailing dots — so `.`/`..`
+ * (which would resolve to the repo root / its parent) can never be used as an
+ * install dir name, even though `join(versionDir, name)` would otherwise accept
+ * them. */
+function safeVersionName(name: string | undefined): string {
+  const cleaned = (name ?? '')
+    .replace(/[\\/:*?"<>|]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/^[.\-]+/, '')
+    .replace(/[.\-]+$/, '')
+    .trim()
+  return cleaned === '' ? 'official' : cleaned
+}
+
+/** Map a dsh install progress step onto the shared download-center step model. */
+function toDownloadStep(step: DshInstallStep): DownloadStep {
+  return {
+    key: step.kind,
+    status: step.state,
+    detail: step.detail,
+    meta: step.version !== undefined && step.version !== '' ? step.version : undefined,
+  }
+}
+
+/** Physically delete a dsh install. App-managed version instances (under the
+ * dsh version repo) are removed wholesale together with their dedicated home;
+ * otherwise the directory owning the executable is removed.
+ *
+ * Async deletion via `fs/promises.rm` so the huge node_modules tree does not
+ * block the main process's event loop (which would make the whole app hang). */
+async function deleteDshFiles(entry: DshEntry): Promise<void> {
+  const execDir = installDir(entry.execPath)
+  // Anchor on the repo this install actually landed in (set at install time),
+  // so cleanup still works after the current dshVersionDir setting changed.
+  const versionRoot = entry.versionDir ?? dshVersionDir()
+  const targets: string[] = []
+  const instanceNames: string[] = []
+  if (existsSync(versionRoot)) {
+    for (const sub of readdirSync(versionRoot, { withFileTypes: true })) {
+      if (!sub.isDirectory()) continue
+      const p = join(versionRoot, sub.name)
+      let rp = p
+      try { rp = realpathSync(p) } catch { /* fall back to literal path */ }
+      if (execDir === rp || execDir.startsWith(rp + sep)) {
+        targets.push(p)
+        instanceNames.push(sub.name)
+      }
+    }
+  }
+  if (targets.length === 0) targets.push(execDir)
+  for (const t of targets) {
+    await rm(t, { recursive: true, force: true })
+  }
+  // Clean up the dedicated home (`<versionRepo>/../homes/<name>`).
+  const homes = join(dirname(versionRoot), 'homes')
+  for (const name of instanceNames) {
+    const h = join(homes, name)
+    await rm(h, { recursive: true, force: true })
+  }
+}
+
+/** Persist the dsh version-repository dir (shared by `dsh:setVersionDir` and
+ * the onboarding wizard). Empty string resets to the default. */
+export function setVersionDirValue(dir: string): IpcResult<boolean> {
+  try {
+    const trimmed = dir.trim()
+    if (trimmed === '') {
+      patchSettings({ dshVersionDir: undefined })
+      return { ok: true, value: true }
+    }
+    // Normalize to an absolute path; create-allowed (the repo dir is made on
+    // first install), so only an existing non-directory is rejected up front.
+    const target = resolve(trimmed)
+    if (existsSync(target) && !statSync(target).isDirectory()) {
+      return fail(E.storeNotDir, { path: target })
+    }
+    patchSettings({ dshVersionDir: target })
+    return { ok: true, value: true }
+  } catch (error) {
+    return failFromError(error)
+  }
+}
+
+export function registerDshIpc(): void {
+  handle('dsh:list', (): IpcResult<{ dshes: DshEntry[] }> => {
+    const { dshes } = readDshState()
+    // Surface dsh versions already on disk in the version repo but not yet
+    // registered: auto-register them so they appear in the DSH list (and stop
+    // invisibly blocking an official install of the same name). Idempotent.
+    const discovered = discoverVersionRepo(dshes, dshVersionDir())
+    if (discovered.length > 0) {
+      writeDshState([...dshes, ...discovered])
+      logger.info(`discovered ${discovered.length} repo version(s): ${discovered.map(x => x.name).join(',')}`)
+    }
+    const merged = [...dshes, ...discovered]
+    return {
+      ok: true,
+      value: {
+        dshes: merged.map(d => {
+          // 精确定位 dsh 包根：版本读 `@deepseek-ai/dsh`（或 apps/cli）的 package.json，
+          // 所在位置指向包根而非 `.bin` shim 目录。shim 上旧式暴力上溯会读错版本。
+          const resolved = resolveDshPackage(d.execPath)
+          // A pre-fix settings value may still name a custom profiles dir. It is
+          // ignored for every operation; surfaced only while it still exists, so
+          // the DSH page can point the user at data worth moving into <home>/profiles.
+          const legacy = legacyProfilesDir(d)
+          return {
+            ...d,
+            version: resolved?.version ?? d.version ?? readVersionFromPath(d.execPath),
+            // 派生 managed：persisted 标记 或 该安装根位于其版本库内（修复标记被覆盖的旧条目）。
+            managed: isDeletableDsh(d, d.versionDir ?? dshVersionDir()),
+            launch: baseLaunch(d.execPath),
+            profileDir: effectiveProfileDir(d),
+            legacyProfilesDir: legacy !== undefined && existsSync(legacy) ? legacy : undefined,
+            dir: resolved?.root ?? installDir(d.execPath),
+          }
+        }),
+      },
+    }
+  })
+
+  // Profile info under a SPECIFIC dsh (for the Run page's launch picker/launcher),
+  // independent of any global selection.
+  handle('dsh:profiles', (_event, id: string): IpcResult<DshProfileInfo[]> => {
+    const ctx = ctxOf(id)
+    if (ctx === null) return fail(E.dshNotFound)
+    return { ok: true, value: listProfileInfos(ctx) }
+  })
+
+  // Whether a managed dsh has a newer release available. `value: null` = up to date.
+  handle('dsh:checkUpdate', async (_event, id: string): Promise<IpcResult<DshUpdateInfo | null>> => {
+    const entry = dshEntryById(id)
+    if (entry === undefined) return fail(E.dshNotFound)
+    return { ok: true, value: await checkForDshUpdate(entry.version) }
+  })
+
+  // In-place update of a managed dsh: validates + kicks off a **background** dsh
+  // download session, so the global download center tracks progress (the caller
+  // closes its dialog immediately). Cross-major still requires `ackMajorRisk`.
+  // Returns the new session id instead of awaiting the full reinstall.
+  handle('dsh:update', async (_event, id: string, opts?: { version?: string; ackMajorRisk?: boolean }): Promise<IpcResult<{ id: string }>> => {
+    const { dshes } = readDshState()
+    const entry = dshes.find(d => d.id === id)
+    if (entry === undefined) return fail(E.dshNotFound)
+    // Replacing the install files out from under a live runtime breaks it.
+    const active = listRuns().filter(r => r.dshId === id)
+    if (active.length > 0) return fail(E.dshInUse, { profiles: active.map(r => r.profile).join('、') })
+    if (!isDeletableDsh(entry, entry.versionDir ?? dshVersionDir())) return fail(E.dshNotManaged)
+    // Resolve the target version: explicit, else the latest stable release.
+    let target = opts?.version?.trim()
+    if (target === undefined || target === '') {
+      target = (await checkForDshUpdate(entry.version))?.latest?.version
+    }
+    if (target === undefined || target === '') return fail(E.dshUpToDate)
+    // Cross-major → require explicit acknowledgement of the breaking-change risk.
+    const majorBump = majorOfVersion(target) !== majorOfVersion(entry.version)
+    if (majorBump && opts?.ackMajorRisk !== true) {
+      return fail(E.dshMajorRisk, { current: entry.version, latest: target })
+    }
+    const sessionId = startDshDownload(entry.name, `→ v${target}`, async patchStep => {
+      const result = await updateDsh(entry, dshVersionDir(), { version: target },
+        step => patchStep(toDownloadStep(step)))
+      // Re-read the CURRENT registry at write time — the update job outlives the
+      // handler, so replaying the handler-start snapshot would clobber a dsh that
+      // was added/renamed/removed meanwhile (lost update).
+      updateDshState(list => list.map(d => d.id === id ? { ...d, version: result.version } : d))
+      logger.info(`dsh updated: ${entry.name} ${entry.version} → ${result.version} (backup ${result.backupDir})`)
+    })
+    return { ok: true, value: { id: sessionId } }
+  })
+
+  // Reveal a dsh's install directory in the OS file explorer.
+  handle('dsh:revealDir', async (_event, id: string): Promise<IpcResult<boolean>> => {
+    const { dshes } = readDshState()
+    const entry = dshes.find(d => d.id === id)
+    if (entry === undefined) return fail(E.dshNotFound)
+    const error = await shell.openPath(installDir(entry.execPath))
+    return error === '' ? { ok: true, value: true } : fail(E.shellOpenPath, { detail: error })
+  })
+
+  handle('dsh:add', async (_event, path: string): Promise<IpcResult<DshEntry>> => {
+    let entry: DshEntry
+    try {
+      entry = await entryFromPath(path)
+    } catch {
+      // Not a real filesystem path — e.g. a command string like
+      // `node --import tsx/esm "…"`. Register it as-is (version unknown).
+      entry = { id: path, name: 'dsh (manual)', execPath: path, version: '', home: defaultHome() }
+    }
+    const { dshes } = readDshState()
+    // 保留被替换条目的 app-managed 标记：官方安装后若在「Add DSH」里用同一条 execPath
+    // 重新登记，不能把 managed:true 覆盖成未托管——否则该 dsh 会被当系统 dsh 保护而无法删除。
+    const existing = dshes.find(x => x.id === entry.id)
+    writeDshState([...dshes.filter(d => d.id !== entry.id), existing?.managed === true ? { ...entry, managed: true } : entry])
+    return { ok: true, value: entry }
+  })
+
+  handle('dsh:remove', async (_event, id: string, opts?: { deleteFiles?: boolean }): Promise<IpcResult<boolean>> => {
+    const { dshes } = readDshState()
+    const entry = dshes.find(d => d.id === id)
+    // 非 app 管理的（系统级/手动加入的用户已有安装）一律禁止删除，避免误删用户全局
+    // 环境或绕过 UI 的 `dsh:remove` 调用。唯一例外：该可执行已不存在（磁盘与 app 不同步）
+    // —— 此刻允许脱管（仍不删文件），让用户能清理失效条目。
+    const stale = entry !== undefined && !existsExecutable(entry.execPath)
+    if (entry !== undefined && !stale && !isDeletableDsh(entry, entry.versionDir ?? dshVersionDir())) {
+      return fail(E.dshProtected)
+    }
+    // A dsh with live profiles must not have its install removed underneath.
+    const active = listRuns().filter(r => r.dshId === id)
+    if (active.length > 0) return fail(E.dshInUse, { profiles: active.map(r => r.profile).join('、') })
+    logger.info(`dsh removed: ${entry?.name ?? id}${opts?.deleteFiles === true ? ' (delete files)' : ''}`)
+    // 先从列表移除（脱管 — 始终执行）。
+    writeDshState(dshes.filter(d => d.id !== id))
+    // Drop the removed dsh's per-profile launch configs while its profile dirs
+    // (which hold the stable ids) still exist.
+    if (entry !== undefined) clearDshLaunchConfig(id, contextForEntry(entry))
+    // 可选的物理删除：app 管理的版本实例（含其独立 home），其它则删可执行所属目录。
+    // await 异步删除，避免同步 rm 阻塞主进程导致 App 未响应。
+    if (opts?.deleteFiles === true && entry !== undefined) {
+      await deleteDshFiles(entry)
+    }
+    return { ok: true, value: true }
+  })
+
+  handle('dsh:setHome', (_event, id: string, home: string): IpcResult<boolean> => {
+    if (typeof home !== 'string' || home.trim() === '') return fail(E.nameInvalid)
+    const { dshes } = readDshState()
+    if (!dshes.some(d => d.id === id)) return fail(E.dshNotFound)
+    const target = resolve(home.trim())
+    try {
+      if (existsSync(target) && !statSync(target).isDirectory()) return fail(E.storeNotDir, { path: target })
+      mkdirSync(target, { recursive: true })
+    } catch (error) {
+      return fail(E.storeUnusable, { detail: String(error) })
+    }
+    const next = dshes.map(d => d.id === id ? { ...d, home: target } : d)
+    writeDshState(next)
+    return { ok: true, value: true }
+  })
+
+  handle('dsh:rename', (_event, id: string, name: string): IpcResult<boolean> => {
+    const trimmed = name.trim()
+    if (trimmed === '') return fail(E.nameInvalid)
+    const { dshes } = readDshState()
+    if (!dshes.some(d => d.id === id)) return fail(E.dshNotFound)
+    writeDshState(dshes.map(d => d.id === id ? { ...d, name: trimmed } : d))
+    return { ok: true, value: true }
+  })
+
+  handle('dsh:addManual', (_event, alias: string, execPath: string): IpcResult<DshEntry> => {
+    // Register without probing/running commands: user-supplied alias, version unknown.
+    const baseName = alias.trim() !== '' ? alias.trim() : (execPath.split(/[\\/]/).pop() ?? execPath)
+    const entry: DshEntry = {
+      id: execPath,
+      name: baseName,
+      execPath,
+      version: readVersionFromPath(execPath),
+      home: defaultHome(),
+    }
+    const { dshes } = readDshState()
+    // 保留被替换条目的 app-managed 标记：官方安装后若在「Add DSH」里用同一条 execPath
+    // 重新登记，不能把 managed:true 覆盖成未托管——否则该 dsh 会被当系统 dsh 保护而无法删除。
+    const existing = dshes.find(x => x.id === entry.id)
+    writeDshState([...dshes.filter(d => d.id !== entry.id), existing?.managed === true ? { ...entry, managed: true } : entry])
+    return { ok: true, value: entry }
+  })
+
+  handle('dsh:probe', async (_event, path?: string): Promise<IpcResult<DshEntry[]>> => {
+    // No path → probe the system; a path → probe that single candidate.
+    if (path === undefined || path === '') return { ok: true, value: await probeDshs() }
+    return { ok: true, value: [await entryFromPath(path)] }
+  })
+
+  // Official install → a **background** dsh download session: the same shared
+  // session manager as plugin downloads, so progress streams to the global
+  // download center (version → install → register) instead of blocking the dialog.
+  // Returns the new session id; the caller closes its dialog immediately.
+  handle('dsh:installOfficial', (_event, options?: { versionDir?: string; name?: string; version?: string; force?: boolean }): IpcResult<{ id: string }> => {
+      const currentRoot = dshVersionDir()
+      let versionDir = currentRoot
+      const requested = options?.versionDir?.trim()
+      if (requested !== undefined && requested !== '') {
+        const repoDir = resolve(requested)
+        // Create-allowed: the repo dir legitimately does not exist on first use,
+        // but an existing non-directory / unwritable path must fail up front.
+        try {
+          if (existsSync(repoDir) && !statSync(repoDir).isDirectory()) return fail(E.storeNotDir, { path: repoDir })
+          mkdirSync(repoDir, { recursive: true })
+          const probe = join(repoDir, '.pm-write-probe')
+          writeFileSync(probe, '')
+          rmSync(probe, { force: true })
+        } catch (error) {
+          return fail(E.storeUnusable, { detail: String(error) })
+        }
+        versionDir = repoDir
+        // 用户在安装对话框把版本库指向了非当前设置的目录：写回设置，让「官方安装到指定目录」
+        // 持久可锚定（删除/清理用 entry.versionDir 而不是之后可能变化的 dshVersionDir()）。
+        if (repoDir !== currentRoot) patchSettings({ dshVersionDir: repoDir })
+      }
+      const name = safeVersionName(options?.name)
+      const target = join(versionDir, name)
+      // 非强制时沿用弹窗报错，避免误覆盖一个正常实例（强制重装在校验后的会话内清目录）。
+      if (versionExists(target) && options?.force !== true) {
+        return fail(E.dshVersionExists, { name })
+      }
+      const sessionId = startDshDownload(name, '官方安装', async patchStep => {
+        // 修复/强制重装：先清掉残缺实例再装（home 由 installOfficialDsh 兜底清）。
+        if (options?.force === true && versionExists(target)) {
+          await rm(target, { recursive: true, force: true }).catch(() => {})
+        }
+        const info = await installOfficialDsh(versionDir, name, options?.version,
+          step => patchStep(toDownloadStep(step)))
+        patchStep({ key: 'register', status: 'running' })
+        try {
+          registerInstalledDsh(versionDir, name, info)
+        } catch (writeError) {
+          patchStep({ key: 'register', status: 'error', detail: String(writeError) })
+          throw writeError
+        }
+        patchStep({ key: 'register', status: 'ok', meta: info.version })
+        logger.info(`dsh official installed: ${name} (v${info.version})`)
+      })
+      return { ok: true, value: { id: sessionId } }
+  })
+
+  // Official-install version picker: published `@deepseek-ai/dsh` versions.
+  handle('dsh:pkgVersions', async (): Promise<IpcResult<PackageVersionInfo>> => ({
+    ok: true, value: await fetchPackageVersions('@deepseek-ai/dsh'),
+  }))
+
+  // DSH version repository location (settings).
+  handle('dsh:getVersionDir', (): IpcResult<{ dir: string }> => ({
+    ok: true, value: { dir: dshVersionDir() },
+  }))
+  handle('dsh:setVersionDir', (_event, dir: string): IpcResult<boolean> =>
+    setVersionDirValue(dir))
+}

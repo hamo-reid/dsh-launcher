@@ -655,7 +655,7 @@ export interface DshInstallResult {
 }
 
 /** Streamed per-step progress of an official dsh install, emitted from the
- * background dsh download session (see `core/pluginDownloads.ts`) and surfaced
+ * background dsh download session (see `core/store/downloads.ts`) and surfaced
  * through the global download center's `steps` list. Mirrors `ImportStep`:
  * resolve the version first, then `pnpm add`, then register. */
 export type DshInstallStep =

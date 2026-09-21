@@ -1,7 +1,7 @@
 import { ipcMain, type IpcMainInvokeEvent } from 'electron'
 import type { IpcResult } from '../../shared/types.ts'
-import { failFromError } from '../core/errors.ts'
-import { child } from '../core/logger.ts'
+import { failFromError } from '../core/shared/errors.ts'
+import { child } from '../core/shared/logger.ts'
 
 /** Domain-tagged audit logger for the IPC boundary (`{domain:"ipc"}`). */
 const ipclog = child('ipc')
