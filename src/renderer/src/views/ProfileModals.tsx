@@ -1,17 +1,17 @@
 /** Modal dialogs for the Profile page — pulled out of `ProfileSection` so the
  * page body stays about list + orchestration, not modal markup. */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Alert, Button, Checkbox, Input, Modal, Select, Space, message, theme } from 'antd'
-import { CheckCircleFilled, CloseCircleFilled, LoadingOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
 import { ErrorDetailModal } from '../components/ErrorDetailModal.tsx'
-import { StepIcon } from '../components/StepIcon.tsx'
+import ImportStepList from './profile-detail/ImportStepList.tsx'
+import { useImportSteps } from './profile-detail/useImportSteps.ts'
 import { MODAL } from '../theme.ts'
 import { majorOfVersion } from '../../../shared/version.ts'
 import { isReservedProfileName } from '../../../shared/profile-name.ts'
-import type { ImportBundleSource, ImportProfileResult, ImportStep } from '../../../shared/types.ts'
+import type { ImportBundleSource, ImportProfileResult } from '../../../shared/types.ts'
 
 interface CreateProfileModalProps {
   open: boolean
@@ -104,21 +104,9 @@ interface ImportProfileModalProps {
   onImported: (name: string) => void
 }
 
-/** Owns the import run (via `window.api.importProfile` + the `import:event`
- * stream) and renders one row per step with a status icon — spinner while
- * running, green check on success, red cross on failure. The final status stays
- * visible in the dialog; there is no separate success / missing-token popup. */
-
-interface ImportRow {
-  key: string
-  section: 'bundle' | 'install'
-  label: string
-  status: 'running' | 'ok' | 'error'
-  /** Right-aligned version detail (resolved store version once installed). */
-  meta?: string
-  detail?: string
-}
-
+/** Import a profile from a portable export: pick the file, choose whether to
+ * force a cross-version import, and watch the step rows stream in as bundles are
+ * restored and installed. */
 export function ImportProfileModal(p: ImportProfileModalProps): JSX.Element {
   const { t } = useTranslation()
   const { token } = theme.useToken()
@@ -129,40 +117,16 @@ export function ImportProfileModal(p: ImportProfileModalProps): JSX.Element {
   const [error, setError] = useState('')
   const [result, setResult] = useState<ImportProfileResult | null>(null)
   const [detailView, setDetailView] = useState<string | null>(null)
-  const rowsRef = useRef<ImportRow[]>([])
-  const [rows, setRows] = useState<ImportRow[]>([])
-
-  const upsert = (row: ImportRow): void => {
-    const next = [...rowsRef.current]
-    const at = next.findIndex(r => r.key === row.key)
-    if (at >= 0) next[at] = row
-    else next.push(row)
-    rowsRef.current = next
-    setRows(next)
-  }
 
   const srcLabel = (s: ImportBundleSource): string =>
     s === 'local' ? t('profile.import.src.local')
       : s === 'reuse' ? t('profile.import.src.reuse')
       : t('profile.import.src.npm')
 
-  // Stream per-step progress straight into the row list. The transient "create"
-  // step is omitted (merged into the dialog header); each bundle row carries its
-  // origin + resolved version, `install` is the final wait step.
-  useEffect(() => window.api.onImportEvent((step: ImportStep) => {
-    if (step.kind === 'bundle') {
-      upsert({
-        key: `bundle:${step.name}`,
-        section: 'bundle',
-        label: `${srcLabel(step.source)} · ${step.name}`,
-        status: step.state,
-        meta: step.version !== undefined ? `v${step.version}` : undefined,
-        detail: step.detail,
-      })
-    } else if (step.kind === 'install') {
-      upsert({ key: 'install', section: 'install', label: t('profile.import.installStep'), status: step.state })
-    }
-  }), [t])
+  const { rows, clear } = useImportSteps({
+    bundleLabel: step => `${srcLabel(step.source)} · ${step.name}`,
+    trackInstall: true,
+  })
 
   // Reset when reopened over a fresh file selection.
   useEffect(() => {
@@ -173,8 +137,7 @@ export function ImportProfileModal(p: ImportProfileModalProps): JSX.Element {
     setDone(false)
     setError('')
     setResult(null)
-    rowsRef.current = []
-    setRows([])
+    clear()
   }, [p.open, p.defaultName])
 
   const mismatch = p.importDshVersion !== '' && majorOfVersion(p.importDshVersion) !== majorOfVersion(p.activeDshVersion)
@@ -185,8 +148,7 @@ export function ImportProfileModal(p: ImportProfileModalProps): JSX.Element {
     if (target === '') { void message.warning(t('profile.import.needName')); return }
     setError('')
     setResult(null)
-    rowsRef.current = []
-    setRows([])
+    clear()
     setRunning(true)
     setDone(false)
     const res = await window.api.importProfile(p.dshId, p.json, target, forceImport, p.unpackDir)
@@ -240,36 +202,7 @@ export function ImportProfileModal(p: ImportProfileModalProps): JSX.Element {
         )}
 
         {/* 逐行进度：转圈 / 绿勾 / 红叉，按来源标注并分组；结束后保留在下面。 */}
-        {rows.length > 0 && (() => {
-          let prevSection: ImportRow['section'] | undefined
-          return (
-            <div style={{ borderTop: `1px solid ${token.colorSplit}`, paddingTop: token.paddingSM }}>
-              {rows.map(row => {
-                const isNewSection = row.section !== prevSection
-                prevSection = row.section
-                return (
-                  <div key={row.key}>
-                    {isNewSection && (
-                      <div style={{ margin: '6px 0 2px', color: token.colorTextSecondary, fontSize: token.fontSizeSM, fontWeight: 600 }}>
-                        {row.section === 'bundle' ? t('profile.import.sectionBundles') : t('profile.import.sectionInstall')}
-                      </div>
-                    )}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0' }}>
-                      <StepIcon status={row.status} />
-                      <span style={{ flex: 1, minWidth: 0 }}>{row.label}</span>
-                      {row.meta !== undefined && (
-                        <span style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' }}>{row.meta}</span>
-                      )}
-                      {row.status === 'error' && (
-                        <Button type="link" size="small" style={{ padding: 0, color: token.colorError }} onClick={() => setDetailView(row.detail ?? '')}>{t('profile.import.errorLabel')}</Button>
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )
-        })()}
+        <ImportStepList rows={rows} onShowDetail={setDetailView} />
 
         {done && error !== '' && (
           <Alert type="error" showIcon title={t('profile.import.failed')} description={error} />
@@ -315,35 +248,13 @@ export function MirrorProfileModal(p: MirrorProfileModalProps): JSX.Element {
   const [done, setDone] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState<ImportProfileResult | null>(null)
-  const rowsRef = useRef<ImportRow[]>([])
-  const [rows, setRows] = useState<ImportRow[]>([])
 
-  const upsert = (row: ImportRow): void => {
-    const next = [...rowsRef.current]
-    const at = next.findIndex(r => r.key === row.key)
-    if (at >= 0) next[at] = row
-    else next.push(row)
-    rowsRef.current = next
-    setRows(next)
-  }
-
-  useEffect(() => window.api.onImportEvent((step: ImportStep) => {
-    if (step.kind === 'bundle') {
-      upsert({
-        key: `bundle:${step.name}`,
-        section: 'bundle',
-        label: `${step.name}`,
-        status: step.state,
-        meta: step.version !== undefined && step.version !== '' ? `v${step.version}` : undefined,
-        detail: step.detail,
-      })
-    }
-  }), [])
+  const { rows, clear } = useImportSteps({ bundleLabel: step => step.name })
 
   useEffect(() => {
     if (!p.open) return
     setTargets([]); setTargetId(undefined); setRunning(false); setDone(false); setError(''); setResult(null)
-    rowsRef.current = []; setRows([])
+    clear()
     void (async () => {
       const r = await window.api.dsh.list()
       if (r.ok) {
@@ -398,19 +309,7 @@ export function MirrorProfileModal(p: MirrorProfileModalProps): JSX.Element {
           </>
         )}
 
-        {rows.length > 0 && (
-          <div style={{ borderTop: `1px solid ${token.colorSplit}`, paddingTop: token.paddingSM }}>
-            {rows.map(row => (
-              <div key={row.key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0' }}>
-                <StepIcon status={row.status} />
-                <span style={{ flex: 1, minWidth: 0 }}>{row.label}</span>
-                {row.meta !== undefined && (
-                  <span style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' }}>{row.meta}</span>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+        <ImportStepList rows={rows} />
 
         {done && error !== '' && <Alert type="error" showIcon title={error} />}
         {done && result !== null && (
