@@ -12,7 +12,7 @@ import { AppError } from '../shared/errors.ts'
 import type { LaunchOptions } from '../../../shared/types.ts'
 
 /** Normalized, validated launch options ready to assemble a command. */
-export interface SanitizedLaunchOptions {
+interface SanitizedLaunchOptions {
   args: string[]
   patches: string[]
   env: Record<string, string>
@@ -22,7 +22,7 @@ export interface SanitizedLaunchOptions {
 /** Environment keys the launcher owns and must never let a user override:
  * overriding the first two breaks the bundled-Electron-as-node shim; the rest
  * would hijack how Node resolves modules / the executable lookup. */
-export const RESERVED_ENV_KEYS: ReadonlySet<string> = new Set([
+const RESERVED_ENV_KEYS: ReadonlySet<string> = new Set([
   'ELECTRON_RUN_AS_NODE', 'DSH_HOME', 'NODE_OPTIONS', 'NODE_PATH', 'PATH',
 ])
 

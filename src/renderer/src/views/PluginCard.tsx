@@ -35,7 +35,7 @@ const kindKey = (k: PluginKind): 'template' | 'bundle' | 'dependency' | 'storeOn
 const provKey = (p: PluginProvenance): 'store' | 'official' | 'subBundle' | 'localLink' | 'external' =>
   p === 'local-link' ? 'localLink' : p === 'sub-bundle' ? 'subBundle' : p
 
-export interface PluginCardProps {
+interface PluginCardProps {
   row: InstalledOverviewRow
   /** Update-check result for this plugin, when a check has run. */
   update?: PluginUpdateInfo

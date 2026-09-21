@@ -7,13 +7,6 @@
 import type { IpcResult } from '../../../shared/types.ts'
 import { logger } from './logger.ts'
 
-export interface IpcFail extends Record<string, unknown> {
-  code: string
-  params?: Record<string, string> | string[]
-  /** Raw original message (fallback detail until callers fully switch to t()). */
-  error: string
-}
-
 type FailParams = Record<string, string> | string[]
 
 /** An application error carrying a stable code + interpolation params. */

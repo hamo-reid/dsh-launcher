@@ -11,7 +11,7 @@
 import { CORE_SCHEMA, FAILSAFE_SCHEMA, defineScalarTag, load } from 'js-yaml'
 
 /** Sentinel prefix carrying a cordis `!!js` expression through js-yaml. */
-export const JS_PREFIX = '\u0000dsh-js:'
+const JS_PREFIX = '\u0000dsh-js:'
 
 const jsExprTag = defineScalarTag<string>('tag:yaml.org,2002:js', {
   identify: () => false,

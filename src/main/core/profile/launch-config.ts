@@ -26,7 +26,7 @@ const ID_FILE = '.dsh-launcher-id'
 const KEY_PREFIX = 'pid:'
 
 /** Absolute path of a profile directory's id sidecar. */
-export function profileIdPath(dir: string): string {
+function profileIdPath(dir: string): string {
   return join(dir, ID_FILE)
 }
 

@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
 import type { TrashItem } from '../../../shared/types.ts'
 
-export interface UseTrash {
+interface UseTrash {
   items: TrashItem[]
   selected?: string
   setSelected: (name?: string) => void

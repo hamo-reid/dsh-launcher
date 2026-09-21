@@ -23,14 +23,14 @@ export function sourceKindOf(source: string): PluginSource {
 }
 
 /** One archived version's origin record. */
-export interface PluginSourceRecord {
+interface PluginSourceRecord {
   kind: PluginSource
   /** The exact pnpm source spec (`name@ver`, `github:owner/repo[#path]`, `file:…`). */
   spec?: string
 }
 
 /** Path to the origin sidecar. */
-export function sourcesFile(storeDir: string): string {
+function sourcesFile(storeDir: string): string {
   return join(storeDir, '.pm-sources.json')
 }
 

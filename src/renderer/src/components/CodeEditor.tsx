@@ -9,7 +9,7 @@ import { monaco } from '../lib/monaco.ts'
 import { useThemeMode } from '../ThemeProvider.tsx'
 import type { CSSProperties } from 'react'
 
-export type CodeLanguage = 'yaml' | 'json' | 'plaintext'
+type CodeLanguage = 'yaml' | 'json' | 'plaintext'
 
 interface Props {
   value: string

@@ -16,10 +16,11 @@
  * mistake is reversible without a launcher-side restore UI.
  */
 
+
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { homePatchPath, readHomePatch } from '../profile/home.ts'
+import { readHomePatch } from '../profile/home.ts'
 import { extractKeyValue, parseNamedRows } from '../patch/patch.ts'
 import { loadYaml } from '../patch/yaml.ts'
 import { logger } from '../shared/logger.ts'
@@ -35,10 +36,8 @@ export { parseSkillText, renderSkillFile, scaffoldSkill } from './frontmatter.ts
 export type { ParsedSkill } from './frontmatter.ts'
 export { installZipSkills, zipEntryUnsafe, zipImportProblem } from './zip.ts'
 
-
-
 /** The package every skill-filesystem config row mounts. */
-export const SKILL_PACKAGE = '@deepseek-ai/dsh-skill-filesystem'
+const SKILL_PACKAGE = '@deepseek-ai/dsh-skill-filesystem'
 
 // Precedence ranks, copied from dsh's skill-filesystem (project roots excluded).
 const CUSTOM_RANK = 300
@@ -49,7 +48,7 @@ const BUNDLED_SKILL_RANK = 600
 // ── config ───────────────────────────────────────────────────────────────────
 
 /** The `config` of the `skill-filesystem` row in the home layer, if any. */
-export interface SkillFsConfig {
+interface SkillFsConfig {
   includeDefaultRoots?: boolean
   dshHome?: string
   agentsHome?: string
@@ -59,7 +58,7 @@ export interface SkillFsConfig {
 
 /** Read the `@deepseek-ai/dsh-skill-filesystem` row's config from the home
  * layer. An absent row, or an unparsable one, means dsh's defaults apply. */
-export function readSkillFsConfig(ctx: DshContext): SkillFsConfig {
+function readSkillFsConfig(ctx: DshContext): SkillFsConfig {
   const { text } = readHomePatch(ctx)
   const row = parseNamedRows(text).find(candidate => candidate.name === SKILL_PACKAGE)
   if (row === undefined) return {}
@@ -189,7 +188,7 @@ export function setSkillTrash(next: ((target: string) => Promise<void>) | null):
 }
 
 /** One editable entry: a skill living in the writable user-dsh root. */
-export interface WritableSkill {
+interface WritableSkill {
   entry: SkillEntry
 }
 /** Find the skill named `name` among the editable entries, or `undefined`.
@@ -276,9 +275,6 @@ export function importSkillZip(ctx: DshContext, zipPath: string): SkillEntry[] {
 }
 
 /** The home-layer patch path a `skill-filesystem` config row lives in (for docs/UX). */
-export function skillConfigPath(ctx: DshContext): string {
-  return homePatchPath(ctx)
-}
 
 /** The catalog entry for a skill just installed into `root`, in the shape it
  * landed as (`bundle` → `<name>/SKILL.md`, `flat` → `<name>.md`). */

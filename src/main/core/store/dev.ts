@@ -16,6 +16,7 @@
  * resolves them from the DEV package (not the profile), so they may need a
  * shim/`pnpm install` (see `diagnoseDevPlugin`).
  */
+
 import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { loadSettings, updateSettings } from '../settings/settings.ts'
@@ -28,8 +29,10 @@ import { createKeyedCache } from '../shared/keyed-cache.ts'
 import { logger } from '../shared/logger.ts'
 import type { DshContext } from '../profile/appState.ts'
 import type {
-  DevBuildTarget, DevDiagnosis, DevPatchRow, DevPeer, DevPlugin, DevRunResult, DevScriptOptions, ModuleIndexInfo,
+  DevBuildTarget, DevDiagnosis, DevPatchRow, DevPeer, DevPlugin, DevRunResult, DevScriptOptions,
 } from '../../../shared/types.ts'
+
+
 
 /** The manifest fields the dev-plugin helpers read. */
 interface DevManifest {
@@ -170,7 +173,7 @@ export function removeDevPlugin(name: string): void {
 }
 
 /** Update one registered dev plugin in place (atomic against the current list). */
-export function updateDevPlugin(name: string, mutate: (dev: DevPlugin) => DevPlugin): void {
+function updateDevPlugin(name: string, mutate: (dev: DevPlugin) => DevPlugin): void {
   updateSettings((draft) => {
     draft.devPlugins = (draft.devPlugins ?? []).map(p => (p.name === name ? mutate(p) : p))
   })
@@ -179,7 +182,7 @@ export function updateDevPlugin(name: string, mutate: (dev: DevPlugin) => DevPlu
 // ── diagnosis ───────────────────────────────────────────────────────────────
 
 /** How a diagnosis is targeted: which chain it resolves against, and who it is. */
-export interface DiagnoseOptions {
+interface DiagnoseOptions {
   /** The profile whose composition (and `node_modules`) to resolve against. */
   profile?: string
   /** Bypass the caches — the dialog's 「重新诊断」. */
@@ -408,7 +411,7 @@ export function unshimDevPeers(dev: DevPlugin): string[] {
 // ── build ───────────────────────────────────────────────────────────────────
 
 /** The package's declared script names (empty when it declares none). */
-export function readScripts(dir: string): string[] {
+function readScripts(dir: string): string[] {
   try {
     const m = readManifest(dir) as DevManifest & { scripts?: Record<string, string> }
     return Object.keys(m.scripts ?? {}).sort()

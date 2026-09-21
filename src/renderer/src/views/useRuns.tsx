@@ -27,7 +27,7 @@ export interface RunConflictInfo {
 /** Per-run console buffer cap, mirroring the main process' `RUN_LOG_CAP`. */
 const LOG_CAP = 512 * 1024
 
-export interface UseRuns {
+interface UseRuns {
   /** Live runs, newest last. */
   running: RunInfo[]
   /** Runs that ended during this renderer session (kept so their output stays

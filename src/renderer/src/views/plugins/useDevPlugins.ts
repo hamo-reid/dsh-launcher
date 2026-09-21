@@ -30,7 +30,7 @@ export interface RunOutput { name: string; ok: boolean; text: string; command: s
  * computed for, so a cached verdict never reads as a fresh one elsewhere. */
 export interface OpenReport { name: string; diag: DevDiagnosis }
 
-export interface DevPluginsApi {
+interface DevPluginsApi {
   /** The chain every verdict on screen was computed against. */
   hosts: HostOption[]
   target: DevTarget

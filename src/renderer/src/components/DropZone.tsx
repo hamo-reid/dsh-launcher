@@ -12,7 +12,7 @@ import { Spin, Typography, theme } from 'antd'
 import { InboxOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 
-export interface FileDropHandlers {
+interface FileDropHandlers {
   onDragEnter: (e: DragEvent<HTMLDivElement>) => void
   onDragOver: (e: DragEvent<HTMLDivElement>) => void
   onDragLeave: (e: DragEvent<HTMLDivElement>) => void

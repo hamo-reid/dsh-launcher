@@ -97,7 +97,7 @@ export function listRuns(): RunInfo[] {
 // ── run-state subscription (tray status monitoring) ──────────────────────────
 
 /** Listened to on every run start / stop (the tray updates its tooltip live). */
-export type RunStateListener = (runs: RunInfo[]) => void
+type RunStateListener = (runs: RunInfo[]) => void
 const runListeners = new Set<RunStateListener>()
 
 function notifyRunState(): void {
@@ -127,7 +127,7 @@ function resolveNodeExe(): { exe: string; bundled: boolean } {
 }
 
 /** Stop one run by id. Returns false when the id is unknown (already exited). */
-export function stopRun(id: string): boolean {
+function stopRun(id: string): boolean {
   const run = runs.get(id)
   if (run === undefined) return false
   logger.info(`run stopped: ${run.profile}`)

@@ -65,7 +65,7 @@ export function hostLabel(host: { name: string; version?: string } | undefined, 
 
 /** The verdict a package's badge shows, as a descriptor the view maps onto a colour
  * and a label. `issues` counts both kinds of problem the badge summarizes. */
-export type StatusDescriptor =
+type StatusDescriptor =
   | { kind: 'noEntry' }
   | { kind: 'issues'; count: number }
   | { kind: 'ok' }
@@ -83,7 +83,7 @@ export function statusOf(diagnosis: DevDiagnosis | undefined): StatusDescriptor 
  * "Missing" (nothing has it) and "dangling" (the directory entry is there but its
  * link target is gone) are DIFFERENT problems with different fixes — install the
  * package versus repair the link — so they never collapse into one verdict. */
-export type ResolveDescriptor =
+type ResolveDescriptor =
   | { kind: 'missing' }
   | { kind: 'dangling'; target: string }
   | { kind: 'resolved'; root: DevResolveRoot; peer: boolean }
@@ -102,7 +102,7 @@ export function resolveDescriptor(
 /** The chain a verdict belongs to, as an i18n key plus its params. A verdict is
  * not readable without the chain it was computed for, so the two travel together
  * everywhere one is shown. */
-export interface ScopeLabel {
+interface ScopeLabel {
   key: 'plugin.dev.detectedAt' | 'plugin.dev.detectedAtHost'
   params: { time: string; host: string; profile?: string }
 }
@@ -129,7 +129,7 @@ export function scopeLabel(
 /** One build-menu entry: a labelled group of script keys. Deliberately NOT antd's
  * `MenuProps['items']` — the two shapes are compatible, and staying off the type
  * keeps this module testable without a DOM. */
-export interface BuildMenuItem {
+interface BuildMenuItem {
   type: 'group'
   label: string
   children: { key: string; label: string }[]

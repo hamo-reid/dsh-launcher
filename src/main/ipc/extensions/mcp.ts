@@ -33,17 +33,17 @@ import type {
 type McpWriteLayer = 'profile' | 'home'
 
 /** The patch file backing a writable layer. */
-export function layerPath(ctx: DshContext, profile: string, layer: McpWriteLayer): string {
+function layerPath(ctx: DshContext, profile: string, layer: McpWriteLayer): string {
   return layer === 'home' ? homePatchPath(ctx) : profilePatchPath(ctx, profile)
 }
 
 /** Read a patch layer, defaulting to an empty document. */
-export function readLayer(path: string): string {
+function readLayer(path: string): string {
   return existsSync(path) ? readFileSync(path, 'utf8') : '[]'
 }
 
 /** Validate a row id (also the `- id:` token, so the same guard applies). */
-export function inputIdInvalid(input: McpServerInput): boolean {
+function inputIdInvalid(input: McpServerInput): boolean {
   const id = input.id.trim()
   if (id === '') return false // derived from serverName
   return rowIdInvalid(id)
@@ -51,7 +51,7 @@ export function inputIdInvalid(input: McpServerInput): boolean {
 
 /** Field validation the form and dsh both require. Returns a fail envelope or
  * `null` when the input is acceptable. */
-export function rejectInput(input: McpServerInput): IpcResult<never> | null {
+function rejectInput(input: McpServerInput): IpcResult<never> | null {
   if (input === null || typeof input !== 'object') return fail(E.internal, undefined, 'bad input')
   if (inputIdInvalid(input)) return fail(E.nameInvalid, { detail: input.id })
   if (!SERVER_NAME_RE.test(input.serverName ?? '')) return fail(E.extBadServerName, { detail: input.serverName ?? '' })
@@ -72,7 +72,7 @@ export function rejectInput(input: McpServerInput): IpcResult<never> | null {
 }
 
 /** Write a patch layer after structural validation, then verify the row landed. */
-export function commitLayer(path: string, next: string, verify: (text: string) => boolean, id: string): IpcResult<boolean> {
+function commitLayer(path: string, next: string, verify: (text: string) => boolean, id: string): IpcResult<boolean> {
   assertPatchDocValid(next)
   writeFileSync(path, next)
   const after = readFileSync(path, 'utf8')
@@ -81,7 +81,7 @@ export function commitLayer(path: string, next: string, verify: (text: string) =
 
 /** Create or update one MCP row in the chosen layer (shared by the per-profile
  * editor and the library's apply/sync paths). */
-export function saveMcpRow(ctx: DshContext, profile: string, rawInput: McpServerInput, layer: McpWriteLayer): IpcResult<boolean> {
+function saveMcpRow(ctx: DshContext, profile: string, rawInput: McpServerInput, layer: McpWriteLayer): IpcResult<boolean> {
   try {
     const path = layerPath(ctx, profile, layer)
     const current = readLayer(path)
@@ -106,7 +106,7 @@ export function saveMcpRow(ctx: DshContext, profile: string, rawInput: McpServer
  * resolves from another layer, in any profile the write reaches. Overriding such
  * a row is the disable toggle's job — it writes an id-targeted update, never a
  * second insert (see `ext:mcpSetDisabled`). */
-export function idResolvesElsewhere(ctx: DshContext, profile: string, layer: McpWriteLayer, id: string): boolean {
+function idResolvesElsewhere(ctx: DshContext, profile: string, layer: McpWriteLayer, id: string): boolean {
   // A home row is resolved by EVERY profile, so a home write has to consider
   // them all; a profile write only ever lands in that one profile's resolution.
   const profiles = layer === 'profile' ? [profile] : listProfiles(ctx)

@@ -5,14 +5,17 @@
  * (via `store:migrate`) after the user consents, and a hindsight migration
  * marker lets the probe retire later. Read side keeps working on legacy stores.
  */
+
 import { cpSync, existsSync, mkdirSync, realpathSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
-import { basename, dirname, join, normalize } from 'node:path'
+import { basename, join, normalize } from 'node:path'
 import { runPnpm } from '../dsh/pnpm.ts'
 import { dshScopes, profilesRoot } from '../profile/appState.ts'
 import { logger } from '../shared/logger.ts'
 import {
   initStore, pluginVersionDir, readVersion, storeVersions, type ProfileManifestShape, type StoreManifest,
 } from './layout.ts'
+
+
 
 /** Whether the store still holds legacy flat packages awaiting the one-time
  * migration (top-level node_modules entries not yet absorbed into versions). */

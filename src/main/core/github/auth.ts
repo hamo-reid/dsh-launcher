@@ -21,7 +21,7 @@ import type { GithubAuthState, GithubEncryption, GithubRateLimit, GithubTokenSou
 
 /** Encrypt/decrypt a token at rest; injected by the main process (safeStorage).
  * The historical name for the envelope the MCP secrets share (`SecretCipher`). */
-export type TokenCipher = SecretCipher
+type TokenCipher = SecretCipher
 
 /** Quota probe endpoint — cheap and auth-aware. */
 const RATE_LIMIT_URL = 'https://api.github.com/rate_limit'

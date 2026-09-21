@@ -89,7 +89,7 @@ export function parsePatchRows(text: string): PluginRow[] {
 }
 
 /** A row with its package name (when the block carries one) and disabled state. */
-export interface NamedRow {
+interface NamedRow {
   id: string
   name?: string
   disabled: boolean

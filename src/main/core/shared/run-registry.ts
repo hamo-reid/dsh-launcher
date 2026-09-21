@@ -7,7 +7,7 @@
 
 /** A run's identity: a profile name is unique per dsh, so the dsh id is part of
  * the single-instance key. */
-export interface HasRun {
+interface HasRun {
   dshId: string
   profile: string
 }

@@ -8,7 +8,7 @@
  */
 import semver from 'semver'
 
-export interface SemVer { major: number; minor: number; patch: number }
+interface SemVer { major: number; minor: number; patch: number }
 
 /** Parse a dotted numeric version into its parts. `null` when unt parseable
  * (mirrors semver's strict three-part requirement, so `1.2` and junk → null). */

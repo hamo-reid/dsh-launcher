@@ -125,7 +125,7 @@ export function pluginDir(): string {
 }
 
 /** Default base of the local dsh version repository. */
-export function defaultVersionDir(): string {
+function defaultVersionDir(): string {
   return join(userData, 'dsh', 'versions')
 }
 

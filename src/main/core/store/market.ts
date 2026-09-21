@@ -12,17 +12,20 @@
  * installable. Nothing outside a catalog entry is ever accepted.
  */
 
+
 import { loadSettings, patchSettings } from '../settings/settings.ts'
 import { child, logger } from '../shared/logger.ts'
 import type {
-  MarketAnnotations, MarketCatalog, MarketPage, MarketPlugin, MarketSort, MarketSource, MarketSourceState,
+  MarketAnnotations, MarketCatalog, MarketPage, MarketPlugin, MarketSort, MarketSourceState,
 } from '../../../shared/types.ts'
+
+
 
 /** Domain-tagged logger for market-catalog traffic. */
 const mlog = child('market')
 
 /** The canonical catalog address (GitHub Pages behind a CDN). */
-export const MARKET_OFFICIAL_URL = 'https://awesome-dsh-plugin.com/plugins.json'
+const MARKET_OFFICIAL_URL = 'https://awesome-dsh-plugin.com/plugins.json'
 
 /** npm package names are plain, allowlisted shape — guards the store's package.json. */
 const NPM_NAME_RE = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/
@@ -91,13 +94,13 @@ export function forgetCatalog(): void {
 }
 
 /** The single URL the current route resolves to (the first source in order). */
-export function catalogUrl(state: MarketSourceState): string {
+function catalogUrl(state: MarketSourceState): string {
   return sourcesFor(state)[0].url
 }
 
 /** The memoized catalog for a URL, or null when absent or for a different URL.
  * A pure memory read — never touches the network. */
-export function cachedCatalog(url: string): MarketCatalog | null {
+function cachedCatalog(url: string): MarketCatalog | null {
   return served?.url === url ? served.data : null
 }
 

@@ -15,7 +15,7 @@ export type Bucket = 'all' | 'used' | 'unused' | 'update' | 'template'
 
 /** Overview card sort orders. */
 export type SortKey = 'name' | 'size' | 'versions' | 'usage'
-export type SortDir = 'asc' | 'desc'
+type SortDir = 'asc' | 'desc'
 
 /** Whether a facet's values are a whitelist or a blacklist. */
 export type FacetMode = 'include' | 'exclude'
@@ -39,7 +39,7 @@ export interface StoredFilters {
   showDev: boolean
 }
 
-export const FILTER_KEY = 'pm.plugins.overview.filters'
+const FILTER_KEY = 'pm.plugins.overview.filters'
 
 export const DEFAULT_FILTERS: StoredFilters = {
   bucket: 'all',
@@ -126,7 +126,7 @@ export function facetMatches<T extends string>(facet: Facet<T>, values: readonly
 }
 
 /** Inputs the overview filter needs beyond the persisted config. */
-export interface OverviewFilterContext {
+interface OverviewFilterContext {
   /** Name substring filter (include only). */
   query: string
   /** Update-check results, for the `update` bucket. */

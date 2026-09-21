@@ -14,7 +14,7 @@ import type { ProfilePatchReload } from '../../../shared/types.ts'
 export const MANIFEST_FILE_NAME = 'package.json'
 
 /** A profile manifest, uninterpreted — every field the launcher reads or writes. */
-export interface RawManifest {
+interface RawManifest {
   name?: string
   private?: boolean
   dependencies?: Record<string, string>
@@ -23,7 +23,7 @@ export interface RawManifest {
 
 /** The manifest's on-disk byte form: 2-space JSON with a trailing newline, the
  * shape dsh's own tooling writes. */
-export function stringifyManifest(manifest: RawManifest): string {
+function stringifyManifest(manifest: RawManifest): string {
   return JSON.stringify(manifest, null, 2) + '\n'
 }
 

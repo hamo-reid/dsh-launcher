@@ -37,7 +37,7 @@ export function findMcpLibraryEntry(serverName: string): McpLibEntry | undefined
 
 /** A structural problem with an entry, with the IPC error code the UI should
  * show for it (`mcpInputInvalid` is its message-only form). */
-export interface McpInputProblem { code: string; message: string }
+interface McpInputProblem { code: string; message: string }
 
 /** Structural validation for a library entry — the same rules a patch row must
  * satisfy for dsh to load it. Returns the problem, or `null` when acceptable. */

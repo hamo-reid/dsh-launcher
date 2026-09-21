@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { Button, Tag } from 'antd'
 
-export interface FilterChip {
+interface FilterChip {
   key: string
   label: ReactNode
   onClose: () => void

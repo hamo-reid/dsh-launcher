@@ -21,7 +21,7 @@ export interface SecretCipher {
 export const PLAIN_PREFIX = 'plain:'
 
 /** One secret's at-rest codec. */
-export interface SecretCodec {
+interface SecretCodec {
   /** Inject the cipher (main process wires safeStorage; tests inject a fake). */
   setCipher(next: SecretCipher | null): void
   /** Whether a cipher is usable right now — i.e. new values get encrypted. */

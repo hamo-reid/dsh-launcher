@@ -10,7 +10,7 @@
 import type { McpKV, McpReconnect, McpServer, McpServerInput, McpTransport, McpValueMode } from '../../../shared/types.ts'
 
 /** Every key `McpServerInput` declares — anything else in a JSON document is rejected. */
-export const MCP_INPUT_KEYS = [
+const MCP_INPUT_KEYS = [
   'id', 'serverName', 'transport', 'command', 'args', 'env', 'cwd',
   'url', 'headers', 'toolCallTimeoutMs', 'failOnStartupError', 'reconnect', 'disabled',
 ] as const

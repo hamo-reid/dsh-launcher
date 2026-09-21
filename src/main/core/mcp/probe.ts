@@ -61,7 +61,7 @@ const NOISE_TAIL_CAP = 512
 
 // ── injected side effects (project convention: module-level, swappable) ──────
 
-export interface McpProbeDeps {
+interface McpProbeDeps {
   spawn: typeof spawn
   /** Stop the probe process AND its tree. */
   kill: (proc: ChildProcess) => void
@@ -103,7 +103,7 @@ export interface McpProbeChild {
   onError(listener: (error: Error) => void): void
 }
 
-export interface StdioHandshakeOpts {
+interface StdioHandshakeOpts {
   clientVersion: string
   timeoutMs: number
 }

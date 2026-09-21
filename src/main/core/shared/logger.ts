@@ -27,7 +27,7 @@ import { createLogger, format, transports, type Logger } from 'winston'
 import DailyRotateFile from 'winston-daily-rotate-file'
 import { mkdirSync } from 'node:fs'
 
-export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
+type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 
 /** Severity ladder — debug lowest, so clamping the level at `debug` shows all. */
 const LEVELS: Record<LogLevel, number> = { error: 0, warn: 1, info: 2, debug: 3 }
@@ -181,7 +181,7 @@ export function logsDirectory(): string {
 }
 
 /** The `logger.*` surface (optionally tagged with a `domain` for routing/grep). */
-export interface LoggerApi {
+interface LoggerApi {
   debug: (message: string, extra?: unknown) => void
   info: (message: string, extra?: unknown) => void
   warn: (message: string, extra?: unknown) => void

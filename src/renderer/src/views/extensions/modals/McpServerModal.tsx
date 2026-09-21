@@ -113,7 +113,7 @@ function KVEditor(props: {
   )
 }
 
-export interface McpServerModalProps {
+interface McpServerModalProps {
   open: boolean
   /** The row being edited, or `null` when adding. */
   editing: McpServer | null

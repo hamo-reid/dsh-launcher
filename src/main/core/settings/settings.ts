@@ -236,9 +236,6 @@ export function saveSettings(settings: AppSettings): void {
 }
 
 /** Drop a single top-level key (used by directory resets). */
-export function clearSetting(key: keyof AppSettings): AppSettings {
-  return updateSettings((draft) => { delete draft[key] })
-}
 
 /** Update the in-memory rows and schedule a coalesced flush (skip when the rows
  * are byte-identical to the last flush — a cheap no-op dedupe). */

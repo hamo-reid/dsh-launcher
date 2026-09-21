@@ -79,7 +79,7 @@ export interface NodeTarget {
 }
 
 /** A ready-to-spawn command: executable, argv, and the child environment. */
-export interface LaunchSpec {
+interface LaunchSpec {
   exe: string
   argv: string[]
   env: NodeJS.ProcessEnv
@@ -103,7 +103,7 @@ function preloadArgs(bundled: boolean): string[] {
 }
 
 /** Inputs for the dsh launch command. */
-export interface DshLaunchInput {
+interface DshLaunchInput {
   /** Resolved dsh entry (script + loader mode + cwd). */
   launch: LaunchEntry
   /** dsh home exported to the child as `DSH_HOME`. */
@@ -138,7 +138,7 @@ export function buildDshLaunch({
 }
 
 /** Inputs for launching a node script (pnpm) with the same cleanup contract. */
-export interface NodeScriptLaunchInput {
+interface NodeScriptLaunchInput {
   node: NodeTarget
   script: string
   args: readonly string[]

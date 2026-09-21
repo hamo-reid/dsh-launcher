@@ -7,7 +7,7 @@ import { SKILL_NAME_RE } from '../../../../../shared/skill.ts'
 
 const CodeEditor = lazy(() => import('../../../components/CodeEditor.tsx'))
 
-export interface SkillEditorModalProps {
+interface SkillEditorModalProps {
   open: boolean
   /** The name being edited, or `null` when creating. */
   previousName: string | null

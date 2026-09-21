@@ -78,7 +78,7 @@ function depIsLocalLink(spec: string | undefined, storeDir: string): boolean {
 }
 
 /** Read the legacy store layout (a single pnpm project at the store root). */
-export function legacyListPlugins(dir: string): { name: string; version: string }[] {
+function legacyListPlugins(dir: string): { name: string; version: string }[] {
   const manifestPath = join(dir, 'package.json')
   if (!existsSync(manifestPath)) return []
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as StoreManifest

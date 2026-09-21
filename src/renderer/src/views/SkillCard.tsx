@@ -9,7 +9,7 @@ import { useTranslation } from 'react-i18next'
 import ConfirmMenu, { type MenuAction } from '../components/ConfirmMenu.tsx'
 import type { SkillLibEntry } from '../../../shared/types.ts'
 
-export interface SkillCardProps {
+interface SkillCardProps {
   entry: SkillLibEntry
   /** Per-dsh install states (installed / stale). */
   installs: Array<{ installed: boolean; stale: boolean }>

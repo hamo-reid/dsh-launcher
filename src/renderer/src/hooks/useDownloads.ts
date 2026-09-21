@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { DownloadSessionInfo, IpcResult } from '../../../shared/types.ts'
 
 /** Start a background dsh install/update session (returns its session id). */
-export type StartDshArgs =
+type StartDshArgs =
   | { op: 'install'; versionDir?: string; name?: string; version?: string; force?: boolean }
   | { op: 'update'; id: string; version?: string; ackMajorRisk?: boolean }
 
@@ -73,5 +73,3 @@ export function useDownloads(): {
 
   return { downloads, dshDownloads, pluginDownloads, startPlugin, startDsh, cancel, dismiss, cleanup }
 }
-
-export type UseDownloads = ReturnType<typeof useDownloads>

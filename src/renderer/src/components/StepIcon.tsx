@@ -2,7 +2,7 @@ import { CheckCircleFilled, CloseCircleFilled, LoadingOutlined } from '@ant-desi
 import { theme } from 'antd'
 
 /** Status of one progress row / install step. */
-export type RowStatus = 'running' | 'ok' | 'error'
+type RowStatus = 'running' | 'ok' | 'error'
 
 /** Colored step icon for a progress row (spinner / check / cross), token-driven
  * so the same three states render identically across every install/import modal. */

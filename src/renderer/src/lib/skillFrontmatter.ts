@@ -13,7 +13,7 @@
 
 /** The header fields the preview shows, both optional: absent means the fence or
  * the field is not (yet) there. */
-export interface LiveHeader {
+interface LiveHeader {
   name?: string
   description?: string
 }

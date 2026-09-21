@@ -323,21 +323,3 @@ export function MirrorProfileModal(p: MirrorProfileModalProps): JSX.Element {
     </Modal>
   )
 }
-
-interface MissingPluginsModalProps {
-  list: string[]
-  onClose: () => void
-}
-export function MissingPluginsModal(p: MissingPluginsModalProps): JSX.Element {
-  const { t } = useTranslation()
-  const { token } = theme.useToken()
-  return (
-    <Modal title={t('profile.import.missingModalTitle')} open onOk={p.onClose} onCancel={p.onClose} okText={t('profile.import.gotIt')} width={MODAL.narrow}>
-      <Alert type="warning" showIcon style={{ marginBottom: 10 }} title={t('profile.import.missingModalHint')} />
-      {p.list.map(m => <div key={m} style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', padding: '2px 0' }}>• {m}</div>)}
-      <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, marginTop: 8 }}>
-        {t('profile.import.missingDesc')}
-      </div>
-    </Modal>
-  )
-}

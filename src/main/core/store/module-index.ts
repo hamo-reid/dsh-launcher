@@ -107,7 +107,7 @@ function safeRealpath(path: string): string {
 
 /** Probe one candidate module dir, telling "absent" from "a link whose target is
  * gone". `undefined` = not a package here, so the search continues. */
-export function probeModuleDir(dir: string): ProbedDir | undefined {
+function probeModuleDir(dir: string): ProbedDir | undefined {
   let link = false
   try {
     link = lstatSync(dir).isSymbolicLink()
@@ -159,7 +159,7 @@ function hostPackageDir(ctx: DshContext): string | undefined {
 /** The plain module roots, nearest first — the shape `combo.ts`'s `bundleRoots`
  * uses, with "this profile" and "the shared profiles root" kept apart (the single
  * `host-fallback` label used to conflate them). */
-export function moduleRoots(ctx: DshContext, profile?: string): { root: DevResolveRoot; dir: string }[] {
+function moduleRoots(ctx: DshContext, profile?: string): { root: DevResolveRoot; dir: string }[] {
   const roots: { root: DevResolveRoot; dir: string }[] = []
   if (profile !== undefined && profile !== '') {
     roots.push({ root: 'profile', dir: join(profileDir(ctx, profile), 'node_modules') })
@@ -171,7 +171,7 @@ export function moduleRoots(ctx: DshContext, profile?: string): { root: DevResol
 
 /** A probed directory: where it is, whether it is usable, and — when it is a link
  * whose target is gone — what it pointed at. */
-export interface ProbedDir {
+interface ProbedDir {
   dir: string
   state: DevResolveState
   link?: string
@@ -238,7 +238,7 @@ function rowsOfFile(path: string, source: string): ModuleIndexRow[] {
  * patch: ids only mean something inside a composition, and unioning every
  * profile's bundles would invent a map no real run uses. The dialog says so.
  */
-export function collectIndexRows(
+function collectIndexRows(
   ctx: DshContext,
   profile: string | undefined,
   devPatch: { source: string; rows: readonly { id: string; name?: string }[] },

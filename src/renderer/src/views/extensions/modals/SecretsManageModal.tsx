@@ -3,7 +3,7 @@ import { Button, Modal, Popconfirm, Space, Typography } from 'antd'
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 
-export interface SecretsManageModalProps {
+interface SecretsManageModalProps {
   open: boolean
   /** Stored environment-variable names. */
   names: string[]

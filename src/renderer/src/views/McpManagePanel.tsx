@@ -43,7 +43,7 @@ function writeLayerOf(server: McpServer): 'profile' | 'home' {
   return server.layer === 'home' ? 'home' : 'profile'
 }
 
-export interface McpManagePanelProps {
+interface McpManagePanelProps {
   dshId: string
   /** The profile whose rows are managed, or `null` for the home-only scope. */
   profile: string | null

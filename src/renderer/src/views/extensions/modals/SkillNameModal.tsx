@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import FieldLabel from '../../../components/FieldLabel.tsx'
 import { SKILL_NAME_RE } from '../../../../../shared/skill.ts'
 
-export interface SkillNameModalProps {
+interface SkillNameModalProps {
   open: boolean
   onCancel: () => void
   onSubmit: (name: string) => void

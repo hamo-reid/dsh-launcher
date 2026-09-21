@@ -11,7 +11,7 @@ import { useTranslation } from 'react-i18next'
 import ConfirmMenu, { type MenuAction } from '../components/ConfirmMenu.tsx'
 import type { McpLibEntry, McpProbeResult } from '../../../shared/types.ts'
 
-export interface McpCardProps {
+interface McpCardProps {
   entry: McpLibEntry
   /** How many profile/home rows carry this `serverName`. */
   applied: number

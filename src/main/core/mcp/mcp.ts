@@ -13,16 +13,17 @@
  * `!!js process.env.<NAME>`, which keeps the secret out of the patch file (and
  * therefore out of a profile export or a backup).
  */
+
 import { isJsExpr, jsExprText, loadYaml } from '../patch/yaml.ts'
 import {
   appendInsertChild, extractKeyValue, parseNamedRows, removeInsertRow, setRowConfig, setRowDisabled,
 } from '../patch/patch.ts'
-import type {
-  McpIssue, McpKV, McpLayer, McpReconnect, McpServer, McpServerInput, McpTransport,
-} from '../../../shared/types.ts'
+import type { McpIssue, McpKV, McpLayer, McpReconnect, McpServer, McpServerInput } from '../../../shared/types.ts'
+
+
 
 /** The package every MCP row mounts. */
-export const MCP_PACKAGE = '@deepseek-ai/dsh-mcp-client'
+const MCP_PACKAGE = '@deepseek-ai/dsh-mcp-client'
 
 /** dsh's own `serverName` rule (`[A-Za-z0-9_-]{1,32}`). */
 export const SERVER_NAME_RE = /^[A-Za-z0-9_-]{1,32}$/
@@ -31,7 +32,7 @@ export const SERVER_NAME_RE = /^[A-Za-z0-9_-]{1,32}$/
 const ENV_REF_RE = /^process\.env\.([A-Za-z_][A-Za-z0-9_]*)$/
 
 /** Derive a stable row id for a server the caller did not pin one for. */
-export function defaultRowId(serverName: string): string {
+function defaultRowId(serverName: string): string {
   const slug = serverName.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '')
   return `mcp-${slug === '' ? 'server' : slug}`
 }
@@ -99,7 +100,7 @@ export function renderMcpConfigBody(input: McpServerInput): string[] {
 
 /** Render one whole MCP row as `insert:` child lines (4-space base indent), ready
  * for {@link appendInsertChild}. */
-export function renderMcpRow(input: McpServerInput): string[] {
+function renderMcpRow(input: McpServerInput): string[] {
   const lines: string[] = [
     `    - id: ${input.id}`,
     `      name: ${yamlScalar(MCP_PACKAGE)}`,
@@ -312,4 +313,3 @@ export function findMcpServer(text: string, id: string): McpServer | undefined {
 }
 
 /** The transports a row may declare, in the order the form offers them. */
-export const MCP_TRANSPORTS: readonly McpTransport[] = ['stdio', 'streamable-http']

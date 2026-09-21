@@ -206,7 +206,7 @@ export type DownloadStatus = 'running' | 'done' | 'failed' | 'cancelled'
 export type DownloadKind = 'plugin' | 'dsh'
 
 /** Per-step state of a task that has visible multi-stage progress (dsh install). */
-export type DownloadStepStatus = 'running' | 'ok' | 'error'
+type DownloadStepStatus = 'running' | 'ok' | 'error'
 
 /** One progress step of a multi-stage task (e.g. dsh install: version→install→register). */
 export interface DownloadStep {
@@ -327,7 +327,7 @@ export type DevResolveRoot = 'monorepo' | 'host' | 'profile' | 'host-fallback' |
 export type DevResolveState = 'ok' | 'dangling'
 
 /** One `id → package` binding harvested from a patch layer. */
-export interface ModuleBinding {
+interface ModuleBinding {
   id: string
   name: string
   /** The layer that declared it (a bundle package name, 'profile' or 'home'). */
@@ -547,7 +547,7 @@ export interface DshEntry {
 // ── health check (disk ↔ app sync) ───────────────────────────────────────────
 
 /** What a health check flagged on the disk vs. the app's recorded state. */
-export type HealthIssueKind =
+type HealthIssueKind =
   /** A registered dsh's executable no longer exists on disk. */
   | 'dsh-exec'
   /** The dsh executable exists but its launch entry is unresolvable (incomplete install). */

@@ -10,7 +10,7 @@
  * and "which entry goes when we are over budget".
  */
 
-export interface KeyedCacheOptions {
+interface KeyedCacheOptions {
   /** Entries kept before the oldest is dropped. Default: no limit. */
   max?: number
   /** Entry lifetime. Default: `Infinity` — an entry lives until its key changes
@@ -18,7 +18,7 @@ export interface KeyedCacheOptions {
   ttlMs?: number
 }
 
-export interface KeyedCache<V> {
+interface KeyedCache<V> {
   /** The entry for `key`, computing and storing it on a miss. `refresh`
    * recomputes even on a hit (the diagnosis dialog's 「重新诊断」). */
   get(key: string, compute: () => V, opts?: { refresh?: boolean }): V

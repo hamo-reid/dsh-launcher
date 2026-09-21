@@ -17,7 +17,7 @@ import { createSecretCodec, type SecretCipher } from '../settings/secret-at-rest
 import { logger } from '../shared/logger.ts'
 
 /** Encrypt/decrypt a secret at rest; injected by the main process (safeStorage). */
-export type McpSecretCipher = SecretCipher
+type McpSecretCipher = SecretCipher
 
 /** An env var name must be a valid `[A-Za-z_][A-Za-z0-9_]*` identifier. */
 const NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/

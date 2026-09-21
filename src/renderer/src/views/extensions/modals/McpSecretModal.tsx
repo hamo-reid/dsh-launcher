@@ -4,7 +4,7 @@ import { Input, Modal, Space } from 'antd'
 import { useTranslation } from 'react-i18next'
 import FieldLabel from '../../../components/FieldLabel.tsx'
 
-export interface McpSecretModalProps {
+interface McpSecretModalProps {
   open: boolean
   saving: boolean
   onCancel: () => void
