@@ -7,7 +7,7 @@
  */
 
 import type { ClassifiedRow, PluginRow, RowCreateInput } from '../../shared/types.ts'
-import { load, FAILSAFE_SCHEMA } from 'js-yaml'
+import { loadStructureOnly, type StructureParse } from './yaml.ts'
 
 /** Matches a `- id: xxx` row start (optionally quoted id). */
 const ID_RE = /^(\s*)- id:\s*'?([^'\s]+)'?\s*$/
@@ -94,16 +94,18 @@ export interface NamedRow {
  * misread as bad YAML. Throws a friendly message.
  */
 export function assertPatchDocValid(next: string): void {
-  if (next.includes('!!js')) return
-  let parsed: unknown
+  let check: StructureParse
   try {
-    parsed = load(next, { schema: FAILSAFE_SCHEMA })
+    check = loadStructureOnly(next)
   } catch (error) {
     throw new Error(`patch 不是合法 YAML：${String(error instanceof Error ? error.message : error)}`)
   }
-  // dsh 要求 patch 顶层是 loader-patch 条目数组。空文档(只有注释 → null)、对象、标量
-  // 都会在启动时检查失败,必须在写入前拒绝——否则会静默写坏,到启动才暴露。
-  if (!Array.isArray(parsed)) {
+  // 只有注释 / 空文档由 js-yaml 5 自己拒绝（它抛 "expected a document"），已在上面
+  // 的 catch 覆盖；`checked: false` 则意味着文档带 `!!js`，深度检查被跳过。
+  if (!check.checked) return
+  // dsh 要求 patch 顶层是 loader-patch 条目数组。对象、标量都会在启动时检查失败,
+  // 必须在写入前拒绝——否则会静默写坏,到启动才暴露。
+  if (!Array.isArray(check.value)) {
     throw new Error('patch 顶层必须是 YAML 数组（loader patch 条目列表）')
   }
 }

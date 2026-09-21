@@ -6,13 +6,13 @@ import { app, dialog, shell } from 'electron'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import AdmZip from 'adm-zip'
-import { load as loadYaml, FAILSAFE_SCHEMA } from 'js-yaml'
 import { listProfiles, profileDir } from '../core/home.ts'
 import { readManifest } from '../core/manifest.ts'
 import {
   appendRowBlock, assertPatchDocValid, extractKeyValue, extractRowBlock, parsePatchRows, removeRow,
   setRowConfig, setRowDisabled, upsertRow,
 } from '../core/patch.ts'
+import { loadStructureOnly, type StructureParse } from '../core/yaml.ts'
 import {
   composeProfileLayers, defaultConfigText, findInsertConflicts, listUnclaimedBundles, reconcileBundles,
   resolveBundlePatch, validateComposition,
@@ -34,15 +34,18 @@ import type {
   ProfilePatchReload, ProfileValidation, RowCreateInput,
 } from '../../shared/types.ts'
 
-/** Validate a config value is a YAML mapping (FAILSAFE: structure only, so
- * cordis `!!js` tags are not misread). Throws with a friendly message. */
+/** Validate a config value is a YAML mapping. Structure only, so a cordis
+ * `!!js` reference (which the schema cannot resolve) is not misread as bad
+ * YAML. Throws with a friendly message. */
 function assertConfigValid(configText: string): void {
-  let parsed: unknown
+  let check: StructureParse
   try {
-    parsed = loadYaml(configText, { schema: FAILSAFE_SCHEMA })
+    check = loadStructureOnly(configText)
   } catch (error) {
     throw new Error(`config 不是合法 YAML：${String(error instanceof Error ? error.message : error)}`)
   }
+  if (!check.checked) return
+  const parsed = check.value
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('config 必须是对象（YAML 映射）')
   }
@@ -51,7 +54,7 @@ function assertConfigValid(configText: string): void {
 /** Validate an insert list reads as a YAML sequence. */
 function assertInsertValid(items: string[]): void {
   try {
-    loadYaml(items.map(item => `- ${item}`).join('\n'), { schema: FAILSAFE_SCHEMA })
+    loadStructureOnly(items.map(item => `- ${item}`).join('\n'))
   } catch (error) {
     throw new Error(`insert 不是合法 YAML 列表：${String(error instanceof Error ? error.message : error)}`)
   }
