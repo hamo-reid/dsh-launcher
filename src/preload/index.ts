@@ -11,6 +11,7 @@ import type {
   DshProfileInfo,
   DshUpdateInfo,
   DevBuildTarget,
+  DevDiagnoseOptions,
   DevDiagnosis,
   DevLinkMode,
   DevPlugin,
@@ -284,10 +285,10 @@ const api = {
       ipcRenderer.invoke('plugins:devAdd'),
     devRemove: (name: string): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('plugins:devRemove', name),
-    devDiagnose: (name: string, dshId?: string): Promise<IpcResult<DevDiagnosis>> =>
-      ipcRenderer.invoke('plugins:devDiagnose', name, dshId),
-    devShimPeers: (name: string, dshId?: string): Promise<IpcResult<{ added: string[]; skipped: string[] }>> =>
-      ipcRenderer.invoke('plugins:devShimPeers', name, dshId),
+    devDiagnose: (name: string, opts?: DevDiagnoseOptions): Promise<IpcResult<DevDiagnosis>> =>
+      ipcRenderer.invoke('plugins:devDiagnose', name, opts),
+    devShimPeers: (name: string, opts?: DevDiagnoseOptions): Promise<IpcResult<{ added: string[]; skipped: string[] }>> =>
+      ipcRenderer.invoke('plugins:devShimPeers', name, opts),
     devUnshimPeers: (name: string): Promise<IpcResult<{ removed: string[] }>> =>
       ipcRenderer.invoke('plugins:devUnshimPeers', name),
     devScripts: (name: string): Promise<IpcResult<{ options: DevScriptOptions; current?: DevBuildTarget }>> =>

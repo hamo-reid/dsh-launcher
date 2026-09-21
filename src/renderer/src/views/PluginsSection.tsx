@@ -56,7 +56,6 @@ export default function PluginsSection() {
   // Dev plugins live in their own registry + section; the overview hides them by
   // default so "real" plugins stay a clean list.
   const [devNames, setDevNames] = useState<Set<string>>(new Set())
-  const [showDev, setShowDev] = useState(false)
 
   // Classification filters — each facet is a whitelist (`include`) or a
   // blacklist (`exclude`); within a facet the values OR, across facets they AND.
@@ -70,11 +69,14 @@ export default function PluginsSection() {
   // Overview card sort + local pagination.
   const [sortKey, setSortKey] = useState<SortKey>(savedFilters.sortKey)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>(savedFilters.sortDir)
+  // Whether the overview also lists registered dev plugins. Persisted with the
+  // rest of the overview filters, so the choice survives a reload.
+  const [showDev, setShowDev] = useState(savedFilters.showDev)
   const [page, setPage] = useState(1)
 
   useEffect(() => {
-    saveFilters({ bucket, origin: originFacet, kind: kindFacet, provenance: provFacet, sortKey, sortDir })
-  }, [bucket, originFacet, kindFacet, provFacet, sortKey, sortDir])
+    saveFilters({ bucket, origin: originFacet, kind: kindFacet, provenance: provFacet, sortKey, sortDir, showDev })
+  }, [bucket, originFacet, kindFacet, provFacet, sortKey, sortDir, showDev])
 
   // Update detection (manual; main-process cached).
   const [updates, setUpdates] = useState<Map<string, PluginUpdateInfo>>(new Map())
@@ -324,7 +326,7 @@ export default function PluginsSection() {
   const filteredOverview = useMemo(
     () => applyOverviewFilters(
       overview,
-      { bucket, origin: originFacet, kind: kindFacet, provenance: provFacet, sortKey, sortDir },
+      { bucket, origin: originFacet, kind: kindFacet, provenance: provFacet, sortKey, sortDir, showDev },
       { query: search, updates, devNames, showDev },
     ),
     [overview, search, bucket, originFacet, kindFacet, provFacet, sortKey, sortDir, updates, devNames, showDev],

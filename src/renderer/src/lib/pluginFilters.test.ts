@@ -35,8 +35,16 @@ describe('parseStoredFilters', () => {
       provenance: { mode: 'exclude', values: ['official', 'sub-bundle'] },
       sortKey: 'size',
       sortDir: 'desc',
+      showDev: true,
     }
     expect(parseStoredFilters(JSON.stringify(cfg))).toEqual(cfg)
+  })
+
+  it('carries the dev-plugin toggle, defaulting to hidden', () => {
+    // Absent (an older store) and non-boolean values both read as hidden.
+    expect(parseStoredFilters(JSON.stringify({ bucket: 'all' })).showDev).toBe(false)
+    expect(parseStoredFilters(JSON.stringify({ showDev: 'yes' })).showDev).toBe(false)
+    expect(parseStoredFilters(JSON.stringify({ showDev: true })).showDev).toBe(true)
   })
 
   it('migrates the legacy bare-array facets to include mode', () => {

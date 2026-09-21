@@ -11,9 +11,10 @@ import {
 import { listComboPlugins } from '../core/combo.ts'
 import { linkDevToProfile, repairDevLink } from '../core/profile.ts'
 import {
-  buildDevPlugin, defaultDevBuild, devScriptOptions, diagnoseDevPlugin, installDevDeps, listDevPlugins, registerDevPlugin,
-  removeDevPlugin, shimDevPeers, unshimDevPeers,
+  buildDevPlugin, cachedDiagnosis, defaultDevBuild, devScriptOptions, forgetDevDiagnosis, installDevDeps, listDevPlugins,
+  registerDevPlugin, removeDevPlugin, shimDevPeers, unshimDevPeers,
 } from '../core/dev-plugins.ts'
+import { listProfiles } from '../core/home.ts'
 import {
   cancelPluginDownload, cleanupPluginDownloads, listPluginDownloads, onDownloadsChange, onDownloadsSettled, startPluginDownload,
 } from '../core/pluginDownloads.ts'
@@ -28,7 +29,7 @@ import { attachPluginSizes } from '../core/store-overview.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
 import { pathIdentifierInvalid, versionInvalid } from './validate.ts'
 import { handle } from './handle.ts'
-import type { ComboPlugin, DevBuildTarget, DevDiagnosis, DevLinkMode, DevPlugin, DevRunResult, DevScriptOptions, DownloadSessionInfo, InstalledOverviewRow, IpcResult, NpmSearchHit, PackageVersionInfo, PluginApplyResult, PluginApplyTarget, PluginCleanupResult, PluginMigrationResult, PluginUpdateInfo, PluginUpdateResult, PluginUsagePoint } from '../../shared/types.ts'
+import type { ComboPlugin, DevBuildTarget, DevDiagnoseOptions, DevDiagnosis, DevLinkMode, DevPlugin, DevRunResult, DevScriptOptions, DownloadSessionInfo, InstalledOverviewRow, IpcResult, NpmSearchHit, PackageVersionInfo, PluginApplyResult, PluginApplyTarget, PluginCleanupResult, PluginMigrationResult, PluginUpdateInfo, PluginUpdateResult, PluginUsagePoint } from '../../shared/types.ts'
 
 /** Validate + persist the plugin-store location (shared by `plugins:setDir`
  * and the onboarding wizard). On success the dir is made usable and saved. */
@@ -71,15 +72,6 @@ function ctxOf(dshId: unknown): DshContext | null {
   return entry === undefined ? null : contextForEntry(entry)
 }
 
-/** A context for a dsh-agnostic operation (dev-plugin diagnosis/peers): the
- * explicit id when given, else the first registered dsh. `null` when none. */
-function anyDshContext(dshId: unknown): DshContext | null {
-  const explicit = ctxOf(dshId)
-  if (explicit !== null) return explicit
-  const scope = dshScopes()[0]
-  return scope === undefined ? null : { execPath: scope.execPath ?? '', home: scope.home, version: scope.version ?? '' }
-}
-
 /** Remove a plugin's UNUSED archived versions — keep the newest, plus any version
  * a profile still resolves to. Frees disk without breaking profiles. Shared by
  * the explicit cleanup action and an update's "don't keep the old version". */
@@ -98,6 +90,41 @@ function cleanupUnusedVersions(store: string, name: string): string[] {
     if (removePlugin(store, name, version).ok) removed.push(version)
   }
   return removed
+}
+
+/** A context for a dsh-agnostic operation (dev-plugin diagnosis/peers), together
+ * with the identity the report's provenance line needs. An explicit id MUST
+ * exist: substituting another dsh would diagnose — and shim peers — against a
+ * resolution chain the user did not choose. With no id it stays the first
+ * registered dsh. `null` when there is none. */
+function devHostTarget(dshId: unknown): { ctx: DshContext; id: string; name: string; version: string } | null {
+  if (typeof dshId === 'string' && dshId !== '') {
+    const entry = dshEntryById(dshId)
+    if (entry === undefined) return null
+    return { ctx: contextForEntry(entry), id: entry.id, name: entry.name, version: entry.version }
+  }
+  const scope = dshScopes()[0]
+  if (scope === undefined) return null
+  const version = scope.version ?? ''
+  return {
+    ctx: { execPath: scope.execPath ?? '', home: scope.home, version },
+    id: scope.id, name: scope.name, version,
+  }
+}
+
+/** The profile a diagnosis targets, validated: it becomes a path AND its
+ * composition decides which ids mean what, so an unknown one is an error rather
+ * than a silently profile-less report. `null` = no profile (host layers only). */
+function devTargetProfile(ctx: DshContext, raw: unknown): string | null | IpcResult<never> {
+  if (raw === undefined || raw === null || raw === '') return null
+  if (typeof raw !== 'string' || pathIdentifierInvalid(raw)) return fail(E.nameInvalid)
+  if (!listProfiles(ctx).includes(raw)) return fail(E.profileNotFound, { detail: raw })
+  return raw
+}
+
+/** Whether `devTargetProfile` refused. */
+function profileRefused(pick: string | null | IpcResult<never>): pick is IpcResult<never> {
+  return pick !== null && typeof pick !== 'string'
 }
 
 export function registerPluginsIpc(): void {
@@ -467,29 +494,43 @@ export function registerPluginsIpc(): void {
     }
   })
 
-  // Resolution diagnosis: entry build output, the patch rows dsh loads, and the
-  // `@deepseek-ai/*` peers a `link:` must resolve from the dev package itself.
-  handle('plugins:devDiagnose', (_event, name: string, dshId?: string): IpcResult<DevDiagnosis> => {
+  // Resolution diagnosis against one target (host + optional profile): the entry
+  // build output, the patch rows dsh actually loads — each resolved by its own
+  // `name:` or by the package its `id:` is bound to in that composition — and the
+  // peers a `link:` must resolve from the dev package itself. Cached; `refresh`
+  // recomputes.
+  handle('plugins:devDiagnose', (_event, name: string, opts?: DevDiagnoseOptions): IpcResult<DevDiagnosis> => {
     try {
       const dev = listDevPlugins().find(p => p.name === name)
       if (dev === undefined) return fail(E.nameInvalid, [], `未注册的开发插件：${name}`)
-      const ctx = anyDshContext(dshId)
-      if (ctx === null) return fail(E.dshNotFound)
-      return { ok: true, value: diagnoseDevPlugin(dev, ctx) }
+      const target = devHostTarget(opts?.dshId)
+      if (target === null) return fail(E.dshNotFound)
+      const profile = devTargetProfile(target.ctx, opts?.profile)
+      if (profileRefused(profile)) return profile
+      return {
+        ok: true,
+        value: cachedDiagnosis(dev, target.ctx, {
+          ...(profile !== null ? { profile } : {}),
+          refresh: opts?.refresh === true,
+          dsh: { id: target.id, name: target.name, version: target.version },
+        }),
+      }
     } catch (error) {
       return failFromError(error)
     }
   })
 
-  // Fallback peer fix: junction the dsh install's `@deepseek-ai/*` into the dev
-  // package. Reversible; `pnpm install` in the repo will drop it again.
-  handle('plugins:devShimPeers', (_event, name: string, dshId?: string): IpcResult<{ added: string[]; skipped: string[] }> => {
+  // Fallback peer fix: junction the host's copies into the dev package. Reversible;
+  // `pnpm install` in the repo will drop them again.
+  handle('plugins:devShimPeers', (_event, name: string, opts?: DevDiagnoseOptions): IpcResult<{ added: string[]; skipped: string[] }> => {
     try {
       const dev = listDevPlugins().find(p => p.name === name)
       if (dev === undefined) return fail(E.nameInvalid, [], `未注册的开发插件：${name}`)
-      const ctx = anyDshContext(dshId)
-      if (ctx === null) return fail(E.dshNotFound)
-      return { ok: true, value: shimDevPeers(dev, ctx) }
+      const target = devHostTarget(opts?.dshId)
+      if (target === null) return fail(E.dshNotFound)
+      const profile = devTargetProfile(target.ctx, opts?.profile)
+      if (profileRefused(profile)) return profile
+      return { ok: true, value: shimDevPeers(dev, target.ctx, profile !== null ? { profile } : {}) }
     } catch (error) {
       return failFromError(error)
     }
@@ -562,10 +603,14 @@ export function registerPluginsIpc(): void {
         if (!snap.ok) return fail(E.storeInstallFailed, { detail: snap.text })
         const version = storeVersions(store, name).at(-1)
         const linked = await installIntoProfile(profilesRootFor(ctx), profile, name, store, version !== undefined ? { version } : {})
-        return linked.ok ? { ok: true, value: linked.text } : fail(E.storeOperationFailed, { detail: linked.text })
+        if (!linked.ok) return fail(E.storeOperationFailed, { detail: linked.text })
+        forgetDevDiagnosis()
+        return { ok: true, value: linked.text }
       }
       const result = await linkDevToProfile(ctx, profile, name, dev.dir)
-      return result.ok ? { ok: true, value: result.text } : fail(E.storeOperationFailed, { detail: result.text })
+      if (!result.ok) return fail(E.storeOperationFailed, { detail: result.text })
+      forgetDevDiagnosis()
+      return { ok: true, value: result.text }
     } catch (error) {
       return failFromError(error)
     }
@@ -578,7 +623,9 @@ export function registerPluginsIpc(): void {
       if (pathIdentifierInvalid(profile) || pathIdentifierInvalid(name)) return fail(E.nameInvalid)
       if (isProfileRunning(dshId, profile)) return fail(E.runAlreadyRunning, { profile })
       const result = await repairDevLink(ctx, profile, name, opts ?? {})
-      return result.ok ? { ok: true, value: result.text } : fail(E.storeOperationFailed, { detail: result.text })
+      if (!result.ok) return fail(E.storeOperationFailed, { detail: result.text })
+      forgetDevDiagnosis()
+      return { ok: true, value: result.text }
     } catch (error) {
       return failFromError(error)
     }

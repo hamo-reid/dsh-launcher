@@ -14,6 +14,7 @@ import type {
   DshProfileInfo,
   DshUpdateInfo,
   DevBuildTarget,
+  DevDiagnoseOptions,
   DevDiagnosis,
   DevLinkMode,
   DevPlugin,
@@ -269,10 +270,12 @@ export interface WindowApi {
     devAdd: () => Promise<IpcResult<DevPlugin>>
     /** Unregister; never touches the source dir or any profile. */
     devRemove: (name: string) => Promise<IpcResult<boolean>>
-    /** Resolution diagnosis (entry / patch rows / peers). */
-    devDiagnose: (name: string, dshId?: string) => Promise<IpcResult<DevDiagnosis>>
-    /** Junction the dsh install's peers into the dev package (reversible). */
-    devShimPeers: (name: string, dshId?: string) => Promise<IpcResult<{ added: string[]; skipped: string[] }>>
+    /** Resolution diagnosis against one target (host + optional profile): entry,
+     * patch rows (by their own `name:` or the package their `id:` is bound to) and
+     * peers. Cached; `refresh` recomputes. */
+    devDiagnose: (name: string, opts?: DevDiagnoseOptions) => Promise<IpcResult<DevDiagnosis>>
+    /** Junction the host's copies of the missing peers into the dev package. */
+    devShimPeers: (name: string, opts?: DevDiagnoseOptions) => Promise<IpcResult<{ added: string[]; skipped: string[] }>>
     devUnshimPeers: (name: string) => Promise<IpcResult<{ removed: string[] }>>
     /** The build scripts this dev plugin can run (its own + its workspace root's). */
     devScripts: (name: string) => Promise<IpcResult<{ options: DevScriptOptions; current?: DevBuildTarget }>>

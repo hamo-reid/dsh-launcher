@@ -5,7 +5,7 @@
  * tree instead of a real dsh install.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -25,7 +25,7 @@ import { runPnpm } from './pnpm.ts'
 import { openDatabase, saveSettings } from './settings.ts'
 import { contextForEntry } from './appState.ts'
 import {
-  buildDevPlugin, defaultDevBuild, devScriptOptions, diagnoseDevPlugin, findWorkspaceRoot, listDevPlugins,
+  buildDevPlugin, cachedDiagnosis, defaultDevBuild, devScriptOptions, diagnoseDevPlugin, findWorkspaceRoot, listDevPlugins,
   registerDevPlugin, removeDevPlugin, shimDevPeers, unshimDevPeers,
 } from './dev-plugins.ts'
 
@@ -131,8 +131,11 @@ describe('diagnoseDevPlugin', () => {
 
     const diag = diagnoseDevPlugin(registerDevPlugin(pkgDir()), ctx())
     expect(diag.patchRows).toEqual([
-      { id: 'graph', name: '@me/dsh-graph', dir: join(pkgDir(), 'node_modules', '@me', 'dsh-graph'), root: 'monorepo' },
-      { id: 'gone', name: '@me/dsh-gone' },
+      {
+        id: 'graph', name: '@me/dsh-graph', nameFrom: 'row',
+        dir: join(pkgDir(), 'node_modules', '@me', 'dsh-graph'), root: 'monorepo', state: 'ok',
+      },
+      { id: 'gone', name: '@me/dsh-gone', nameFrom: 'row' },
     ])
     expect(diag.missingPatchRows).toEqual(['@me/dsh-gone'])
   })
@@ -147,8 +150,10 @@ describe('diagnoseDevPlugin', () => {
     expect(diag.patchRows).toEqual([{
       id: 'web',
       name: '@deepseek-ai/dsh-web-app',
+      nameFrom: 'row',
       dir: join(anchor(), 'node_modules', '@deepseek-ai', 'dsh-web-app'),
       root: 'host',
+      state: 'ok',
     }])
   })
 
@@ -175,6 +180,7 @@ describe('diagnoseDevPlugin', () => {
       name: '@deepseek-ai/dsh-base',
       dir: join(pkgDir(), 'node_modules', '@deepseek-ai', 'dsh-base'),
       root: 'monorepo',
+      state: 'ok',
     }])
   })
 })
@@ -243,5 +249,158 @@ describe('build target', () => {
   it('throws when neither the package nor its workspace declares scripts', async () => {
     makeMonorepo()
     await expect(buildDevPlugin(registerDevPlugin(pkgDir()))).rejects.toThrow()
+  })
+})
+
+/**
+ * Resolution against a host laid out the way pnpm installs one: the only
+ * neighbour of `node_modules/@deepseek-ai` is the `dsh` package itself, and the
+ * modules it depends on sit under that package's own `node_modules` chain. The
+ * plain `<anchor>/node_modules/<name>` probe the diagnosis used to make finds
+ * nothing there, which is why every host module used to read as missing.
+ */
+describe('resolution against a pnpm-shaped host', () => {
+  /** The dsh package of the (mocked) install anchor. */
+  const dshPkg = (): string => join(anchor(), 'node_modules', '@deepseek-ai', 'dsh')
+
+  /** Give the dsh package a dependency, the way pnpm links one in. */
+  function provide(name: string): void {
+    writePkg(join(dshPkg(), 'node_modules', name), { name, version: '1.0.0' })
+  }
+
+  /** A bundle the profile composes, with its own id → package patch. */
+  function makeBundle(bundle: string, rows: string): void {
+    const dir = join(anchor(), 'node_modules', bundle)
+    writePkg(dir, { name: bundle, version: '1.0.0', dsh: { bundle: { patch: './cordis.patch.yml' } } })
+    writeFileSync(join(dir, 'cordis.patch.yml'), rows)
+  }
+
+  /** A profile manifest with bundles, so `listComboPlugins` has something to read. */
+  function makeProfile(name: string, bundles: string[]): void {
+    const dir = join(ctx().home, 'profiles', name)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({
+      name: `dsh-profile-${name}`, dependencies: {}, dsh: { profile: { bundles } },
+    }))
+  }
+
+  it('resolves a host module through the dsh package chain', () => {
+    makeMonorepo()
+    writePkg(dshPkg(), { name: '@deepseek-ai/dsh', version: '1.0.0' })
+    provide('@deepseek-ai/dsh-web-app')
+    writeFileSync(join(pkgDir(), 'cordis.patch.yml'), '- id: web\n  name: "@deepseek-ai/dsh-web-app"\n')
+
+    const diag = diagnoseDevPlugin(registerDevPlugin(pkgDir()), ctx())
+    expect(diag.patchRows[0]).toMatchObject({
+      root: 'host', state: 'ok', dir: join(dshPkg(), 'node_modules', '@deepseek-ai', 'dsh-web-app'),
+    })
+    expect(diag.missingPatchRows).toEqual([])
+  })
+
+  it('resolves an id-only row through the composition the target composes', () => {
+    makeMonorepo()
+    writePkg(dshPkg(), { name: '@deepseek-ai/dsh', version: '1.0.0' })
+    provide('@deepseek-ai/cordis-plugin-timer')
+    // `timer` → cordis-plugin-timer: the mapping is parsed, not prefixed.
+    makeBundle('@deepseek-ai/dsh-base', '- id: timer\n  name: "@deepseek-ai/cordis-plugin-timer"\n')
+    makeProfile('main', ['@deepseek-ai/dsh-base'])
+    // The dev patch only ADDRESSES the id — the shape a composition patch really has.
+    writeFileSync(join(pkgDir(), 'cordis.patch.yml'), '- id: timer\n  disabled: true\n')
+
+    const diag = diagnoseDevPlugin(registerDevPlugin(pkgDir()), ctx(), { profile: 'main' })
+    expect(diag.patchRows[0]).toMatchObject({
+      id: 'timer',
+      name: '@deepseek-ai/cordis-plugin-timer',
+      nameFrom: 'index',
+      from: '@deepseek-ai/dsh-base',
+      root: 'host',
+    })
+    expect(diag.missingPatchRows).toEqual([])
+    expect(diag.unknownIds).toEqual([])
+    expect(diag.meta.profile).toBe('main')
+  })
+
+  it('lists an id no layer names as unknown rather than as a missing package', () => {
+    makeMonorepo()
+    writeFileSync(join(pkgDir(), 'cordis.patch.yml'), '- id: nobody-knows-me\n  disabled: true\n')
+    const diag = diagnoseDevPlugin(registerDevPlugin(pkgDir()), ctx())
+    expect(diag.patchRows[0]).toEqual({ id: 'nobody-knows-me', name: '', nameFrom: 'row' })
+    expect(diag.unknownIds).toEqual(['nobody-knows-me'])
+    expect(diag.missingPatchRows).toEqual([])
+  })
+
+  it('reports a link whose target is gone instead of calling it missing', () => {
+    makeMonorepo()
+    writeFileSync(join(pkgDir(), 'cordis.patch.yml'), '- id: web\n  name: "@deepseek-ai/dsh-web-app"\n')
+    const scope = join(ctx().home, 'profiles', 'node_modules', '@deepseek-ai')
+    mkdirSync(scope, { recursive: true })
+    const broken = join(root, 'previous-version-store')
+    try {
+      symlinkSync(broken, join(scope, 'dsh-web-app'), 'junction')
+    } catch {
+      return // a filesystem that refuses junctions: nothing to assert here
+    }
+
+    const dev = registerDevPlugin(pkgDir())
+    const row = diagnoseDevPlugin(dev, ctx()).patchRows[0]
+    expect(row).toMatchObject({ root: 'host-fallback', state: 'dangling' })
+    expect(row.link).toBe(broken)
+    // A dangling entry is a package that cannot be imported, so the row still
+    // counts as missing too — the two facts coexist on purpose.
+    expect(diagnoseDevPlugin(dev, ctx()).missingPatchRows).toEqual(['@deepseek-ai/dsh-web-app'])
+  })
+
+  it('lists unscoped declared dependencies, not just @deepseek-ai ones', () => {
+    makeMonorepo()
+    writePkg(pkgDir(), {
+      name: '@me/dsh-foo', version: '0.1.0', exports: { '.': './dist/index.js' },
+      dependencies: { hono: '^4.0.0' }, dsh: { bundle: { patch: 'cordis.patch.yml' } },
+    })
+    writeFileSync(join(pkgDir(), 'cordis.patch.yml'), '')
+    writePkg(join(ctx().home, 'profiles', 'node_modules', 'hono'), { name: 'hono', version: '4.0.0' })
+
+    const diag = diagnoseDevPlugin(registerDevPlugin(pkgDir()), ctx())
+    expect(diag.peers.map(p => p.name)).toEqual(['hono'])
+    expect(diag.peers[0]).toMatchObject({ root: 'host-fallback', state: 'ok' })
+    expect(diag.missingPeers).toEqual(['hono'])
+  })
+
+  it('resolves a subpath row by its package instead of calling it missing', () => {
+    makeMonorepo()
+    writePkg(dshPkg(), { name: '@deepseek-ai/dsh', version: '1.0.0' })
+    provide('@deepseek-ai/dsh-web-app')
+    writeFileSync(join(pkgDir(), 'cordis.patch.yml'), '- id: startup\n  name: "@deepseek-ai/dsh-web-app/startup"\n')
+
+    const diag = diagnoseDevPlugin(registerDevPlugin(pkgDir()), ctx())
+    expect(diag.patchRows[0]).toMatchObject({
+      name: '@deepseek-ai/dsh-web-app/startup', pkg: '@deepseek-ai/dsh-web-app', root: 'host',
+    })
+    expect(diag.missingPatchRows).toEqual([])
+  })
+
+  it('serves a cached report until a layer file changes or refresh is asked', () => {
+    makeMonorepo()
+    writeFileSync(join(pkgDir(), 'cordis.patch.yml'), '- id: web\n  name: "@deepseek-ai/dsh-web-app"\n')
+    const dev = registerDevPlugin(pkgDir())
+
+    const first = cachedDiagnosis(dev, ctx())
+    expect(cachedDiagnosis(dev, ctx())).toBe(first)          // a hit, not a recompute
+    expect(cachedDiagnosis(dev, ctx(), { refresh: true })).not.toBe(first)
+
+    // Editing the patch must miss the cache even without `refresh`: this dialog
+    // exists to be re-run while editing exactly that file.
+    const later = new Date(Date.now() + 2000)
+    utimesSync(join(pkgDir(), 'cordis.patch.yml'), later, later)
+    expect(cachedDiagnosis(dev, ctx())).not.toBe(first)
+  })
+
+  it('reports the chain it ran against, so a cached verdict keeps its identity', () => {
+    makeMonorepo()
+    const diag = diagnoseDevPlugin(registerDevPlugin(pkgDir()), ctx(), {
+      dsh: { id: 'dsh-1', name: 'official', version: '1.2.3' },
+    })
+    expect(diag.meta).toMatchObject({ dshId: 'dsh-1', dshName: 'official', dshVersion: '1.2.3' })
+    expect(diag.meta.profile).toBeUndefined()
+    expect(Number.isNaN(Date.parse(diag.meta.at))).toBe(false)
   })
 })

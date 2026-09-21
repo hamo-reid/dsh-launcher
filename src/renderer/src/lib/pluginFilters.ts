@@ -33,6 +33,10 @@ export interface StoredFilters {
   provenance: Facet<PluginProvenance>
   sortKey: SortKey
   sortDir: SortDir
+  /** Whether the overview also lists registered dev plugins. A view preference
+   * rather than a facet, but it belongs with the rest of the overview's filter
+   * state — it is one of the inputs `applyOverviewFilters` takes. */
+  showDev: boolean
 }
 
 export const FILTER_KEY = 'pm.plugins.overview.filters'
@@ -44,6 +48,7 @@ export const DEFAULT_FILTERS: StoredFilters = {
   provenance: { mode: 'include', values: [] },
   sortKey: 'name',
   sortDir: 'asc',
+  showDev: false,
 }
 
 const ALL_BUCKETS: readonly Bucket[] = ['all', 'used', 'unused', 'update', 'template']
@@ -87,6 +92,7 @@ export function parseStoredFilters(raw: string | null): StoredFilters {
       provenance: parseFacet(p.provenance, p.provenances, ALL_PROVENANCES),
       sortKey: ALL_SORTS.includes(p.sortKey as SortKey) ? p.sortKey as SortKey : 'name',
       sortDir: p.sortDir === 'desc' ? 'desc' : 'asc',
+      showDev: p.showDev === true,
     }
   } catch {
     return DEFAULT_FILTERS

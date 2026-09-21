@@ -319,24 +319,88 @@ export interface DevPlugin {
 }
 
 /** Which root satisfied a dev-plugin reference, for the diagnosis UI. */
-export type DevResolveRoot = 'monorepo' | 'host' | 'host-fallback' | 'home'
+export type DevResolveRoot = 'monorepo' | 'host' | 'profile' | 'host-fallback' | 'home'
+
+/** Whether a resolved entry is usable. `dangling` = the directory entry exists (a
+ * symlink/junction) but its target is gone: every `existsSync` check reads it as
+ * missing, while replacing it needs to know it is there. */
+export type DevResolveState = 'ok' | 'dangling'
+
+/** One `id → package` binding harvested from a patch layer. */
+export interface ModuleBinding {
+  id: string
+  name: string
+  /** The layer that declared it (a bundle package name, 'profile' or 'home'). */
+  source: string
+}
+
+/** The id → package map a diagnosis resolved against, and what fed it. */
+export interface ModuleIndexInfo {
+  /** In composition order; an id is bound by the FIRST layer that names it. */
+  bindings: ModuleBinding[]
+  /** An id claimed with different names by more than one layer — the host's hard
+   * `duplicate loader entry id` failure, named here instead of at boot. */
+  conflicts: { id: string; names: string[]; sources: string[] }[]
+  /** Layers that contributed rows, in composition order. */
+  layers: { source: string; rows: number }[]
+  /** The profile the index was built for; absent = host layers only. */
+  profile?: string
+}
 
 /** One row of a dev bundle's patch, resolved to its on-disk package dir. */
 export interface DevPatchRow {
   id: string
-  /** The `name:` the row loads (empty for a config-only row). */
+  /** The package the row loads: its own `name:`, else the id's host binding. */
   name: string
-  /** Resolved package dir when the host's resolution chain finds it. */
+  /** Whether `name` was written in the row or looked up in the index. */
+  nameFrom: 'row' | 'index'
+  /** The package part, when `name` is a subpath import (`pkg/sub`). */
+  pkg?: string
+  /** Resolved package dir when the resolution chain finds it. */
   dir?: string
   /** Which root satisfied it (`monorepo` = the dev package's own tree). */
   root?: DevResolveRoot
+  /** `dangling` when the entry exists but its link target is gone. */
+  state?: DevResolveState
+  /** The link's (broken) target, when `state` is `dangling`. */
+  link?: string
+  /** The layer that supplied an index name (bundle package / 'profile' / 'home'). */
+  from?: string
+  /** Where a PROFILE-scoped resolution found it, when that differs from `dir`. */
+  profileDir?: string
 }
 
-/** One `@deepseek-ai/*` peer the dev package needs, with its resolution result. */
+/** One peer the dev package needs, with its resolution result. */
 export interface DevPeer {
   name: string
+  /** The package part, when `name` is a subpath import. */
+  pkg?: string
   dir?: string
   root?: DevResolveRoot
+  state?: DevResolveState
+  /** The link's (broken) target, when `state` is `dangling`. */
+  link?: string
+}
+
+/** Provenance of one report: which chain it ran against, and when. Shown with
+ * the verdicts so a cached one is never mistaken for a fresh one elsewhere. */
+export interface DevDiagnosisMeta {
+  dshId: string
+  dshName: string
+  dshVersion: string
+  profile?: string
+  /** ISO timestamp of when this report was computed. */
+  at: string
+}
+
+/** Target of a dev-plugin diagnosis: the chain to resolve against. `profile`
+ * adds that profile's composition and `node_modules`; without it only the
+ * non-profile host layers are consulted. */
+export interface DevDiagnoseOptions {
+  dshId?: string
+  profile?: string
+  /** Bypass the caches (the dialog's 「重新诊断」). */
+  refresh?: boolean
 }
 
 /** Resolution diagnosis for one dev plugin. */
@@ -348,11 +412,16 @@ export interface DevDiagnosis {
   /** Patch rows (the modules dsh actually loads), each resolved or not. */
   patchRows: DevPatchRow[]
   missingPatchRows: string[]
-  /** `@deepseek-ai/*` peers, each resolved or not. */
+  /** Peers, each resolved or not. */
   peers: DevPeer[]
   missingPeers: string[]
   /** Peers currently satisfied by a launcher-installed shim junction. */
   shimmed: string[]
+  /** The id → package map this diagnosis resolved against. */
+  index: ModuleIndexInfo
+  /** Ids the dev patch addresses that no layer names. */
+  unknownIds: string[]
+  meta: DevDiagnosisMeta
 }
 
 /** Result of a dev-package command (build / install): pnpm's output plus the

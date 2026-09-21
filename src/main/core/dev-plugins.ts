@@ -16,17 +16,18 @@
  * resolves them from the DEV package (not the profile), so they may need a
  * shim/`pnpm install` (see `diagnoseDevPlugin`).
  */
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { loadSettings, updateSettings } from './settings.ts'
 import { parseNamedRows } from './patch.ts'
-import { installAnchor } from './home.ts'
-import { resolveBundleSubdepDir } from './bundle-subdeps.ts'
+import {
+  bindingFor, forgetModuleIndex, moduleIndexFor, packageOf, resolveModule, type ResolvedModule,
+} from './module-index.ts'
 import { runPnpm } from './pnpm.ts'
 import { logger } from './logger.ts'
 import type { DshContext } from './appState.ts'
 import type {
-  DevBuildTarget, DevDiagnosis, DevPatchRow, DevPeer, DevPlugin, DevResolveRoot, DevRunResult, DevScriptOptions,
+  DevBuildTarget, DevDiagnosis, DevPatchRow, DevPeer, DevPlugin, DevRunResult, DevScriptOptions, ModuleIndexInfo,
 } from '../../shared/types.ts'
 
 /** The manifest fields the dev-plugin helpers read. */
@@ -40,8 +41,18 @@ interface DevManifest {
   dsh?: { bundle?: { patch?: string } }
 }
 
-/** `@deepseek-ai/<name>` literals, for finding undeclared peers in built code. */
-const DSH_IMPORT_RE = /@deepseek-ai\/[a-z0-9-]+/gi
+/** Bare specifiers imported by built code: `from 'x'`, `import 'x'`,
+ * `require('x')`. The scope is deliberately open — the host's tree also holds
+ * unscoped packages, and a name's usefulness is decided by the index, not by its
+ * spelling. */
+const IMPORT_SPEC_RE = /(?:\bfrom\s*|\bimport\s*|\brequire\(\s*)['"]([^'"]+)['"]/g
+
+/** Whether a spec is something other than a package: relative/absolute paths,
+ * `node:` builtins, URLs, and pnpm's virtual-store paths. */
+function notAPackage(spec: string): boolean {
+  return spec === '' || spec.startsWith('.') || spec.startsWith('/') || spec.startsWith('node:') ||
+    spec.startsWith('data:') || spec.includes('://') || spec.startsWith('\\')
+}
 
 function readManifest(dir: string): DevManifest {
   return JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as DevManifest
@@ -77,48 +88,41 @@ export function findWorkspaceRoot(dir: string): string | undefined {
   return undefined
 }
 
-/** Resolve `name` from a package dir the way Node would (its own lookup chain). */
-function resolveFromPackage(dir: string, name: string): string | undefined {
-  return resolveBundleSubdepDir(dir, name)
-}
-
-/** The host-provided roots, checked AFTER the dev package's own lookup. Mirrors
- * the host's chain: the dsh install anchor (its own `@deepseek-ai/*`), the shared
- * profiles root (the host's heal fallback), then the dsh home. A `link:`'s own
- * imports never traverse a profile, so per-profile roots are not consulted. */
-function hostRoots(ctx: DshContext): { root: DevResolveRoot; dir: string }[] {
-  const out: { root: DevResolveRoot; dir: string }[] = []
-  const anchor = installAnchor(ctx)
-  if (anchor !== undefined) out.push({ root: 'host', dir: anchor })
-  out.push({ root: 'host-fallback', dir: join(ctx.home, 'profiles') })
-  out.push({ root: 'home', dir: ctx.home })
-  return out
-}
-
-/** Resolve a dev-plugin reference the way the host would: the dev package's own
- * Node lookup first (monorepo workspace links), then the host roots. Returns
- * where it was found, so the UI can tell "monorepo" from "host-provided". */
+/**
+ * Resolve one reference the way the target would: the dev package's own Node
+ * lookup first (monorepo workspace links), then the host chain — the dsh install,
+ * the chosen profile, the shared profiles root, the home. Returns where it was
+ * found (and whether the entry is usable), so the UI can tell "monorepo" from
+ * "host-provided" and "missing" from "the link target is gone".
+ */
 function resolveDevRef(
-  dev: DevPlugin, ctx: DshContext, name: string,
-): { dir: string; root: DevResolveRoot } | undefined {
-  const local = resolveFromPackage(dev.dir, name)
-  if (local !== undefined) return { dir: local, root: 'monorepo' }
-  for (const { root, dir } of hostRoots(ctx)) {
-    const candidate = join(dir, 'node_modules', name)
-    if (existsSync(join(candidate, 'package.json'))) return { dir: candidate, root }
-  }
-  return undefined
+  dev: DevPlugin, ctx: DshContext, spec: string, profile?: string,
+): ResolvedModule | undefined {
+  return resolveModule(ctx, spec, { from: dev.dir, ...(profile !== undefined ? { profile } : {}) })
 }
 
-/** `@deepseek-ai/*` names the dev package needs: declared peers/deps plus any
- * literal imported by the built entry (catches undeclared host services). */
-function collectPeers(m: DevManifest, entryFile: string | undefined): string[] {
+/**
+ * The names the dev package needs.
+ *
+ * Declared `dependencies`/`peerDependencies` are always listed — any scope, since
+ * the host's own tree has unscoped packages too. Import literals from the built
+ * entry are listed ONLY when the composition knows the name (it is a row
+ * somewhere): a bundled entry inlines its third-party imports, and reporting every
+ * `react`/`antd`/`immer` it happens to mention would bury the real findings.
+ */
+function collectPeers(m: DevManifest, entryFile: string | undefined, known: (pkg: string) => boolean): string[] {
   const set = new Set<string>()
-  for (const n of Object.keys(m.peerDependencies ?? {})) if (n.startsWith('@deepseek-ai/')) set.add(n)
-  for (const n of Object.keys(m.dependencies ?? {})) if (n.startsWith('@deepseek-ai/')) set.add(n)
+  for (const source of [m.peerDependencies, m.dependencies]) {
+    for (const n of Object.keys(source ?? {})) if (!notAPackage(n)) set.add(packageOf(n))
+  }
   if (entryFile !== undefined && existsSync(entryFile)) {
     try {
-      for (const hit of readFileSync(entryFile, 'utf8').matchAll(DSH_IMPORT_RE)) set.add(hit[0])
+      for (const hit of readFileSync(entryFile, 'utf8').matchAll(IMPORT_SPEC_RE)) {
+        const spec = hit[1]
+        if (notAPackage(spec)) continue
+        const pkg = packageOf(spec)
+        if (known(pkg)) set.add(pkg)
+      }
     } catch { /* unreadable entry — declared peers are still reported */ }
   }
   return [...set].sort()
@@ -152,6 +156,7 @@ export function registerDevPlugin(dir: string): DevPlugin {
     const prev = (draft.devPlugins ?? []).find(p => p.name === name)
     draft.devPlugins = [...(draft.devPlugins ?? []).filter(p => p.name !== name), { ...entry, ...(prev?.shims !== undefined ? { shims: prev.shims } : {}) }]
   })
+  forgetDevDiagnosis()
   logger.info(`dev plugin registered: ${name} (${target})`)
   return entry
 }
@@ -159,6 +164,7 @@ export function registerDevPlugin(dir: string): DevPlugin {
 /** Drop a dev plugin from the registry. Never touches the source dir. */
 export function removeDevPlugin(name: string): void {
   updateSettings((draft) => { draft.devPlugins = (draft.devPlugins ?? []).filter(p => p.name !== name) })
+  forgetDevDiagnosis()
   logger.info(`dev plugin unregistered: ${name}`)
 }
 
@@ -171,9 +177,32 @@ export function updateDevPlugin(name: string, mutate: (dev: DevPlugin) => DevPlu
 
 // ── diagnosis ───────────────────────────────────────────────────────────────
 
-/** Diagnose a dev plugin's resolution: entry build output, the patch rows dsh
- * actually loads, and the `@deepseek-ai/*` peers the dev package must resolve. */
-export function diagnoseDevPlugin(dev: DevPlugin, ctx: DshContext): DevDiagnosis {
+/** How a diagnosis is targeted: which chain it resolves against, and who it is. */
+export interface DiagnoseOptions {
+  /** The profile whose composition (and `node_modules`) to resolve against. */
+  profile?: string
+  /** Bypass the caches — the dialog's 「重新诊断」. */
+  refresh?: boolean
+  /** Provenance for the report line; the IPC layer is what knows the scope. */
+  dsh?: { id: string; name: string; version: string }
+}
+
+/** The dev bundle's patch file (its `dsh.bundle.patch`), when the manifest has one. */
+function devPatchFile(m: DevManifest, dir: string): string | undefined {
+  const rel = m.dsh?.bundle?.patch
+  return typeof rel === 'string' && rel.trim() !== '' ? join(dir, rel) : undefined
+}
+
+/**
+ * Diagnose a dev plugin's resolution against one target: the entry build output,
+ * the patch rows dsh actually loads (resolving a row's own `name:` OR the package
+ * bound to its `id:` by the composition), and the peers the dev package must
+ * resolve.
+ *
+ * Cached per (target × dev × patch × shims): the dialog exists to be re-run while
+ * editing a patch, so a hit is the normal case and `refresh` is the escape hatch.
+ */
+export function diagnoseDevPlugin(dev: DevPlugin, ctx: DshContext, opts: DiagnoseOptions = {}): DevDiagnosis {
   let m: DevManifest = {}
   try { m = readManifest(dev.dir) } catch { /* unreadable manifest → empty */ }
 
@@ -182,28 +211,60 @@ export function diagnoseDevPlugin(dev: DevPlugin, ctx: DshContext): DevDiagnosis
   const entryMissing = entry !== undefined ? !existsSync(entry) : !existsSync(join(dev.dir, 'index.js'))
 
   // The patch rows are the modules dsh loads — the real resolution surface.
-  const patchRel = m.dsh?.bundle?.patch
-  const patch = typeof patchRel === 'string' && patchRel.trim() !== '' ? join(dev.dir, patchRel) : undefined
-  const patchRows: DevPatchRow[] = []
-  if (patch !== undefined && existsSync(patch)) {
-    try {
-      for (const row of parseNamedRows(readFileSync(patch, 'utf8'))) {
-        const name = row.name ?? ''
-        const hit = name === '' ? undefined : resolveDevRef(dev, ctx, name)
-        patchRows.push({ id: row.id, name, ...(hit !== undefined ? { dir: hit.dir, root: hit.root } : {}) })
-      }
-    } catch { /* unreadable patch → no rows to report */ }
-  }
-  const missingPatchRows = patchRows.filter(r => r.name !== '' && r.dir === undefined).map(r => r.name)
+  const patch = devPatchFile(m, dev.dir)
+  const rawRows = patch !== undefined && existsSync(patch)
+    ? (() => { try { return parseNamedRows(readFileSync(patch, 'utf8')) } catch { return [] } })()
+    : []
+  const index = moduleIndexFor(
+    ctx, opts.profile, { source: m.name ?? dev.name, rows: rawRows }, patch, opts.refresh === true,
+  )
 
-  const peers: DevPeer[] = collectPeers(m, entry).map(n => {
-    const hit = resolveDevRef(dev, ctx, n)
-    return { name: n, ...(hit !== undefined ? { dir: hit.dir, root: hit.root } : {}) }
+  const patchRows: DevPatchRow[] = rawRows.map((row) => {
+    // A row names its package, or addresses one an earlier layer inserted by id.
+    const own = (row.name ?? '').trim()
+    const binding = own === '' ? bindingFor(index, row.id) : undefined
+    const name = own !== '' ? own : binding?.name ?? ''
+    const from = binding === undefined ? undefined : binding.source
+    if (name === '') return { id: row.id, name: '', nameFrom: 'row' as const }
+    const hit = resolveDevRef(dev, ctx, name, opts.profile)
+    // What the chosen PROFILE alone would resolve (no dev tree): the verdict a
+    // snapshot/copy install of this plugin inside that profile would get.
+    const inProfile = opts.profile === undefined ? undefined : resolveModule(ctx, name, { profile: opts.profile })
+    const pkg = packageOf(name)
+    return {
+      id: row.id,
+      name,
+      nameFrom: own !== '' ? ('row' as const) : ('index' as const),
+      ...(pkg !== name ? { pkg } : {}),
+      ...(hit !== undefined ? { dir: hit.dir, root: hit.root, state: hit.state, ...(hit.link !== undefined ? { link: hit.link } : {}) } : {}),
+      ...(from !== undefined ? { from } : {}),
+      ...(inProfile !== undefined && inProfile.dir !== hit?.dir ? { profileDir: inProfile.dir } : {}),
+    }
+  })
+  // A row whose package cannot be imported: nothing has it, or the entry is there
+  // but its link target is gone. Both block the load, so both are counted.
+  const missingPatchRows = patchRows
+    .filter(r => r.name !== '' && (r.dir === undefined || r.state === 'dangling'))
+    .map(r => r.name)
+  const unknownIds = patchRows.filter(r => r.name === '').map(r => r.id)
+
+  const knownPackages = new Set([
+    ...index.bindings.map(b => packageOf(b.name)),
+    ...index.bindings.map(b => b.id),
+  ])
+  const peers: DevPeer[] = collectPeers(m, entry, pkg => knownPackages.has(pkg)).map((n) => {
+    const hit = resolveDevRef(dev, ctx, n, opts.profile)
+    const pkg = packageOf(n)
+    return {
+      name: n,
+      ...(pkg !== n ? { pkg } : {}),
+      ...(hit !== undefined ? { dir: hit.dir, root: hit.root, state: hit.state, ...(hit.link !== undefined ? { link: hit.link } : {}) } : {}),
+    }
   })
   // A `link:`'s own imports resolve from the DEV tree only, so a peer the host
   // provides but the dev tree cannot see still needs a shim — the host roots are
-  // not on its import path.
-  const missingPeers = peers.filter(p => p.root !== 'monorepo').map(p => p.name)
+  // not on its import path. A DANGLING dev-tree entry does not help it either.
+  const missingPeers = peers.filter(p => p.root !== 'monorepo' || p.state === 'dangling').map(p => p.name)
 
   return {
     entryMissing,
@@ -214,7 +275,71 @@ export function diagnoseDevPlugin(dev: DevPlugin, ctx: DshContext): DevDiagnosis
     peers,
     missingPeers,
     shimmed: dev.shims ?? [],
+    index,
+    unknownIds,
+    meta: {
+      dshId: opts.dsh?.id ?? ctx.execPath,
+      dshName: opts.dsh?.name ?? ctx.version,
+      dshVersion: opts.dsh?.version ?? ctx.version,
+      ...(opts.profile !== undefined && opts.profile !== '' ? { profile: opts.profile } : {}),
+      at: new Date().toISOString(),
+    },
   }
+}
+
+// ── diagnosis cache ─────────────────────────────────────────────────────────
+
+/** Distinct diagnoses kept before trimming the oldest. */
+const MAX_DIAGNOSES = 32
+const diagCache = new Map<string, DevDiagnosis>()
+
+/** Stamp a file's identity, or `-` when it is absent (so its appearance is a
+ * change of its own). */
+function stamp(path: string | undefined): string {
+  if (path === undefined) return '-'
+  try {
+    const st = statSync(path)
+    return `${st.mtimeMs}:${st.size}`
+  } catch {
+    return '-'
+  }
+}
+
+/** Everything a diagnosis result depends on that a file mtime cannot express. */
+function diagKey(dev: DevPlugin, ctx: DshContext, opts: DiagnoseOptions, patch: string | undefined): string {
+  return [
+    ctx.execPath, ctx.home, ctx.version, opts.profile ?? '', opts.dsh?.id ?? '',
+    dev.dir, (dev.shims ?? []).join(','), stamp(patch),
+  ].join('\u0000')
+}
+
+/** The cached diagnosis for this target, computing it when absent (or when
+ * `refresh` asks). The report's `meta.at` is the time it was COMPUTED, so a
+ * served-from-cache verdict still shows its real age. */
+export function cachedDiagnosis(dev: DevPlugin, ctx: DshContext, opts: DiagnoseOptions = {}): DevDiagnosis {
+  let m: DevManifest = {}
+  try { m = readManifest(dev.dir) } catch { /* unreadable manifest → empty */ }
+  const key = diagKey(dev, ctx, opts, devPatchFile(m, dev.dir))
+  if (opts.refresh !== true) {
+    const hit = diagCache.get(key)
+    if (hit !== undefined) return hit
+  }
+  const diag = diagnoseDevPlugin(dev, ctx, opts)
+  diagCache.set(key, diag)
+  while (diagCache.size > MAX_DIAGNOSES) {
+    const oldest = diagCache.keys().next().value
+    if (oldest === undefined) break
+    diagCache.delete(oldest)
+  }
+  return diag
+}
+
+/** Drop every cached report and index. Called whenever resolution changes in a way
+ * no file stamp can see — the registry itself, or a shim junction written into the
+ * dev package (which is what makes a peer resolvable at all). */
+export function forgetDevDiagnosis(): void {
+  diagCache.clear()
+  forgetModuleIndex()
 }
 
 // ── peer shims (reversible fallback fix) ────────────────────────────────────
@@ -229,31 +354,35 @@ function isRemovableLink(path: string): boolean {
 }
 
 /**
- * Satisfy missing `@deepseek-ai/*` peers by junctioning the dsh install's copies
- * into the dev package's `node_modules`. Only `node_modules` is written (never
- * `package.json`), and the created links are recorded so they can be removed.
- * `pnpm install` in the monorepo will drop them again — the durable fix is to
- * declare the peers there; this is the "make it run now" fallback.
+ * Satisfy missing peers by junctioning the host's copies into the dev package's
+ * `node_modules`. Only `node_modules` is written (never `package.json`), and the
+ * created links are recorded so they can be removed. `pnpm install` in the
+ * monorepo will drop them again — the durable fix is to declare the peers there;
+ * this is the "make it run now" fallback.
+ *
+ * The source comes from the same chain the diagnosis reported (`resolveModule`),
+ * and a DANGLING entry is re-created rather than skipped: an install upgrade
+ * leaves junctions whose target is gone, and `existsSync` cannot see them — which
+ * is exactly the case a shim is wanted for.
  */
-export function shimDevPeers(dev: DevPlugin, ctx: DshContext): { added: string[]; skipped: string[] } {
-  const diag = diagnoseDevPlugin(dev, ctx)
+export function shimDevPeers(
+  dev: DevPlugin, ctx: DshContext, opts: DiagnoseOptions = {},
+): { added: string[]; skipped: string[] } {
+  const diag = cachedDiagnosis(dev, ctx, { ...opts, refresh: true })
   const added: string[] = []
   const skipped: string[] = []
   for (const name of diag.missingPeers) {
-    // Source from wherever the host provides it (install anchor, heal fallback,
-    // dsh home) — the same roots the diagnosis reports.
-    const source = hostRoots(ctx)
-      .map(r => join(r.dir, 'node_modules', name))
-      .find(d => existsSync(join(d, 'package.json')))
-    if (source === undefined) { skipped.push(name); continue }
+    const source = resolveModule(ctx, name, opts.profile !== undefined ? { profile: opts.profile } : {})
+    if (source === undefined || source.state === 'dangling' || source.root === 'monorepo') {
+      skipped.push(name)
+      continue
+    }
     const linkPath = join(dev.dir, 'node_modules', name)
     mkdirSync(dirname(linkPath), { recursive: true })
     try {
-      if (existsSync(linkPath)) {
-        if (!isRemovableLink(linkPath)) { skipped.push(name); continue }
-        rmSync(linkPath, { force: true })
-      }
-      symlinkSync(source, linkPath, 'junction')
+      if (isRemovableLink(linkPath)) rmSync(linkPath, { force: true })
+      else if (existsSync(linkPath)) { skipped.push(name); continue }
+      symlinkSync(source.dir, linkPath, 'junction')
       added.push(name)
     } catch (error) {
       logger.warn(`dev peer shim failed for ${name}: ${error instanceof Error ? error.message : String(error)}`)
@@ -262,6 +391,7 @@ export function shimDevPeers(dev: DevPlugin, ctx: DshContext): { added: string[]
   }
   if (added.length > 0) {
     updateDevPlugin(dev.name, p => ({ ...p, shims: [...new Set([...(p.shims ?? []), ...added])] }))
+    forgetDevDiagnosis()
   }
   logger.info(`dev peer shim: ${dev.name} added ${added.length}, skipped ${skipped.length}`)
   return { added, skipped }
@@ -280,6 +410,7 @@ export function unshimDevPeers(dev: DevPlugin): string[] {
     }
   }
   updateDevPlugin(dev.name, p => ({ ...p, shims: [] }))
+  forgetDevDiagnosis()
   logger.info(`dev peer unshim: ${dev.name} removed ${removed.length}`)
   return removed
 }
