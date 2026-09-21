@@ -2,6 +2,7 @@
 import { Suspense, lazy } from 'react'
 import { Modal, Space, Tag, Typography, theme } from 'antd'
 import { useTranslation } from 'react-i18next'
+import { liveHeader } from '../../../lib/skillFrontmatter.ts'
 import { SKILL_NAME_RE } from '../../../../../shared/skill.ts'
 
 const CodeEditor = lazy(() => import('../../../components/CodeEditor.tsx'))
@@ -15,21 +16,6 @@ export interface SkillEditorModalProps {
   onChange: (text: string) => void
   onCancel: () => void
   onSubmit: () => void
-}
-
-/** Best-effort frontmatter header for the live summary; the authoritative
- * validation happens main-side on save. */
-function liveHeader(text: string): { name?: string; description?: string } {
-  const lines = text.split(/\r?\n/)
-  if (lines[0]?.trim() !== '---') return {}
-  const end = lines.findIndex((line, i) => i > 0 && line.trim() === '---')
-  if (end < 0) return {}
-  const pick = (key: string): string | undefined => {
-    const line = lines.slice(1, end).find(l => l.startsWith(`${key}:`))
-    const value = line?.slice(key.length + 1).trim() ?? ''
-    return value === '' ? undefined : value.replace(/^'(.*)'$/, '$1')
-  }
-  return { name: pick('name'), description: pick('description') }
 }
 
 export function SkillEditorModal(props: SkillEditorModalProps): JSX.Element {
