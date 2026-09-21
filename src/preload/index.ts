@@ -2,7 +2,7 @@
  * The contract lives in `src/shared/api.ts`; this object is checked against it
  * so the implementation can never drift from what the renderer sees. */
 
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
   ComboPlugin,
   DshDataImportResult,
@@ -195,10 +195,15 @@ const api = {
       ipcRenderer.invoke('ext:libSkillSave', previousName, text),
     libSkillDelete: (name: string): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('ext:libSkillDelete', name),
-    libSkillImportZip: (): Promise<IpcResult<SkillLibEntry[] | null>> =>
-      ipcRenderer.invoke('ext:libSkillImportZip'),
+    libSkillImportZip: (zipPath?: string): Promise<IpcResult<SkillLibEntry[] | null>> =>
+      ipcRenderer.invoke('ext:libSkillImportZip', zipPath),
     libSkillInstall: (name: string, dshId: string, overwrite: boolean): Promise<IpcResult<SkillEntry>> =>
       ipcRenderer.invoke('ext:libSkillInstall', name, dshId, overwrite),
+    filePath: (file: File): string => {
+      // getPathForFile throws on a non-File; a File with no on-disk backing
+      // yields ''. Never let either escape — the caller's input is untrusted.
+      try { return webUtils.getPathForFile(file) } catch { return '' }
+    },
   },
 
   run: {

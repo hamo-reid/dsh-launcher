@@ -103,6 +103,9 @@ export const E = {
   extBadSkill: 'ext.badSkill',
   extSkillZipNoSkill: 'ext.skillZipNoSkill',
   extSkillZipUnsafe: 'ext.skillZipUnsafe',
+  extSkillZipNotZip: 'ext.skillZipNotZip',
+  extSkillZipMissing: 'ext.skillZipMissing',
+  extSkillZipBad: 'ext.skillZipBad',
   // extensions (MCP library)
   extMcpExists: 'ext.mcpExists',
   extMcpNotInLib: 'ext.mcpNotInLib',

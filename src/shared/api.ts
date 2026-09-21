@@ -186,11 +186,16 @@ export interface WindowApi {
     libSkillSave: (previousName: string | null, text: string) => Promise<IpcResult<SkillLibEntry>>
     /** Move one library skill to the OS recycle bin. */
     libSkillDelete: (name: string) => Promise<IpcResult<boolean>>
-    /** Pick a zip via a file dialog and install its skills into the library
-     * (all-or-nothing). `null` when the dialog was cancelled. */
-    libSkillImportZip: () => Promise<IpcResult<SkillLibEntry[] | null>>
+    /** Install a zip's skills into the library (all-or-nothing). With no
+     * `zipPath` a file dialog picks the archive; a drag & drop passes its
+     * resolved path. `null` when the dialog was cancelled. */
+    libSkillImportZip: (zipPath?: string) => Promise<IpcResult<SkillLibEntry[] | null>>
     /** Copy a library skill into a dsh's writable root (`overwrite` = reinstall). */
     libSkillInstall: (name: string, dshId: string, overwrite: boolean) => Promise<IpcResult<SkillEntry>>
+    /** Resolve a dropped file to its absolute path. The renderer cannot read
+     * `File.path` (Electron removed it), only the preload can (`webUtils`).
+     * Returns `''` when the file has no on-disk backing. */
+    filePath: (file: File) => string
   }
 
   run: {

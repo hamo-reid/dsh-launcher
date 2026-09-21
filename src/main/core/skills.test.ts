@@ -11,8 +11,8 @@ import { join } from 'node:path'
 import { contextForEntry } from './appState.ts'
 import { AppError } from './errors.ts'
 import {
-  deleteSkill, findEditableSkill, importSkillZip, listSkills, parseSkillText, readSkillFile, renderSkillFile, scaffoldSkill,
-  setSkillTrash, skillRoots, writeSkill, zipEntryUnsafe,
+  deleteSkill, findEditableSkill, importSkillZip, installZipSkills, listSkills, parseSkillText, readSkillFile, renderSkillFile,
+  scaffoldSkill, setSkillTrash, skillRoots, writeSkill, zipEntryUnsafe, zipImportProblem,
 } from './skills.ts'
 import type { DshContext } from './appState.ts'
 
@@ -340,5 +340,41 @@ describe('zip import', () => {
       'b/SKILL.md': makeSkill('zip-dupe'),
     })
     expect(codeOf(zip)).toBe('ext.skillExists')
+  })
+})
+
+describe('zip import pre-flight (explicit paths, e.g. drag & drop)', () => {
+  it('rejects a missing path and a directory as missing', () => {
+    expect(zipImportProblem(join(root, 'no-such.zip'))).toEqual(
+      { code: 'ext.skillZipMissing', detail: join(root, 'no-such.zip') },
+    )
+    mkdirSync(join(root, 'adir.zip'), { recursive: true })
+    expect(zipImportProblem(join(root, 'adir.zip'))?.code).toBe('ext.skillZipMissing')
+  })
+
+  it('rejects a non-zip extension without touching the archive', () => {
+    const txt = join(root, 'notes.txt')
+    writeFileSync(txt, 'just text')
+    expect(zipImportProblem(txt)?.code).toBe('ext.skillZipNotZip')
+  })
+
+  it('passes a real zip through to the installer', () => {
+    const arc = new AdmZip()
+    arc.addFile('ok/SKILL.md', Buffer.from(makeSkill('preflight-ok'), 'utf8'))
+    const file = join(root, 'ok.zip')
+    arc.writeZip(file)
+    expect(zipImportProblem(file)).toBeNull()
+  })
+
+  it('reports garbage bytes under a .zip name as unreadable, not internal', () => {
+    const file = join(root, 'garbage.zip')
+    writeFileSync(file, 'definitely not a zip archive')
+    let code = ''
+    try {
+      installZipSkills(join(root, 'target'), file, () => false)
+    } catch (error) {
+      code = error instanceof AppError ? error.code : `unexpected: ${String(error)}`
+    }
+    expect(code).toBe('ext.skillZipBad')
   })
 })

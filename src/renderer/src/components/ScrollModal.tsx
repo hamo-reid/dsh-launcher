@@ -13,6 +13,7 @@ interface ScrollModalProps {
   width?: string | number
   footer?: ReactNode
   okText?: string
+  cancelText?: string
   onOk?: () => void | Promise<void>
   okDisabled?: boolean
   confirmLoading?: boolean
@@ -26,7 +27,7 @@ interface ScrollModalProps {
  * Encapsulates the repeated `maxHeight + overflowY:auto` wrapper spread across views.
  */
 export default function ScrollModal({
-  title, open, onCancel, children, width, footer, okText, onOk,
+  title, open, onCancel, children, width, footer, okText, cancelText, onOk,
   okDisabled, confirmLoading, destroyOnHidden, bodyMax = 'md',
 }: ScrollModalProps) {
   const height = typeof bodyMax === 'number' ? `${bodyMax}px` : BODY_HS[bodyMax]
@@ -41,6 +42,7 @@ export default function ScrollModal({
       width={width}
       footer={footer}
       okText={okText}
+      cancelText={cancelText}
       onOk={onOk}
       okButtonProps={okDisabled !== undefined ? { disabled: okDisabled } : undefined}
       confirmLoading={confirmLoading}

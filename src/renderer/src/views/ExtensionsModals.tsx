@@ -1,41 +1,39 @@
 /**
  * Modals for the extensions surface.
  *
- * Track A is the MCP server form. It is deliberately a typed form rather than a
- * raw YAML box: dsh fails a row that misses `serverName`/`transport`/an endpoint,
- * and the credential field needs an explicit "reference, not literal" default so
- * a secret never lands in `cordis.patch.yml` (which a profile export would carry
- * away).
+ * Track A is the MCP server form, with a JSON text mode beside it. The form is
+ * the friendly default: dsh fails a row that misses `serverName`/`transport`/
+ * an endpoint, and the credential field needs an explicit "reference, not
+ * literal" default so a secret never lands in `cordis.patch.yml` (which a
+ * profile export would carry away). The JSON mode edits the same
+ * `McpServerInput` as text (args as a string array, env/headers as
+ * {name, mode, value} arrays) for pasting whole configs at once.
  */
 import { lazy, Suspense, useEffect, useState } from 'react'
-import { Alert, Button, Checkbox, Collapse, Input, InputNumber, Modal, Popconfirm, Radio, Select, Space, Tag, theme, Typography } from 'antd'
+import { Alert, Button, Checkbox, Collapse, Input, InputNumber, Modal, Popconfirm, Radio, Segmented, Select, Space, Tag, theme, Typography } from 'antd'
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import FieldLabel from '../components/FieldLabel.tsx'
+import ScrollModal from '../components/ScrollModal.tsx'
 import { MODAL } from '../theme.ts'
+import {
+  argsToText, blankMcpInput, fromServer, jsonToMcpInput, mcpInputToJson,
+  normalizeInput, type McpJsonProblem,
+} from '../lib/mcpInput.ts'
 import { SKILL_NAME_RE } from '../../../shared/skill.ts'
 import type { McpKV, McpServer, McpServerInput, McpValueMode } from '../../../shared/types.ts'
 
-/** A blank row for a new server. */
-function blankInput(): McpServerInput {
-  return { id: '', serverName: '', transport: 'stdio', command: '', args: [], env: [], cwd: '' }
-}
+const CodeEditor = lazy(() => import('../components/CodeEditor.tsx'))
 
-/** Seed the form from an existing row (its raw config is not editable here). */
-function fromServer(server: McpServer): McpServerInput {
-  return {
-    id: server.id,
-    serverName: server.serverName,
-    transport: server.transport === 'streamable-http' ? 'streamable-http' : 'stdio',
-    command: server.command ?? '',
-    args: server.args ?? [],
-    env: server.env ?? [],
-    cwd: server.cwd ?? '',
-    url: server.url ?? '',
-    headers: server.headers ?? [],
-    ...(server.toolCallTimeoutMs !== undefined ? { toolCallTimeoutMs: server.toolCallTimeoutMs } : {}),
-    ...(server.failOnStartupError !== undefined ? { failOnStartupError: server.failOnStartupError } : {}),
-    ...(server.reconnect !== undefined ? { reconnect: server.reconnect } : {}),
+/** Localized label per JSON problem kind — keyed explicitly so a new
+ * McpJsonProblem kind fails the typecheck until it gets a label. */
+function jsonProblemLabel(problem: McpJsonProblem, t: TFunction<'translation'>): string {
+  switch (problem.kind) {
+    case 'parse': return t('ext.mcp.form.jsonErr.parse', { detail: problem.message })
+    case 'notObject': return t('ext.mcp.form.jsonErr.notObject')
+    case 'unknown': return t('ext.mcp.form.jsonErr.unknown', { detail: problem.keys.join(', ') })
+    case 'field': return t('ext.mcp.form.jsonErr.field', { field: problem.field, expected: problem.expected })
   }
 }
 
@@ -138,29 +136,54 @@ export interface McpServerModalProps {
 export default function McpServerModal(props: McpServerModalProps): JSX.Element {
   const { t } = useTranslation()
   const { token } = theme.useToken()
-  const [input, setInput] = useState<McpServerInput>(blankInput)
+  const [input, setInput] = useState<McpServerInput>(blankMcpInput)
   const [argsText, setArgsText] = useState('')
+  const [mode, setMode] = useState<'form' | 'json'>('form')
+  const [jsonText, setJsonText] = useState('')
+  const [jsonError, setJsonError] = useState<McpJsonProblem | null>(null)
 
   // Re-seed whenever the dialog opens, so a cancelled edit never leaks into the
-  // next one.
+  // next one. The JSON projection is computed lazily on switch, never here.
   useEffect(() => {
     if (!props.open) return
-    const seeded = props.editing === null ? blankInput() : fromServer(props.editing)
+    const seeded = props.editing === null ? blankMcpInput() : fromServer(props.editing)
     setInput(seeded)
-    setArgsText((seeded.args ?? []).join('\n'))
+    setArgsText(argsToText(seeded.args))
+    setMode('form')
+    setJsonText('')
+    setJsonError(null)
   }, [props.open, props.editing])
 
   const set = (patch: Partial<McpServerInput>): void => setInput(prev => ({ ...prev, ...patch }))
 
+  const switchMode = (next: 'form' | 'json'): void => {
+    if (next === mode) return
+    // Form -> JSON is the only place the text is recomputed; the form input
+    // stays the source of truth and the JSON pane only ever fills it with
+    // successfully parsed values (so the cursor never jumps mid-typing).
+    if (next === 'json') {
+      setJsonText(mcpInputToJson(input, argsText))
+      setJsonError(null)
+    }
+    setMode(next)
+  }
+
+  const onJsonChange = (text: string): void => {
+    setJsonText(text)
+    const parsed = jsonToMcpInput(text)
+    if ('problem' in parsed) {
+      setJsonError(parsed.problem)
+    } else {
+      setJsonError(null)
+      setInput(parsed.input)
+      setArgsText(parsed.argsText)
+    }
+  }
+
   const submit = (): void => {
-    const args = argsText.split('\n').map(line => line.trim()).filter(line => line !== '')
-    // Blank rows (a '+' click never filled in) are dropped for BOTH editors —
-    // the backend rejects an empty name outright.
-    props.onSubmit({
-      ...input, args,
-      env: input.env?.filter(e => e.name !== ''),
-      headers: input.headers?.filter(e => e.name !== ''),
-    })
+    // An unparsable JSON pane holds edits the form never saw — block the save.
+    if (mode === 'json' && jsonError !== null) return
+    props.onSubmit(normalizeInput(input, argsText))
   }
 
   const isStdio = input.transport === 'stdio'
@@ -169,16 +192,20 @@ export default function McpServerModal(props: McpServerModalProps): JSX.Element 
     set({ reconnect: { ...reconnect, ...patch } })
 
   return (
-    <Modal
-      open={props.open}
+    <ScrollModal
       title={props.editing === null ? t('ext.mcp.form.addTitle') : t('ext.mcp.form.editTitle', { name: props.editing.serverName })}
+      open={props.open}
+      onCancel={props.onCancel}
+      onOk={submit}
       okText={t('common.save')}
       cancelText={t('common.cancel')}
+      okDisabled={mode === 'json' && jsonError !== null}
       confirmLoading={props.saving}
-      onOk={submit}
-      onCancel={props.onCancel}
       width={MODAL.wide}
       destroyOnHidden
+      // Cap the body and scroll inside the dialog, so long env lists or the
+      // expanded advanced section never grow the dialog past the viewport.
+      bodyMax="lg"
     >
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
         {props.editing?.rawConfig !== undefined && (
@@ -207,6 +234,24 @@ export default function McpServerModal(props: McpServerModalProps): JSX.Element 
           </div>
         )}
 
+        <div>
+          <FieldLabel>{t('ext.mcp.form.mode')}</FieldLabel>
+          <Segmented
+            size="small"
+            value={mode}
+            onChange={value => switchMode(value as 'form' | 'json')}
+            options={[
+              { value: 'form', label: t('ext.mcp.form.modeForm') },
+              { value: 'json', label: t('ext.mcp.form.modeJson') },
+            ]}
+          />
+        </div>
+        {mode === 'form' && jsonError !== null && (
+          <Alert type="warning" showIcon title={t('ext.mcp.form.jsonStale')} />
+        )}
+
+        {mode === 'form' ? (
+          <>
         <div>
           <FieldLabel>{t('ext.mcp.form.serverName')}</FieldLabel>
           <Input
@@ -338,8 +383,36 @@ export default function McpServerModal(props: McpServerModalProps): JSX.Element 
             ),
           }]}
         />
+          </>
+        ) : (
+          <>
+            {jsonError !== null && (
+              <Alert
+                type="error"
+                showIcon
+                title={t('ext.mcp.form.jsonInvalid')}
+                description={(
+                  <Typography.Text code style={{ fontSize: token.fontSizeSM }}>
+                    {jsonProblemLabel(jsonError, t)}
+                  </Typography.Text>
+                )}
+              />
+            )}
+            <Typography.Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
+              {t('ext.mcp.form.jsonHint')}
+            </Typography.Text>
+            {props.editing?.rawConfig !== undefined && (
+              <Typography.Text type="warning" style={{ fontSize: token.fontSizeSM }}>
+                {t('ext.mcp.form.jsonRawBody')}
+              </Typography.Text>
+            )}
+            <Suspense fallback={<div style={{ height: 360 }} />}>
+              <CodeEditor value={jsonText} language="json" onChange={onJsonChange} height={360} />
+            </Suspense>
+          </>
+        )}
       </Space>
-    </Modal>
+    </ScrollModal>
   )
 }
 
@@ -540,7 +613,6 @@ function liveHeader(text: string): { name?: string; description?: string } {
 export function SkillEditorModal(props: SkillEditorModalProps): JSX.Element {
   const { t } = useTranslation()
   const { token } = theme.useToken()
-  const CodeEditor = lazy(() => import('../components/CodeEditor.tsx'))
   const header = liveHeader(props.text)
   const nameValid = header.name === undefined || SKILL_NAME_RE.test(header.name)
 

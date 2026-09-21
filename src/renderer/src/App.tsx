@@ -125,6 +125,18 @@ export default function App() {
     return () => window.removeEventListener(HEALTH_DIRTY_EVENT, handler)
   }, [])
 
+  // A file dropped outside a drop zone (sider, header, …) must not navigate
+  // the whole app to that file — swallow the browser default globally.
+  useEffect(() => {
+    const guard = (e: DragEvent): void => { e.preventDefault() }
+    window.addEventListener('dragover', guard)
+    window.addEventListener('drop', guard)
+    return () => {
+      window.removeEventListener('dragover', guard)
+      window.removeEventListener('drop', guard)
+    }
+  }, [])
+
   const TABS: { key: Tab; label: string; icon: ReactNode }[] = [
     { key: 'dsh', label: t('app.tab.dsh'), icon: <RobotOutlined /> },
     { key: 'run', label: t('app.tab.run'), icon: <PlayCircleOutlined /> },

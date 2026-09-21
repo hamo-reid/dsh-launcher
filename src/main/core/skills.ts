@@ -16,7 +16,7 @@
  * mistake is reversible without a launcher-side restore UI.
  */
 import AdmZip from 'adm-zip'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { homePatchPath, readHomePatch } from './home.ts'
@@ -451,6 +451,19 @@ export function zipEntryUnsafe(entryName: string): boolean {
   return path.split('/').some(segment => segment === '..')
 }
 
+/** Pre-flight for an explicit zip path (drag & drop): extension + is-it-really
+ * a file. Zip structure stays `installZipSkills`' job. Returns the error, or
+ * `null` when the path may go to `installZipSkills`. */
+export function zipImportProblem(zipPath: string): { code: string; detail: string } | null {
+  if (!zipPath.toLowerCase().endsWith('.zip')) return { code: E.extSkillZipNotZip, detail: zipPath }
+  try {
+    if (!statSync(zipPath).isFile()) return { code: E.extSkillZipMissing, detail: zipPath }
+  } catch {
+    return { code: E.extSkillZipMissing, detail: zipPath }
+  }
+  return null
+}
+
 /**
  * The directory each zip-carried skill lives in, relative to the zip root.
  *
@@ -489,7 +502,14 @@ export function installZipSkills(
   zipPath: string,
   exists: (name: string) => boolean,
 ): Array<{ skill: ParsedSkill; dir: string }> {
-  const arc = new AdmZip(zipPath)
+  let arc: AdmZip
+  try {
+    arc = new AdmZip(zipPath)
+  } catch (error) {
+    // A dropped file may carry a `.zip` name with garbage bytes — surface that
+    // as a readable error instead of adm-zip's raw exception.
+    throwE(E.extSkillZipBad, { detail: zipPath }, error instanceof Error ? error.message : String(error))
+  }
   const unsafe = arc.getEntries().find(entry => zipEntryUnsafe(entry.entryName))
   if (unsafe !== undefined) throwE(E.extSkillZipUnsafe, { detail: unsafe.entryName })
   const dirs = skillZipRoots(arc.getEntries().map(entry => entry.entryName.replaceAll('\\', '/')))

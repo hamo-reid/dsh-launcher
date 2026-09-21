@@ -15,6 +15,7 @@ import { Alert, Button, Pagination, Segmented, Skeleton, Space, Typography, them
 import { PlusOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
+import DropZone, { useFileDrop } from '../components/DropZone.tsx'
 import EmptyState from '../components/EmptyState.tsx'
 import Panel from '../components/Panel.tsx'
 import SearchInput from '../components/SearchInput.tsx'
@@ -105,15 +106,37 @@ export default function SkillsView(): JSX.Element {
     await load()
   }
 
-  const importZip = async (): Promise<void> => {
+  const importZip = async (zipPath?: string): Promise<void> => {
     setBusy('import')
-    const r = await window.api.ext.libSkillImportZip()
+    const r = await window.api.ext.libSkillImportZip(zipPath)
     setBusy('')
     if (!r.ok) { void message.error(apiErrorText(r)); return }
     if (r.value === null) return // dialog cancelled — not an error
     void message.success(t('ext.skills.imported', { names: r.value.map(entry => entry.name).join(', ') }))
     await load()
   }
+
+  const dropFiles = (files: File[]): void => {
+    const file = files[0]
+    if (file === undefined) return
+    if (files.length > 1) void message.warning(t('ext.skills.dropOneAtATime'))
+    // A skill zip is text-sized; refuse anything absurd before touching IPC.
+    if (file.size > 64 * 1024 * 1024) { void message.warning(t('ext.skills.dropTooLarge')); return }
+    // Resolve synchronously, before any await — the File's on-disk backing is
+    // only reliable inside the drop event's context.
+    const path = window.api.ext.filePath(file)
+    if (path === '') { void message.error(t('ext.skills.dropNoPath')); return }
+    void importZip(path)
+  }
+
+  // The whole card area accepts drops (the DropZone block below is purely
+  // visual — drops on it bubble up here, so one drop always imports once).
+  const drop = useFileDrop({
+    accept: ['.zip'],
+    onDrop: files => dropFiles(files),
+    onReject: () => { void message.warning(t('ext.skills.dropWrongType')) },
+    disabled: busy === 'import',
+  })
 
   const install = async (dshId: string, overwrite: boolean): Promise<void> => {
     if (installEntry === null) return
@@ -202,6 +225,17 @@ export default function SkillsView(): JSX.Element {
         />
       ))}
 
+      <div
+        {...drop.handlers}
+        style={{
+          width: '100%',
+          borderRadius: token.borderRadiusLG,
+          // Highlight with an outline (not a background): the Panel is opaque
+          // and would cover anything painted behind it.
+          outline: drop.dragging ? `2px dashed ${token.colorPrimary}` : undefined,
+          outlineOffset: -2,
+        }}
+      >
       <Panel pad={false}>
         <Toolbar>
           <SearchInput
@@ -273,8 +307,15 @@ export default function SkillsView(): JSX.Element {
               )}
             </>
           )}
+          <DropZone
+            dragging={drop.dragging}
+            busy={busy === 'import'}
+            onPick={() => void importZip()}
+            style={{ marginTop: token.padding }}
+          />
         </div>
       </Panel>
+      </div>
 
       <SkillNameModal
         open={nameModal}

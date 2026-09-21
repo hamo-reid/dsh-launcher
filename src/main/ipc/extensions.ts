@@ -30,6 +30,7 @@ import { listMcpSecretNames, setMcpSecret } from '../core/mcp-secrets.ts'
 import { logger } from '../core/logger.ts'
 import {
   deleteSkill, installedEntry, installZipSkills, listSkills, parseSkillText, scaffoldSkill, writableSkillRoot,
+  zipImportProblem,
 } from '../core/skills.ts'
 import {
   deleteSkillLib, installSkillToDsh, listSkillLibrary, readSkillLibFile, scanSkillInstalls, skillLibraryDir,
@@ -416,23 +417,32 @@ export function registerExtensionsIpc(): void {
     }
   })
 
-  // Pick a skill zip and install its skills into the LIBRARY (all-or-nothing).
+  // Install a skill zip into the LIBRARY (all-or-nothing). With no `zipPath`
+  // a file dialog picks the archive; a drag & drop passes its resolved path.
   // Cancel returns `null` (not an error).
-  handle('ext:libSkillImportZip', async (): Promise<IpcResult<SkillLibEntry[] | null>> => {
-    const picked = await dialog.showOpenDialog({
-      title: '选择要导入的 skill 压缩包',
-      properties: ['openFile'],
-      filters: [{ name: 'Skill 压缩包', extensions: ['zip'] }],
-    })
-    if (picked.canceled || picked.filePaths.length === 0) return { ok: true, value: null }
+  handle('ext:libSkillImportZip', async (_event, zipPath?: string): Promise<IpcResult<SkillLibEntry[] | null>> => {
+    let picked: string
+    if (typeof zipPath === 'string' && zipPath !== '') {
+      picked = zipPath
+    } else {
+      const dialoged = await dialog.showOpenDialog({
+        title: '选择要导入的 skill 压缩包',
+        properties: ['openFile'],
+        filters: [{ name: 'Skill 压缩包', extensions: ['zip'] }],
+      })
+      if (dialoged.canceled || dialoged.filePaths.length === 0) return { ok: true, value: null }
+      picked = dialoged.filePaths[0]
+    }
+    const problem = zipImportProblem(picked)
+    if (problem !== null) return fail(problem.code, { detail: problem.detail })
     try {
       const libDir = skillLibraryDir()
       const installed = installZipSkills(
         libDir,
-        picked.filePaths[0],
+        picked,
         name => existsSync(join(libDir, name)) || existsSync(join(libDir, `${name}.md`)),
       )
-      logger.info(`skill library: imported ${installed.length} skill(s) from ${picked.filePaths[0]}`)
+      logger.info(`skill library: imported ${installed.length} skill(s) from ${picked}`)
       return {
         ok: true,
         value: installed.map(({ skill, dir }) => ({
