@@ -15,31 +15,29 @@
  * settings backup cannot leak it.
  */
 import { loadSettings, updateSettings } from './settings.ts'
+import { createSecretCodec, type SecretCipher } from './secret-at-rest.ts'
 import { logger } from './logger.ts'
 import type { GithubAuthState, GithubEncryption, GithubRateLimit, GithubTokenSource } from '../../shared/types.ts'
 
-/** Encrypt/decrypt a token at rest; injected by the main process (safeStorage). */
-export interface TokenCipher {
-  available(): boolean
-  encrypt(plain: string): string
-  decrypt(cipherText: string): string
-}
+/** Encrypt/decrypt a token at rest; injected by the main process (safeStorage).
+ * The historical name for the envelope the MCP secrets share (`SecretCipher`). */
+export type TokenCipher = SecretCipher
 
-/** Prefix marking a token stored without OS encryption (no keyring available). */
-const PLAIN_PREFIX = 'plain:'
 /** Quota probe endpoint — cheap and auth-aware. */
 const RATE_LIMIT_URL = 'https://api.github.com/rate_limit'
 const USER_URL = 'https://api.github.com/user'
 const PROBE_TIMEOUT_MS = 10_000
 
-let cipher: TokenCipher | null = null
+/** The token's at-rest envelope. */
+const codec = createSecretCodec('github auth: saved token')
+
 let token: string | null = null
 let source: GithubTokenSource = 'none'
 let rateLimited = false
 
 /** Inject the at-rest cipher (main process wires safeStorage; tests inject a fake). */
 export function setTokenCipher(next: TokenCipher | null): void {
-  cipher = next
+  codec.setCipher(next)
 }
 
 /** The environment token, if any (`GH_TOKEN` wins over `GITHUB_TOKEN`; a
@@ -52,32 +50,16 @@ function envToken(): string | undefined {
   return undefined
 }
 
-function decode(stored: string): string | undefined {
-  if (stored.startsWith(PLAIN_PREFIX)) return stored.slice(PLAIN_PREFIX.length)
-  if (cipher === null || !cipher.available()) return undefined
-  try {
-    return cipher.decrypt(stored)
-  } catch (error) {
-    logger.warn(`github auth: saved token could not be decrypted (${error instanceof Error ? error.message : String(error)})`)
-    return undefined
-  }
-}
-
-function encode(plain: string): string {
-  if (cipher !== null && cipher.available()) return cipher.encrypt(plain)
-  return `${PLAIN_PREFIX}${plain}`
-}
-
 function encryptionMode(): GithubEncryption {
   if (token === null || source !== 'settings') return 'none'
-  return cipher !== null && cipher.available() ? 'safe' : 'plaintext'
+  return codec.available() ? 'safe' : 'plaintext'
 }
 
 /** Resolve the effective token: saved setting first, then the environment. Call
  * once at startup, after the settings DB is open. */
 export function initGithubAuth(): GithubAuthState {
   const stored = loadSettings().githubTokenEnc
-  const saved = typeof stored === 'string' && stored !== '' ? decode(stored) : undefined
+  const saved = typeof stored === 'string' && stored !== '' ? codec.decode(stored) : undefined
   if (saved !== undefined) {
     token = saved
     source = 'settings'
@@ -99,7 +81,7 @@ export function setGithubToken(value: string | null): GithubAuthState {
     token = fromEnv ?? null
     source = fromEnv === undefined ? 'none' : 'env'
   } else {
-    const stored = encode(plain)
+    const stored = codec.encode(plain)
     updateSettings((draft) => { draft.githubTokenEnc = stored })
     token = plain
     source = 'settings'

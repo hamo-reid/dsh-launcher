@@ -5,12 +5,15 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { listProfiles, profileDir, profilesDir } from './home.ts'
+import { listProfiles, profileDir, profilePatchPath, profilesDir } from './home.ts'
 import { pluginDir, profilesRootFor, type DshContext } from './appState.ts'
 import { readManifest } from './manifest.ts'
+import {
+  MANIFEST_FILE_NAME, readManifestFile, readRawManifest, writeManifestFile, writeRawManifest,
+} from './manifest-file.ts'
 import { listComboPlugins, reconcileBundles, resolveBundlePatch } from './combo.ts'
-import { appendRowBlock, assertPatchDocValid, extractRowBlock, parsePatchRows, removeRow } from './patch.ts'
-import { runPnpm, type PnpmResult } from './pnpm.ts'
+import { appendRowBlock, assertPatchDocValid, extractRowBlock, PATCH_FILE_NAME, parsePatchRows, removeRow } from './patch.ts'
+import { PNPM_WORKSPACE_YAML, runPnpm, type PnpmResult } from './pnpm.ts'
 import { addLocalPlugin, addPlugin, installIntoProfile, installedStoreVersion } from './plugins.ts'
 import { readVersion, versionsRoot } from './store-layout.ts'
 import { pathOutsideRoot } from './name-guard.ts'
@@ -47,16 +50,6 @@ const PATCH_TEMPLATE = `# Your patch layer for this dsh profile, applied after e
 []
 `
 
-/** pnpm settings an out-of-tree-plugin profile needs — identical to dsh's
- * `initProfile`, so a profile created here is self-contained and shares the
- * installation's single cordis instance instead of duplicating it. */
-const PROFILE_PNPM_WORKSPACE = `packages:
-  - .
-
-nodeLinker: hoisted
-autoInstallPeers: false
-`
-
 /** List profile summaries for one dsh. */
 export function listProfileSummaries(ctx: DshContext): ProfileSummary[] {
   return listProfiles(ctx).map((name) => {
@@ -67,7 +60,7 @@ export function listProfileSummaries(ctx: DshContext): ProfileSummary[] {
     } catch {
       plugins = 0
     }
-    const patchPath = join(profileDir(ctx, name), 'cordis.patch.yml')
+    const patchPath = profilePatchPath(ctx, name)
     const patchText = existsSync(patchPath) ? readFileSync(patchPath, 'utf8') : ''
     return { name, bundles: manifest.bundles.length, plugins, patchRows: parsePatchRows(patchText).length }
   })
@@ -83,8 +76,8 @@ export function profileDirPath(ctx: DshContext, name: string): string {
 /** Absolute path of one editable profile file. */
 export function profileFilePath(ctx: DshContext, name: string, kind: ProfileFileKind): string {
   return kind === 'manifest'
-    ? join(profilesRootFor(ctx), name, 'package.json')
-    : join(profilesRootFor(ctx), name, 'cordis.patch.yml')
+    ? join(profilesRootFor(ctx), name, MANIFEST_FILE_NAME)
+    : profilePatchPath(ctx, name)
 }
 
 /** Read a profile's raw file. `text` is `''` when it does not exist yet. */
@@ -138,24 +131,6 @@ export function writeProfileFile(ctx: DshContext, name: string, kind: ProfileFil
 }
 
 // ── structured manifest edits ───────────────────────────────────────────────
-
-/** The raw manifest shape the launcher reads/writes. */
-interface RawManifest {
-  name?: string
-  private?: boolean
-  dependencies?: Record<string, string>
-  dsh?: { profile?: { bundles?: string[]; patchReload?: ProfilePatchReload } }
-}
-
-function readRawManifest(dir: string): RawManifest {
-  const path = join(dir, 'package.json')
-  if (!existsSync(path)) throw new Error(`profile 不存在：${dir}`)
-  return JSON.parse(readFileSync(path, 'utf8')) as RawManifest
-}
-
-function writeRawManifest(dir: string, manifest: RawManifest): void {
-  writeFileSync(join(dir, 'package.json'), JSON.stringify(manifest, null, 2) + '\n')
-}
 
 /** A package name accepted as a dependency target. */
 const PACKAGE_NAME_RE = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/i
@@ -277,7 +252,7 @@ export function transferProfilePatch(
   source: DshContext, sourceName: string, target: DshContext, targetName: string, move: boolean,
 ): void {
   if (source.home === target.home && sourceName === targetName) throw new Error('源与目标是同一个 profile')
-  const srcPath = join(profilesRootFor(source), sourceName, 'cordis.patch.yml')
+  const srcPath = profilePatchPath(source, sourceName)
   const srcDir = join(profilesRootFor(source), sourceName)
   const dstDir = join(profilesRootFor(target), targetName)
   if (!existsSync(join(srcDir, 'package.json'))) throw new Error(`profile "${sourceName}" 不存在`)
@@ -288,7 +263,7 @@ export function transferProfilePatch(
   const rows = parsePatchRows(text)
   if (rows.length === 0) throw new Error(`profile "${sourceName}" 的 patch 层没有行`)
 
-  const dstPath = join(dstDir, 'cordis.patch.yml')
+  const dstPath = join(dstDir, PATCH_FILE_NAME)
   let dst = existsSync(dstPath) ? readFileSync(dstPath, 'utf8') : '[]'
   for (const row of rows) {
     const block = extractRowBlock(text, row.id)
@@ -343,9 +318,9 @@ export function createProfile(ctx: DshContext, name: string, bundles: string[] =
     dependencies: {},
     dsh: { profile: { bundles, patchReload: DEFAULT_PROFILE_PATCH_RELOAD } },
   }
-  writeFileSync(join(dir, 'package.json'), JSON.stringify(manifest, null, 2) + '\n')
-  writeFileSync(join(dir, 'cordis.patch.yml'), PATCH_TEMPLATE)
-  writeFileSync(join(dir, 'pnpm-workspace.yaml'), PROFILE_PNPM_WORKSPACE)
+  writeRawManifest(dir, manifest)
+  writeFileSync(join(dir, PATCH_FILE_NAME), PATCH_TEMPLATE)
+  writeFileSync(join(dir, 'pnpm-workspace.yaml'), PNPM_WORKSPACE_YAML)
   writeNewProfileId(dir)
   logger.info(`profile created: ${name} (${bundles.length} bundles)`)
 }
@@ -391,9 +366,9 @@ export function softDeleteProfile(ctx: DshContext, name: string): void {
  * node_modules is removed — otherwise a stale link would keep showing up as an
  * "installed but unclaimed" bundle. The rest of the manifest is preserved. */
 export async function removeBundle(ctx: DshContext, profile: string, bundle: string): Promise<void> {
-  const manifestPath = join(profileDir(ctx, profile), 'package.json')
+  const manifestPath = join(profileDir(ctx, profile), MANIFEST_FILE_NAME)
   if (!existsSync(manifestPath)) throw new Error(`profile "${profile}" 不存在`)
-  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+  const manifest = readManifestFile(manifestPath) as {
     dependencies?: Record<string, string>
     dsh?: { profile?: { bundles?: string[] } }
   }
@@ -414,8 +389,8 @@ export async function removeBundle(ctx: DshContext, profile: string, bundle: str
     ...manifest.dsh,
     profile: { ...manifest.dsh?.profile, bundles: bundles.filter(b => b !== bundle) },
   }
-  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
-  if (JSON.parse(readFileSync(manifestPath, 'utf8')).dsh?.profile?.bundles?.includes(bundle)) {
+  writeManifestFile(manifestPath, manifest)
+  if (readManifestFile(manifestPath).dsh?.profile?.bundles?.includes(bundle)) {
     throw new Error('write verify failed: bundle still present')
   }
   // Prune the now-orphaned link from node_modules.
@@ -426,10 +401,8 @@ export async function removeBundle(ctx: DshContext, profile: string, bundle: str
 /** Move one bundle layer within `dsh.profile.bundles` to `toIndex` (0..len-1,
  * clamped). Matches drag-to-position semantics: remove then insert. */
 export function reorderBundle(ctx: DshContext, profile: string, bundle: string, toIndex: number): void {
-  const manifestPath = join(profileDir(ctx, profile), 'package.json')
-  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
-    dsh?: { profile?: { bundles?: string[] } }
-  }
+  const dir = profileDir(ctx, profile)
+  const manifest = readRawManifest(dir)
   const bundles = manifest.dsh?.profile?.bundles ?? []
   const i = bundles.indexOf(bundle)
   if (i < 0) throw new Error(`profile 中没有 bundle 层「${bundle}」`)
@@ -438,7 +411,7 @@ export function reorderBundle(ctx: DshContext, profile: string, bundle: string, 
   next.splice(i, 1)
   next.splice(clamped, 0, bundle)
   manifest.dsh = { ...manifest.dsh, profile: { ...manifest.dsh?.profile, bundles: next } }
-  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
+  writeRawManifest(dir, manifest)
 }
 
 /** Where a profile's bundle comes from — decides how import restores it. */
@@ -541,7 +514,7 @@ function majorOf(version: string): number {
  * to move across machines. */
 export function exportProfile(ctx: DshContext, name: string): string {
   const root = profilesRootFor(ctx)
-  const manifest = JSON.parse(readFileSync(join(root, name, 'package.json'), 'utf8')) as {
+  const manifest = readManifestFile(join(root, name, MANIFEST_FILE_NAME)) as {
     name?: string
     dependencies?: Record<string, string>
     dsh?: { profile?: { bundles?: string[]; patchReload?: string } }
@@ -555,7 +528,7 @@ export function exportProfile(ctx: DshContext, name: string): string {
     if (bundleNames.has(key) || spec.startsWith('link:') || spec.startsWith('file:')) continue
     dependencies[key] = spec
   }
-  const patchPath = join(root, name, 'cordis.patch.yml')
+  const patchPath = join(root, name, PATCH_FILE_NAME)
   const patchText = existsSync(patchPath) ? readFileSync(patchPath, 'utf8') : ''
   const rawReload = manifest.dsh?.profile?.patchReload
   const patchReload = rawReload === 'live' || rawReload === 'startup' ? rawReload : undefined
@@ -575,7 +548,7 @@ export function exportProfile(ctx: DshContext, name: string): string {
  * export dialog offers to pack into a zip. A dev link's dir is its `link:`
  * target (the source package); a store-managed `file:` dep is not local. */
 export function listLocalBundles(ctx: DshContext, name: string, storeDir: string): { name: string; dir: string }[] {
-  const manifest = JSON.parse(readFileSync(join(profilesRootFor(ctx), name, 'package.json'), 'utf8')) as {
+  const manifest = readManifestFile(join(profilesRootFor(ctx), name, MANIFEST_FILE_NAME)) as {
     dependencies?: Record<string, string>
     dsh?: { profile?: { bundles?: string[] } }
   }
@@ -714,14 +687,14 @@ export async function importProfile(
 
   emit({ kind: 'create' })
   mkdirSync(dir, { recursive: true })
-  writeFileSync(join(dir, 'package.json'), JSON.stringify({
+  writeRawManifest(dir, {
     name: `dsh-profile-${target}`,
     private: true,
     dependencies: deps,
     dsh: { profile: { bundles: bundles.map(b => b.name), patchReload } },
-  }, null, 2) + '\n')
-  writeFileSync(join(dir, 'cordis.patch.yml'), userPatch || '[]')
-  writeFileSync(join(dir, 'pnpm-workspace.yaml'), PROFILE_PNPM_WORKSPACE)
+  })
+  writeFileSync(join(dir, PATCH_FILE_NAME), userPatch || '[]')
+  writeFileSync(join(dir, 'pnpm-workspace.yaml'), PNPM_WORKSPACE_YAML)
   // A freshly imported/mirrored profile is a new identity — never inherit the
   // exported profile's launch defaults.
   writeNewProfileId(dir)

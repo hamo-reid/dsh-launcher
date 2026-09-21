@@ -15,6 +15,19 @@ import { child, logger } from './logger.ts'
 import { buildNodeScriptLaunch, type NodeTarget } from './launch-spec.ts'
 import { nodeEnvironment } from './node-env.ts'
 import { nodePreferenceValue } from './settings.ts'
+import { killProcessTree } from './process-kill.ts'
+
+/** The pnpm workspace settings an out-of-tree-plugin tree needs — identical to
+ * dsh's own `initProfile`, and required in two places for the same reason: the
+ * default `nodeLinker: isolated` stows every dependency behind `.pnpm/` and leaves
+ * only the top package visible, so an aggregate bundle's sub-bundles would be
+ * invisible to a profile link. Hoisting makes `node_modules/<sub>` real. */
+export const PNPM_WORKSPACE_YAML = `packages:
+  - .
+
+nodeLinker: hoisted
+autoInstallPeers: false
+`
 
 /** Domain-tagged logger for anything pnpm-related — grep `{domain:"pnpm"}`. */
 const plog = child('pnpm')
@@ -275,16 +288,6 @@ export function runPnpm(
       resolve({ ok, text: out.trim(), command })
     })
   })
-}
-
-/** Kill a process subtree: `taskkill /T /F` on Windows (whole tree), SIGTERM
- * elsewhere. Best-effort — the child may already have exited. */
-function killProcessTree(pid: number): void {
-  if (process.platform === 'win32') {
-    try { spawn('taskkill', ['/pid', String(pid), '/T', '/F']) } catch { /* best-effort */ }
-  } else {
-    try { process.kill(pid, 'SIGTERM') } catch { /* best-effort */ }
-  }
 }
 
 /** Whether to stream pnpm's live output line-by-line (Debug). On with

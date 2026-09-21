@@ -1,9 +1,9 @@
 /** IPC for the machine-level home patch layer (`home:*`). */
 
 import { handle } from './handle.ts'
+import { ctxOf } from './ctxOf.ts'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { homePatchPath, readHomePatch, writeHomePatch } from '../core/home.ts'
-import { contextForEntry, dshEntryById } from '../core/appState.ts'
 import { setRowDisabled } from '../core/patch.ts'
 import { verifyDisabledState } from '../core/app-util.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
@@ -14,10 +14,10 @@ export function registerHomeIpc(): void {
   // Machine-level, shared by every profile; composes after each profile patch.
   handle('home:setDisabled', (_event, dshId: string, id: string, disabled: boolean): IpcResult<boolean> => {
     try {
-      const entry = dshEntryById(dshId)
-      if (entry === undefined) return fail(E.dshNotFound)
+      const ctx = ctxOf(dshId)
+      if (ctx === null) return fail(E.dshNotFound)
       if (rowIdInvalid(id)) return fail(E.nameInvalid)
-      const path = homePatchPath(contextForEntry(entry))
+      const path = homePatchPath(ctx)
       const current = existsSync(path) ? readFileSync(path, 'utf8') : '[]'
       writeFileSync(path, setRowDisabled(current, id, disabled))
       const after = readFileSync(path, 'utf8')
@@ -30,15 +30,15 @@ export function registerHomeIpc(): void {
 
   // The home patch layer's raw text (source mode).
   handle('home:readPatch', (_event, dshId: string): IpcResult<{ text: string; path: string }> => {
-    const entry = dshEntryById(dshId)
-    if (entry === undefined) return fail(E.dshNotFound)
-    return { ok: true, value: readHomePatch(contextForEntry(entry)) }
+    const ctx = ctxOf(dshId)
+    if (ctx === null) return fail(E.dshNotFound)
+    return { ok: true, value: readHomePatch(ctx) }
   })
 
   handle('home:writePatch', (_event, dshId: string, text: string): IpcResult<boolean> => {
-    const entry = dshEntryById(dshId)
-    if (entry === undefined) return fail(E.dshNotFound)
-    writeHomePatch(contextForEntry(entry), text)
+    const ctx = ctxOf(dshId)
+    if (ctx === null) return fail(E.dshNotFound)
+    writeHomePatch(ctx, text)
     return { ok: true, value: true }
   })
 }

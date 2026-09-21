@@ -6,8 +6,9 @@ import { app, dialog, shell } from 'electron'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import AdmZip from 'adm-zip'
-import { listProfiles, profileDir } from '../core/home.ts'
+import { listProfiles, profileDir, profilePatchPath } from '../core/home.ts'
 import { readManifest } from '../core/manifest.ts'
+import { readRawManifest } from '../core/manifest-file.ts'
 import {
   appendRowBlock, assertPatchDocValid, extractKeyValue, extractRowBlock, parsePatchRows, removeRow,
   setRowConfig, setRowDisabled, upsertRow,
@@ -26,6 +27,7 @@ import {
 import { contextForEntry, dshEntryById, pluginDir, type DshContext } from '../core/appState.ts'
 import { addDirToZip, dedentRowBlock, verifyDisabledState } from '../core/app-util.ts'
 import { fail, E } from '../core/errors.ts'
+import { ctxOf } from './ctxOf.ts'
 import { handle } from './handle.ts'
 import { isProfileRunning } from './run.ts'
 import { pathIdentifierInvalid, pathOutsideRoot, rowIdInvalid } from './validate.ts'
@@ -60,28 +62,16 @@ function assertInsertValid(items: string[]): void {
   }
 }
 
-/** Resolve an explicit dsh id to its context, or `null` when unknown. */
-function ctxOf(dshId: unknown): DshContext | null {
-  if (typeof dshId !== 'string') return null
-  const entry = dshEntryById(dshId)
-  return entry === undefined ? null : contextForEntry(entry)
-}
-
-/** Resolve a profile's `cordis.patch.yml` path (single source of the filename). */
-function patchPathOf(ctx: DshContext, name: string): string {
-  return join(profileDir(ctx, name), 'cordis.patch.yml')
-}
-
 /** Read a profile's patch layer, defaulting to an empty document. */
 function readUserPatch(ctx: DshContext, name: string): string {
-  const path = patchPathOf(ctx, name)
+  const path = profilePatchPath(ctx, name)
   return existsSync(path) ? readFileSync(path, 'utf8') : '[]'
 }
 
 const writeUserPatch = (ctx: DshContext, name: string, next: string): void => {
   // Guard against a bad assembly ever reaching disk.
   assertPatchDocValid(next)
-  const path = patchPathOf(ctx, name)
+  const path = profilePatchPath(ctx, name)
   writeFileSync(path, next)
   if (readFileSync(path, 'utf8') !== next) throw new Error('write verify failed')
 }
@@ -94,11 +84,7 @@ function loadProfileDetail(ctx: DshContext, name: string): ProfileDetail {
   let displayName = name
   let patchReload: ProfilePatchReload = 'live'
   try {
-    const raw = JSON.parse(readFileSync(join(profileDir(ctx, name), 'package.json'), 'utf8')) as {
-      name?: string
-      dependencies?: Record<string, string>
-      dsh?: { profile?: { patchReload?: ProfilePatchReload } }
-    }
+    const raw = readRawManifest(profileDir(ctx, name))
     dependencySpecs = raw.dependencies ?? {}
     if (typeof raw.name === 'string' && raw.name !== '') displayName = raw.name
     if (raw.dsh?.profile?.patchReload === 'startup') patchReload = 'startup'
@@ -106,7 +92,7 @@ function loadProfileDetail(ctx: DshContext, name: string): ProfileDetail {
     // A malformed manifest still yields a detail; the source editor surfaces it.
   }
   // The raw view keeps `''` (not `[]`) for a missing layer, unlike the write path.
-  const patchText = existsSync(patchPathOf(ctx, name)) ? readFileSync(patchPathOf(ctx, name), 'utf8') : ''
+  const patchText = existsSync(profilePatchPath(ctx, name)) ? readFileSync(profilePatchPath(ctx, name), 'utf8') : ''
   return {
     bundles, dependencies, dependencySpecs,
     bundleInfo: profileBundleInfo(ctx, name, bundles, dependencySpecs, pluginDir()),
@@ -449,7 +435,7 @@ export function registerProfileIpc(): void {
     const ctx = ctxOf(dshId)
     if (ctx === null) return fail(E.dshNotFound)
     if (invalidName(name)) return fail(E.nameInvalid)
-    if (!existsSync(patchPathOf(ctx, name))) return fail(E.patchNothingToRemove)
+    if (!existsSync(profilePatchPath(ctx, name))) return fail(E.patchNothingToRemove)
     writeUserPatch(ctx, name, removeRow(readUserPatch(ctx, name), id))
     return { ok: true, value: true }
   })
@@ -513,7 +499,7 @@ export function registerProfileIpc(): void {
     if (invalidName(name)) return fail(E.nameInvalid)
     const def = defaultConfigText(ctx, name, id)
     let current = ''
-    const patchPath = patchPathOf(ctx, name)
+    const patchPath = profilePatchPath(ctx, name)
     if (existsSync(patchPath)) {
       const v = extractKeyValue(readFileSync(patchPath, 'utf8'), id, 'config')
       if (v !== undefined) current = v
@@ -527,7 +513,7 @@ export function registerProfileIpc(): void {
     const ctx = ctxOf(dshId)
     if (ctx === null) return fail(E.dshNotFound)
     if (invalidName(name)) return fail(E.nameInvalid)
-    const path = patchPathOf(ctx, name)
+    const path = profilePatchPath(ctx, name)
     if (!existsSync(path)) writeFileSync(path, '[]\n')
     const error = await shell.openPath(path)
     return error === '' ? { ok: true, value: true } : fail(E.shellOpenPath, { detail: error })

@@ -5,6 +5,7 @@
  * closing/updating status. */
 
 import { app, BrowserWindow, dialog, shell } from 'electron'
+import { ctxOf } from './ctxOf.ts'
 import { handle } from './handle.ts'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
@@ -21,6 +22,7 @@ import { fail, failFromError, E } from '../core/errors.ts'
 import { child, logger } from '../core/logger.ts'
 import { effectiveArgs, sanitizeLaunchOptions } from '../core/launch-options.ts'
 import { hasRun, nextRunId } from '../core/run-registry.ts'
+import { killProcessTree } from '../core/process-kill.ts'
 import { pathIdentifierInvalid } from './validate.ts'
 import type {
   InsertConflict, InsertConflictLayer, IpcResult, LaunchOptions, RunDefaults, RunEvent, RunInfo, RunMode,
@@ -122,22 +124,13 @@ function resolveNodeExe(): { exe: string; bundled: boolean } {
   return env.prefer === 'system' ? { exe: 'node', bundled: false } : { exe: process.execPath, bundled: true }
 }
 
-/** Kill the child (and, on Windows, its whole tree). */
-function killChild(childProcess: ChildProcess): void {
-  if (process.platform === 'win32' && childProcess.pid !== undefined) {
-    spawn('taskkill', ['/pid', String(childProcess.pid), '/T', '/F'])
-  } else {
-    childProcess.kill()
-  }
-}
-
 /** Stop one run by id. Returns false when the id is unknown (already exited). */
 export function stopRun(id: string): boolean {
   const run = runs.get(id)
   if (run === undefined) return false
   logger.info(`run stopped: ${run.profile}`)
   run.stopping = true
-  killChild(run.child)
+  killProcessTree(run.child)
   return true
 }
 
@@ -146,7 +139,7 @@ export function stopAllRuns(): void {
   for (const run of runs.values()) {
     logger.info(`run stopped: ${run.profile}`)
     run.stopping = true
-    killChild(run.child)
+    killProcessTree(run.child)
   }
 }
 
@@ -197,7 +190,7 @@ export function registerRunIpc(): void {
     const entry = dshEntryById(dshId)
     if (entry === undefined) return fail(E.dshNotFound)
     if (profile.trim() === '' || pathIdentifierInvalid(profile)) return fail(E.nameInvalid)
-    if (hasRun([...runs.values()], entry.id, profile)) return fail(E.runAlreadyRunning, { profile })
+    if (isProfileRunning(entry.id, profile)) return fail(E.runAlreadyRunning, { profile })
     if (!existsExecutable(entry.execPath)) return fail(E.runExecMissing, { path: entry.execPath })
     try {
       const ctx = contextForEntry(entry)
@@ -375,21 +368,21 @@ export function registerRunIpc(): void {
 
   // Saved default mode + launch parameters for a profile of a given dsh.
   handle('run:getDefaults', (_event, dshId: string, profile: string): IpcResult<RunDefaults> => {
-    const entry = dshEntryById(dshId)
-    if (entry === undefined) return fail(E.dshNotFound)
+    const ctx = ctxOf(dshId)
+    if (ctx === null) return fail(E.dshNotFound)
     if (profile.trim() === '' || pathIdentifierInvalid(profile)) return fail(E.nameInvalid)
-    const pid = profileId(contextForEntry(entry), profile)
+    const pid = profileId(ctx, profile)
     return { ok: true, value: { mode: readRunMode(pid), options: readLaunchOptions(pid) } }
   })
 
   // Validate + persist a profile's default mode + launch parameters (also
   // happens on start; this lets the UI save without launching).
   handle('run:setDefaults', (_event, dshId: string, profile: string, defaults: RunDefaults): IpcResult<boolean> => {
-    const entry = dshEntryById(dshId)
-    if (entry === undefined) return fail(E.dshNotFound)
+    const ctx = ctxOf(dshId)
+    if (ctx === null) return fail(E.dshNotFound)
     if (profile.trim() === '' || pathIdentifierInvalid(profile)) return fail(E.nameInvalid)
     try {
-      const pid = profileId(contextForEntry(entry), profile)
+      const pid = profileId(ctx, profile)
       const sanitized = sanitizeLaunchOptions(defaults.options)
       writeLaunchOptions(pid, {
         args: sanitized.args,

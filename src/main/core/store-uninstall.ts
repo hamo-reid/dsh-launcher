@@ -9,7 +9,7 @@ import { runPnpm } from './pnpm.ts'
 import { logger } from './logger.ts'
 import { pluginVersionDir, versionsRoot, type ProfileManifestShape } from './store-layout.ts'
 import { listBundleSubdepNames } from './bundle-subdeps.ts'
-import type { DshScope } from './appState.ts'
+import { profilesRoot, type DshScope } from './appState.ts'
 import type { PluginUsagePoint } from '../../shared/types.ts'
 
 /**
@@ -91,7 +91,7 @@ function pruneEmptyScopes(from: string): void {
 export async function removePluginFromProfiles(dshes: DshScope[], pkg: string): Promise<PluginUsagePoint[]> {
   const affected: PluginUsagePoint[] = []
   for (const dsh of dshes) {
-    const dir = join(dsh.home, 'profiles')
+    const dir = profilesRoot(dsh.home)
     if (!existsSync(dir)) continue
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue

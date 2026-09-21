@@ -7,7 +7,8 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { resolveInstallAnchor } from './dsh.ts'
 import { profilesRootFor, type DshContext } from './appState.ts'
-import { assertPatchDocValid } from './patch.ts'
+import { assertPatchDocValid, PATCH_FILE_NAME } from './patch.ts'
+import { MANIFEST_FILE_NAME, readManifestFile } from './manifest-file.ts'
 import type { DshProfileInfo } from '../../shared/types.ts'
 
 /** The dsh's home directory. */
@@ -30,7 +31,12 @@ export function installAnchor(ctx: DshContext): string | undefined {
  * every profile and outranks each profile's own layer (dsh composes it after
  * the profile patch). */
 export function homePatchPath(ctx: DshContext): string {
-  return join(ctx.home, 'cordis.patch.yml')
+  return join(ctx.home, PATCH_FILE_NAME)
+}
+
+/** One profile's own patch layer: `<profiles>/<name>/cordis.patch.yml`. */
+export function profilePatchPath(ctx: DshContext, name: string): string {
+  return join(profileDir(ctx, name), PATCH_FILE_NAME)
 }
 
 /** Read the machine-level home patch layer. `text` is `''` when it does not exist. */
@@ -70,15 +76,12 @@ export function listProfileInfos(ctx: DshContext): DshProfileInfo[] {
   const infos: DshProfileInfo[] = []
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     if (!e.isDirectory()) continue
-    const manifestPath = join(dir, e.name, 'package.json')
+    const manifestPath = join(dir, e.name, MANIFEST_FILE_NAME)
     if (!existsSync(manifestPath)) continue
     let bundles = 0
     let dependencies = 0
     try {
-      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
-        dsh?: { profile?: { bundles?: string[] } }
-        dependencies?: Record<string, string>
-      }
+      const manifest = readManifestFile(manifestPath)
       bundles = manifest.dsh?.profile?.bundles?.length ?? 0
       dependencies = Object.keys(manifest.dependencies ?? {}).length
     } catch {

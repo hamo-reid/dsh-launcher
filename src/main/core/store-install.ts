@@ -7,7 +7,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import AdmZip from 'adm-zip'
-import { runPnpm, type PnpmResult } from './pnpm.ts'
+import { PNPM_WORKSPACE_YAML, runPnpm, type PnpmResult } from './pnpm.ts'
 import { logger } from './logger.ts'
 import {
   archivedPluginNames, initStore, latestStoreVersion, pluginVersionDir, readVersion, storeVersions,
@@ -18,20 +18,6 @@ import { pathIdentifierInvalid } from './name-guard.ts'
 import { migrateLegacyStore } from './store-migration.ts'
 import { isLegacyPkg } from './store-uninstall.ts'
 import { listBundleSubdepNames } from './bundle-subdeps.ts'
-
-/**
- * pnpm settings an archived aggregate version needs to expose its sub-packages
- * at the top-level node_modules. Archives default to pnpm's `isolated` linker,
- * which stows every dependency behind `.pnpm/` and leaves only the top package
- * visible — so an aggregate bundle's sub-bundles are invisible to a profile link.
- * Hoisting matches dsh's own profile workspace, making `node_modules/<sub>` real.
- */
-const ARCHIVE_PNPM_WORKSPACE = `packages:
-  - .
-
-nodeLinker: hoisted
-autoInstallPeers: false
-`
 
 /** Whether an installed package's manifest declares a `dsh.bundle` patch. */
 function declaresBundlePatch(pkgDir: string): boolean {
@@ -49,7 +35,7 @@ function declaresBundlePatch(pkgDir: string): boolean {
 function writeHoistedWorkspace(verDir: string): boolean {
   const p = join(verDir, 'pnpm-workspace.yaml')
   if (existsSync(p)) return false
-  writeFileSync(p, ARCHIVE_PNPM_WORKSPACE)
+  writeFileSync(p, PNPM_WORKSPACE_YAML)
   return true
 }
 

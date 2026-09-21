@@ -22,6 +22,7 @@ import { fetchPackageVersions } from '../core/npm.ts'
 import { majorOfVersion } from '../core/version.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
 import { logger } from '../core/logger.ts'
+import { ctxOf } from './ctxOf.ts'
 import { handle } from './handle.ts'
 import type { DownloadStep, DshInstallStep, DshProfileInfo, DshUpdateInfo, IpcResult, PackageVersionInfo } from '../../shared/types.ts'
 
@@ -150,14 +151,14 @@ export function registerDshIpc(): void {
   // Profile info under a SPECIFIC dsh (for the Run page's launch picker/launcher),
   // independent of any global selection.
   handle('dsh:profiles', (_event, id: string): IpcResult<DshProfileInfo[]> => {
-    const entry = dshEntryById(id)
-    if (entry === undefined) return fail(E.dshNotFound)
-    return { ok: true, value: listProfileInfos(contextForEntry(entry)) }
+    const ctx = ctxOf(id)
+    if (ctx === null) return fail(E.dshNotFound)
+    return { ok: true, value: listProfileInfos(ctx) }
   })
 
   // Whether a managed dsh has a newer release available. `value: null` = up to date.
   handle('dsh:checkUpdate', async (_event, id: string): Promise<IpcResult<DshUpdateInfo | null>> => {
-    const entry = readDshState().dshes.find(d => d.id === id)
+    const entry = dshEntryById(id)
     if (entry === undefined) return fail(E.dshNotFound)
     return { ok: true, value: await checkForDshUpdate(entry.version) }
   })

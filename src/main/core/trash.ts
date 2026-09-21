@@ -9,7 +9,7 @@
 import { existsSync, readdirSync, readFileSync, rmSync, renameSync, statSync, utimesSync } from 'node:fs'
 import { join } from 'node:path'
 import { profilesDir } from './home.ts'
-import { parsePatchRows } from './patch.ts'
+import { PATCH_FILE_NAME, parsePatchRows } from './patch.ts'
 import { logger } from './logger.ts'
 import type { DshContext } from './appState.ts'
 import type { TrashItem } from '../../shared/types.ts'
@@ -59,7 +59,7 @@ export function listTrashItems(ctx: DshContext): TrashItem[] {
       continue
     }
     let patchRows = 0
-    const patchPath = join(full, 'cordis.patch.yml')
+    const patchPath = join(full, PATCH_FILE_NAME)
     if (existsSync(patchPath)) {
       try { patchRows = parsePatchRows(readFileSync(patchPath, 'utf8')).length } catch { /* ignore */ }
     }

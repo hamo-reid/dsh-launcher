@@ -24,6 +24,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { homedir } from 'node:os'
 import { mcpSecretsEnv } from './mcp-secrets.ts'
+import { killProcessTree } from './process-kill.ts'
 import { child } from './logger.ts'
 import type { McpKV, McpProbeResult, McpProbeStage, McpServerInput } from '../../shared/types.ts'
 
@@ -63,18 +64,9 @@ export interface McpProbeDeps {
  * Windows the child is `cmd.exe` and the real server (`npx` → `node`) is its
  * grandchild, so killing only the child leaves an orphan holding the port.
  */
-function killProbeTree(proc: ChildProcess): void {
-  if (proc.pid === undefined) return
-  if (process.platform === 'win32') {
-    try { spawn('taskkill', ['/pid', String(proc.pid), '/T', '/F']) } catch { /* already gone */ }
-  } else {
-    try { process.kill(proc.pid, 'SIGTERM') } catch { /* already gone */ }
-  }
-}
-
 const realDeps: McpProbeDeps = {
   spawn,
-  kill: killProbeTree,
+  kill: killProcessTree,
   fetch: (input, init) => globalThis.fetch(input, init),
 }
 

@@ -1,19 +1,15 @@
-/** Read a profile's manifest (`package.json`): bundle layer + dependencies. */
+/** Read a profile's manifest (`package.json`): bundle layer + dependencies.
+ *
+ * The filename, parsing and serialization live in `manifest-file.ts` (a leaf, so
+ * `home.ts` can share them); this module is the ctx-aware projection on top. */
 
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { profileDir } from './home.ts'
+import { readRawManifest } from './manifest-file.ts'
 import type { DshContext } from './appState.ts'
-
-interface ManifestShape {
-  dependencies?: Record<string, string>
-  dsh?: { profile?: { bundles?: string[] } }
-  name?: string
-}
 
 /** Read the manifest's ordered bundles and dependency names. */
 export function readManifest(ctx: DshContext, name: string): { bundles: string[]; dependencies: string[]; displayName: string } {
-  const manifest = JSON.parse(readFileSync(join(profileDir(ctx, name), 'package.json'), 'utf8')) as ManifestShape
+  const manifest = readRawManifest(profileDir(ctx, name))
   return {
     bundles: manifest.dsh?.profile?.bundles ?? [],
     dependencies: Object.keys(manifest.dependencies ?? {}),

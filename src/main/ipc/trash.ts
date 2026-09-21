@@ -1,20 +1,14 @@
 /** IPC for the profile trash (`trash:*`): list, restore, delete, empty. Every
  * handler takes an explicit `dshId` — there is no global active dsh. */
 
+import { ctxOf } from './ctxOf.ts'
 import { handle } from './handle.ts'
 import { baseTrashName, deleteTrashItem, emptyTrash, listTrashItems, restoreTrashItem, trashDir } from '../core/trash.ts'
-import { contextForEntry, dshEntryById, type DshContext } from '../core/appState.ts'
 import { clearLaunchConfig, readProfileId } from '../core/launch-config.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
 import { pathIdentifierInvalid } from './validate.ts'
 import { join } from 'node:path'
 import type { IpcResult, TrashItem } from '../../shared/types.ts'
-
-function ctxOf(dshId: unknown): DshContext | null {
-  if (typeof dshId !== 'string') return null
-  const entry = dshEntryById(dshId)
-  return entry === undefined ? null : contextForEntry(entry)
-}
 
 export function registerTrashIpc(): void {
   handle('trash:list', (_event, dshId: string): IpcResult<TrashItem[]> => {

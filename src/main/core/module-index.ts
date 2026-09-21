@@ -32,9 +32,10 @@ import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, statSy
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { listComboPlugins } from './combo.ts'
-import { dshHome, installAnchor, profileDir, profilesDir } from './home.ts'
+import { dshHome, homePatchPath, installAnchor, profileDir, profilePatchPath, profilesDir } from './home.ts'
 import { parseNamedRows } from './patch.ts'
 import { resolveBundleSubdepDir } from './bundle-subdeps.ts'
+import { createKeyedCache } from './keyed-cache.ts'
 import type { DshContext } from './appState.ts'
 import type { DevResolveRoot, DevResolveState, ModuleIndexInfo } from '../../shared/types.ts'
 
@@ -247,9 +248,9 @@ export function collectIndexRows(
     for (const row of listComboPlugins(ctx, profile)) {
       rows.push({ id: row.id, name: row.name, source: row.bundle })
     }
-    rows.push(...rowsOfFile(join(profileDir(ctx, profile), 'cordis.patch.yml'), 'profile'))
+    rows.push(...rowsOfFile(profilePatchPath(ctx, profile), 'profile'))
   }
-  rows.push(...rowsOfFile(join(dshHome(ctx), 'cordis.patch.yml'), 'home'))
+  rows.push(...rowsOfFile(homePatchPath(ctx), 'home'))
   for (const row of devPatch.rows) rows.push({ id: row.id, name: row.name ?? '', source: devPatch.source })
   return rows
 }
@@ -267,16 +268,15 @@ const CACHE_TTL_MS = 5 * 60_000
 /** Distinct (ctx × profile × dev-patch) signatures kept before trimming. */
 const MAX_ENTRIES = 8
 
-interface CachedIndex { at: number; info: ModuleIndexInfo }
-const indexCache = new Map<string, CachedIndex>()
+const indexCache = createKeyedCache<ModuleIndexInfo>({ max: MAX_ENTRIES, ttlMs: CACHE_TTL_MS })
 
 /** The signature of every layer file a build reads (an absent file is stamped as
  * such, so it appearing later is itself a change). */
 function indexKey(ctx: DshContext, profile: string | undefined, devPatchFile: string | undefined): string {
   return [
     devPatchFile,
-    profile !== undefined && profile !== '' ? join(profileDir(ctx, profile), 'cordis.patch.yml') : undefined,
-    join(dshHome(ctx), 'cordis.patch.yml'),
+    profile !== undefined && profile !== '' ? profilePatchPath(ctx, profile) : undefined,
+    homePatchPath(ctx),
   ].map((file) => {
     if (file === undefined) return '-'
     try {
@@ -300,23 +300,18 @@ export function moduleIndexFor(
   refresh = false,
 ): ModuleIndexInfo {
   const key = indexKey(ctx, profile, patchFile)
-  const hit = indexCache.get(key)
-  if (!refresh && hit !== undefined && Date.now() - hit.at < CACHE_TTL_MS) return hit.info
-  const info = buildModuleIndex(collectIndexRows(ctx, profile, devPatch), profile)
-  indexCache.set(key, { at: Date.now(), info })
-  while (indexCache.size > MAX_ENTRIES) {
-    const oldest = indexCache.keys().next().value
-    if (oldest === undefined) break
-    indexCache.delete(oldest)
-  }
-  return info
+  return indexCache.get(
+    key,
+    () => buildModuleIndex(collectIndexRows(ctx, profile, devPatch), profile),
+    { refresh },
+  )
 }
 
 /** Drop every cached index. Called whenever something changes that resolution
  * depends on but the signature cannot see — a dev plugin's shim junctions being
  * written or removed, the registry itself, or a profile link. */
 export function forgetModuleIndex(): void {
-  indexCache.clear()
+  indexCache.forget()
 }
 
 /** Look up the package bound to a row id (exact id, then the package's own name). */

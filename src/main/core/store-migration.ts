@@ -8,7 +8,7 @@
 import { cpSync, existsSync, mkdirSync, realpathSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, normalize } from 'node:path'
 import { runPnpm } from './pnpm.ts'
-import { dshScopes } from './appState.ts'
+import { dshScopes, profilesRoot } from './appState.ts'
 import { logger } from './logger.ts'
 import {
   initStore, pluginVersionDir, readVersion, storeVersions, type ProfileManifestShape, type StoreManifest,
@@ -134,7 +134,7 @@ async function rewriteProfileLinks(storeDir: string, moves: { old: string; next:
   }
   const affected: string[] = []
   for (const dsh of scopes) {
-    const base = join(dsh.home, 'profiles')
+    const base = profilesRoot(dsh.home)
     if (!existsSync(base)) continue
     for (const entry of readdirSync(base, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue

@@ -14,6 +14,7 @@ import { buildInstalledOverview } from './store-overview.ts'
 import { readPluginSourceSpec } from './store-sources.ts'
 import { compareVersionsLoose } from './version.ts'
 import { githubAuthHeaders, noteGithubResponse, resetGithubRateLimit } from './github-auth.ts'
+import { createKeyedCache } from './keyed-cache.ts'
 import { logger } from './logger.ts'
 import type { DshScope } from './appState.ts'
 import type { InstalledOverviewRow, PluginOrigin, PluginUpdateInfo } from '../../shared/types.ts'
@@ -95,7 +96,9 @@ async function latestGithubTag(repo: string): Promise<string | undefined> {
   }
 }
 
-let cache: { at: number; key: string; list: PluginUpdateInfo[] } | null = null
+/** One entry: the key covers the whole store's plugin set, so a changed signature
+ * replaces the previous result rather than accumulating beside it. */
+const updateCache = createKeyedCache<PluginUpdateInfo[]>({ max: 1, ttlMs: CACHE_TTL_MS })
 
 /** A cache key capturing the exact inputs a result depends on. */
 function cacheKey(storeDir: string, rows: InstalledOverviewRow[]): string {
@@ -117,9 +120,8 @@ export async function checkPluginUpdates(
   // official/local-link/external rows are not.
   const rows = buildInstalledOverview(dshes, storeDir).filter(r => r.inStore === true)
   const key = cacheKey(storeDir, rows)
-  if (opts.refresh !== true && cache !== null && cache.key === key && Date.now() - cache.at < CACHE_TTL_MS) {
-    return cache.list
-  }
+  const cached = opts.refresh === true ? undefined : updateCache.peek(key)
+  if (cached !== undefined) return cached
 
   // A fresh network check starts with a clean rate-limit flag.
   resetGithubRateLimit()
@@ -145,7 +147,7 @@ export async function checkPluginUpdates(
   }
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, rows.length) }, worker))
 
-  cache = { at: Date.now(), key, list }
+  updateCache.set(key, list)
   const updatable = list.filter(x => x.updateAvailable).length
   if (updatable > 0) logger.info(`plugin updates: ${updatable}/${list.length} available`)
   return list

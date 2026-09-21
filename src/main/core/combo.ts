@@ -5,9 +5,9 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
-import { dshHome, homePatchPath, installAnchor, profileDir, profilesDir } from './home.ts'
+import { dshHome, homePatchPath, installAnchor, profileDir, profilePatchPath, profilesDir } from './home.ts'
 import { readManifest } from './manifest.ts'
-import { assertPatchDocValid, collectInsertIds, extractKeyValue, parseClassifiedRows, parseNamedRows, parsePatchRows } from './patch.ts'
+import { assertPatchDocValid, collectInsertIds, extractKeyValue, PATCH_FILE_NAME, parseClassifiedRows, parseNamedRows, parsePatchRows } from './patch.ts'
 import { diagnoseMcpServers, readMcpServers } from './mcp.ts'
 import { child } from './logger.ts'
 import type { DshContext } from './appState.ts'
@@ -46,7 +46,7 @@ function bundlePatchRel(bundleDir: string): string {
   } catch {
     // missing/invalid manifest — fall through to the default filename
   }
-  return 'cordis.patch.yml'
+  return PATCH_FILE_NAME
 }
 
 /** Locate a bundle package's patch file: its declared `dsh.bundle.patch` (else
@@ -64,7 +64,7 @@ export function resolveBundlePatch(ctx: DshContext, bundle: string, profile: str
 
 /** Read the profile's user patch rows (webapp on-disk or `[]`). */
 function readUserPatch(ctx: DshContext, profile: string): string {
-  const path = join(profileDir(ctx, profile), 'cordis.patch.yml')
+  const path = profilePatchPath(ctx, profile)
   return existsSync(path) ? readFileSync(path, 'utf8') : ''
 }
 
@@ -177,7 +177,7 @@ export function validateComposition(
 ): ProfileValidation {
   const result: ProfileValidation = { ok: true, conflicts: [], missingBundles: [], unclaimedBundles: [] }
 
-  const patchPath = join(profileDir(ctx, profile), 'cordis.patch.yml')
+  const patchPath = profilePatchPath(ctx, profile)
   try {
     assertPatchDocValid(existsSync(patchPath) ? readFileSync(patchPath, 'utf8') : '[]')
   } catch (error) {

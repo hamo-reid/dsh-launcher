@@ -57,11 +57,19 @@ export function dshEntryById(id: string | undefined): DshEntry | undefined {
   return readDshState().dshes.find(d => d.id === id)
 }
 
+/** The profiles directory under a dsh home: ALWAYS `<home>/profiles`, matching
+ * the host's `$DSH_HOME/profiles`. This is the one definition of the segment — a
+ * `DshEntry`, a `DshContext` and a `DshScope` all carry a `home`, so every caller
+ * resolves it through here instead of spelling the path out. */
+export function profilesRoot(home: string): string {
+  return join(home, 'profiles')
+}
+
 /** The profiles directory for a dsh: ALWAYS `<home>/profiles`, matching the
  * host's `$DSH_HOME/profiles`. Changing it means changing the home (which is the
  * `DSH_HOME` a direct `dsh` launch uses too), never a second path. */
 export function effectiveProfileDir(entry: DshEntry): string {
-  return join(entry.home, 'profiles')
+  return profilesRoot(entry.home)
 }
 
 /** The dsh context a profile/data operation targets. Carries just the fields
@@ -82,7 +90,7 @@ export function contextForEntry(entry: DshEntry): DshContext {
 
 /** The profiles root a context operates on: always `<home>/profiles`. */
 export function profilesRootFor(ctx: DshContext): string {
-  return join(ctx.home, 'profiles')
+  return profilesRoot(ctx.home)
 }
 
 /** A legacy per-dsh profiles-dir override still persisted in settings. It is

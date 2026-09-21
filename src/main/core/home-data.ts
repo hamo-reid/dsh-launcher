@@ -23,6 +23,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import AdmZip from 'adm-zip'
 import { parseVersion } from './version.ts'
+import { PATCH_FILE_NAME } from './patch.ts'
 import { logger } from './logger.ts'
 import type { DshContext } from './appState.ts'
 import type { DshDataManifest, DshDataImportResult } from '../../shared/types.ts'
@@ -38,12 +39,12 @@ export const MIGRATABLE_TOP_LEVEL: string[] = [
   'AGENTS.md',
   'skills',
   '.agent-presets',
-  'cordis.patch.yml',
+  PATCH_FILE_NAME,
 ]
 
 /** Inside one profile directory, the files that carry user config and migrate.
  * `node_modules` and the boot-rewritten `cordis.yml` are deliberately absent. */
-const PROFILE_MIGRATABLE = ['package.json', 'cordis.patch.yml']
+const PROFILE_MIGRATABLE = ['package.json', PATCH_FILE_NAME]
 
 /** Top-level home entries never migrated (rebuilt / derived). */
 const NON_MIGRATABLE_TOP_LEVEL = new Set(['node_modules'])

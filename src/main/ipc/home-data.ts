@@ -5,7 +5,7 @@
 import { dialog } from 'electron'
 import { handle } from './handle.ts'
 import AdmZip from 'adm-zip'
-import { contextForEntry, readDshState, type DshContext } from '../core/appState.ts'
+import { contextForEntry, dshEntryById, type DshContext } from '../core/appState.ts'
 import { exportDshData, importDshData, mirrorDshData } from '../core/home-data.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
 import type { DshDataImportResult, DshDataManifest, DshEntry, IpcResult } from '../../shared/types.ts'
@@ -18,7 +18,7 @@ let inspectedImportFile: string | null = null
 
 /** The registered entry + its context for `id`, or `undefined`. */
 function entryFor(id: string): { entry: DshEntry; ctx: DshContext } | undefined {
-  const entry = readDshState().dshes.find(d => d.id === id)
+  const entry = dshEntryById(id)
   if (entry === undefined) return undefined
   return { entry, ctx: contextForEntry(entry) }
 }

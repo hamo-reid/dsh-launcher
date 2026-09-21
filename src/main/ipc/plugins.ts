@@ -20,7 +20,7 @@ import {
 } from '../core/pluginDownloads.ts'
 import { checkPluginUpdates } from '../core/plugin-updates.ts'
 import { installSpecFor, marketSourceState, resolveMarket } from '../core/market.ts'
-import { contextForEntry, dshEntryById, dshScopes, pluginDir, profilesRootFor, type DshContext } from '../core/appState.ts'
+import { contextForEntry, dshEntryById, dshScopes, pluginDir, profilesRoot, profilesRootFor, type DshContext } from '../core/appState.ts'
 import { isProfileRunning, listRuns } from './run.ts'
 import { patchSettings } from '../core/settings.ts'
 import { inlineRelativeImages } from '../core/app-util.ts'
@@ -28,6 +28,7 @@ import { fetchPackageVersions, npmSearch } from '../core/npm.ts'
 import { attachPluginSizes } from '../core/store-overview.ts'
 import { fail, failFromError, E } from '../core/errors.ts'
 import { pathIdentifierInvalid, versionInvalid } from './validate.ts'
+import { ctxOf } from './ctxOf.ts'
 import { handle } from './handle.ts'
 import type { ComboPlugin, DevBuildTarget, DevDiagnoseOptions, DevDiagnosis, DevLinkMode, DevPlugin, DevRunResult, DevScriptOptions, DownloadSessionInfo, InstalledOverviewRow, IpcResult, NpmSearchHit, PackageVersionInfo, PluginApplyResult, PluginApplyTarget, PluginCleanupResult, PluginMigrationResult, PluginUpdateInfo, PluginUpdateResult, PluginUsagePoint } from '../../shared/types.ts'
 
@@ -63,13 +64,6 @@ export function setPluginStoreDir(dir: string): IpcResult<boolean> {
   } catch (error) {
     return fail(E.storeUnusable, { detail: String(error) })
   }
-}
-
-/** Resolve an explicit dsh id to its context, or `null` when unknown. */
-function ctxOf(dshId: unknown): DshContext | null {
-  if (typeof dshId !== 'string') return null
-  const entry = dshEntryById(dshId)
-  return entry === undefined ? null : contextForEntry(entry)
 }
 
 /** Remove a plugin's UNUSED archived versions — keep the newest, plus any version
@@ -415,7 +409,7 @@ export function registerPluginsIpc(): void {
       for (const u of usage) {
         const dsh = dshes.find(d => d.name === u.dsh)
         if (dsh === undefined) continue
-        const res = await installIntoProfile(join(dsh.home, 'profiles'), u.profile, pkgName, store)
+        const res = await installIntoProfile(profilesRoot(dsh.home), u.profile, pkgName, store)
         if (res.ok) installed += 1
       }
       const detached = await removePluginFromProfiles(dshes, name)

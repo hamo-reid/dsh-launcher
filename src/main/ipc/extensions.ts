@@ -20,9 +20,10 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { app, dialog } from 'electron'
 import { join } from 'node:path'
+import { ctxOf } from './ctxOf.ts'
 import { handle } from './handle.ts'
-import { contextForEntry, dshEntryById, type DshContext } from '../core/appState.ts'
-import { homePatchPath, listProfiles, profileDir, readHomePatch } from '../core/home.ts'
+import type { DshContext } from '../core/appState.ts'
+import { homePatchPath, listProfiles, profilePatchPath, readHomePatch } from '../core/home.ts'
 import { listMcpServers } from '../core/combo.ts'
 import { diagnoseMcpServers, idTakenElsewhere } from '../core/mcp.ts'
 import { addMcpServer, findMcpServer, mcpRowIds, readMcpServers, removeMcpServer, SERVER_NAME_RE, updateMcpServer } from '../core/mcp.ts'
@@ -53,16 +54,9 @@ import type {
 /** A layer the extensions surface may write. `bundle` is read-only (shipped). */
 type McpWriteLayer = 'profile' | 'home'
 
-/** Resolve an explicit dsh id to its context, or `null` when unknown. */
-function ctxOf(dshId: unknown): DshContext | null {
-  if (typeof dshId !== 'string') return null
-  const entry = dshEntryById(dshId)
-  return entry === undefined ? null : contextForEntry(entry)
-}
-
 /** The patch file backing a writable layer. */
 function layerPath(ctx: DshContext, profile: string, layer: McpWriteLayer): string {
-  return layer === 'home' ? homePatchPath(ctx) : join(profileDir(ctx, profile), 'cordis.patch.yml')
+  return layer === 'home' ? homePatchPath(ctx) : profilePatchPath(ctx, profile)
 }
 
 /** Read a patch layer, defaulting to an empty document. */

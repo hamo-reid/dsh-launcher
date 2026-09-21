@@ -13,44 +13,26 @@
  * `exportSettings` strips the whole map, so a backup cannot carry a secret.
  */
 import { loadSettings, updateSettings } from './settings.ts'
+import { createSecretCodec, type SecretCipher } from './secret-at-rest.ts'
 import { logger } from './logger.ts'
-import type { TokenCipher } from './github-auth.ts'
 
 /** Encrypt/decrypt a secret at rest; injected by the main process (safeStorage). */
-export type McpSecretCipher = TokenCipher
-
-/** Prefix marking a secret stored without OS encryption (no keyring available). */
-const PLAIN_PREFIX = 'plain:'
+export type McpSecretCipher = SecretCipher
 
 /** An env var name must be a valid `[A-Za-z_][A-Za-z0-9_]*` identifier. */
 const NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
 
-let cipher: McpSecretCipher | null = null
+/** The secrets' at-rest envelope. */
+const codec = createSecretCodec('mcp secrets: saved value for a name')
 
 /** Inject the at-rest cipher (main process wires safeStorage; tests inject a fake). */
 export function setMcpSecretCipher(next: McpSecretCipher | null): void {
-  cipher = next
+  codec.setCipher(next)
 }
 
 /** The stored map, safely defaulted. */
 function storedMap(): Record<string, string> {
   return loadSettings().mcpSecrets ?? {}
-}
-
-function decode(stored: string): string | undefined {
-  if (stored.startsWith(PLAIN_PREFIX)) return stored.slice(PLAIN_PREFIX.length)
-  if (cipher === null || !cipher.available()) return undefined
-  try {
-    return cipher.decrypt(stored)
-  } catch (error) {
-    logger.warn(`mcp secrets: saved value for a name could not be decrypted (${error instanceof Error ? error.message : String(error)})`)
-    return undefined
-  }
-}
-
-function encode(plain: string): string {
-  if (cipher !== null && cipher.available()) return cipher.encrypt(plain)
-  return `${PLAIN_PREFIX}${plain}`
 }
 
 /** Names of the stored secrets, sorted. Values never cross this boundary. */
@@ -68,7 +50,7 @@ export function hasMcpSecret(name: string): boolean {
 export function getMcpSecret(name: string): string | undefined {
   const stored = storedMap()[name]
   if (stored === undefined || stored === '') return undefined
-  return decode(stored)
+  return codec.decode(stored)
 }
 
 /** Save (or clear, with `''`/`null`) one launch secret. Only the NAME is ever
@@ -81,7 +63,7 @@ export function setMcpSecret(name: string, value: string | null): void {
   updateSettings((draft) => {
     const next = { ...(draft.mcpSecrets ?? {}) }
     if (plain === '') delete next[key]
-    else next[key] = encode(plain)
+    else next[key] = codec.encode(plain)
     if (Object.keys(next).length === 0) delete draft.mcpSecrets
     else draft.mcpSecrets = next
   })

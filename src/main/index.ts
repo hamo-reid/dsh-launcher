@@ -359,19 +359,16 @@ app.whenReady().then(async () => {
 
   // Open the SQLite settings database before any IPC touches it.
   await openDatabase(join(app.getPath('userData'), 'app.sqlite'))
-  // Encrypt the GitHub token at rest with the OS keychain (DPAPI on Windows),
-  // then resolve the effective token (saved setting → GH_TOKEN/GITHUB_TOKEN env).
-  setTokenCipher({
-    available: () => safeStorage.isEncryptionAvailable(),
-    encrypt: plain => safeStorage.encryptString(plain).toString('base64'),
-    decrypt: cipherText => safeStorage.decryptString(Buffer.from(cipherText, 'base64')),
-  })
-  // The MCP launch secrets share the same at-rest cipher.
-  setMcpSecretCipher({
-    available: () => safeStorage.isEncryptionAvailable(),
-    encrypt: plain => safeStorage.encryptString(plain).toString('base64'),
-    decrypt: cipherText => safeStorage.decryptString(Buffer.from(cipherText, 'base64')),
-  })
+  // Encrypt secrets at rest with the OS keychain (DPAPI on Windows). The GitHub
+  // token and the MCP launch secrets share one cipher; `initGithubAuth` further
+  // down then resolves the effective token (saved setting → GH_TOKEN env).
+  const secretCipher = {
+    available: (): boolean => safeStorage.isEncryptionAvailable(),
+    encrypt: (plain: string): string => safeStorage.encryptString(plain).toString('base64'),
+    decrypt: (cipherText: string): string => safeStorage.decryptString(Buffer.from(cipherText, 'base64')),
+  }
+  setTokenCipher(secretCipher)
+  setMcpSecretCipher(secretCipher)
   // Skill deletion moves the entry to the OS recycle bin (reversible there).
   setSkillTrash(path => shell.trashItem(path))
   // The launcher-global skill library lives under userData; deletions from it

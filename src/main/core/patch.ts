@@ -9,6 +9,14 @@
 import type { ClassifiedRow, PluginRow, RowCreateInput } from '../../shared/types.ts'
 import { loadStructureOnly, type StructureParse } from './yaml.ts'
 
+/** The patch layer's filename. The same in the home and profile layers, and the
+ * name a bundle's `dsh.bundle.patch` falls back to when it declares none.
+ *
+ * It lives here, beside the editor for that file, because this module is a leaf
+ * (it imports nothing else from `core`) — so every other module can name the file
+ * without adding an edge to the graph. */
+export const PATCH_FILE_NAME = 'cordis.patch.yml'
+
 /** Matches a `- id: xxx` row start (optionally quoted id). */
 const ID_RE = /^(\s*)- id:\s*'?([^'\s]+)'?\s*$/
 

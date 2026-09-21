@@ -24,6 +24,7 @@ import {
   bindingFor, forgetModuleIndex, moduleIndexFor, packageOf, resolveModule, type ResolvedModule,
 } from './module-index.ts'
 import { runPnpm } from './pnpm.ts'
+import { createKeyedCache } from './keyed-cache.ts'
 import { logger } from './logger.ts'
 import type { DshContext } from './appState.ts'
 import type {
@@ -291,7 +292,7 @@ export function diagnoseDevPlugin(dev: DevPlugin, ctx: DshContext, opts: Diagnos
 
 /** Distinct diagnoses kept before trimming the oldest. */
 const MAX_DIAGNOSES = 32
-const diagCache = new Map<string, DevDiagnosis>()
+const diagCache = createKeyedCache<DevDiagnosis>({ max: MAX_DIAGNOSES })
 
 /** Stamp a file's identity, or `-` when it is absent (so its appearance is a
  * change of its own). */
@@ -320,25 +321,14 @@ export function cachedDiagnosis(dev: DevPlugin, ctx: DshContext, opts: DiagnoseO
   let m: DevManifest = {}
   try { m = readManifest(dev.dir) } catch { /* unreadable manifest → empty */ }
   const key = diagKey(dev, ctx, opts, devPatchFile(m, dev.dir))
-  if (opts.refresh !== true) {
-    const hit = diagCache.get(key)
-    if (hit !== undefined) return hit
-  }
-  const diag = diagnoseDevPlugin(dev, ctx, opts)
-  diagCache.set(key, diag)
-  while (diagCache.size > MAX_DIAGNOSES) {
-    const oldest = diagCache.keys().next().value
-    if (oldest === undefined) break
-    diagCache.delete(oldest)
-  }
-  return diag
+  return diagCache.get(key, () => diagnoseDevPlugin(dev, ctx, opts), { refresh: opts.refresh === true })
 }
 
 /** Drop every cached report and index. Called whenever resolution changes in a way
  * no file stamp can see — the registry itself, or a shim junction written into the
  * dev package (which is what makes a peer resolvable at all). */
 export function forgetDevDiagnosis(): void {
-  diagCache.clear()
+  diagCache.forget()
   forgetModuleIndex()
 }
 
