@@ -20,6 +20,11 @@ interface ScrollModalProps {
   destroyOnHidden?: boolean
   /** Scroll-body max height: 'md' (420px) | 'lg' (60vh) | explicit px number. */
   bodyMax?: BodyHeight
+  /** Whether a click on the mask closes the dialog. Off by default, because the
+   * dialogs this was built for (dnd-kit bundle reorder, long spec lists) must not
+   * vanish under a stray click — pass `true` for a dialog that used to be a plain
+   * `Modal`, which is closable that way. */
+  maskClosable?: boolean
 }
 
 /**
@@ -28,7 +33,7 @@ interface ScrollModalProps {
  */
 export default function ScrollModal({
   title, open, onCancel, children, width, footer, okText, cancelText, onOk,
-  okDisabled, confirmLoading, destroyOnHidden, bodyMax = 'md',
+  okDisabled, confirmLoading, destroyOnHidden, bodyMax = 'md', maskClosable = false,
 }: ScrollModalProps) {
   const height = typeof bodyMax === 'number' ? `${bodyMax}px` : BODY_HS[bodyMax]
   return (
@@ -36,9 +41,9 @@ export default function ScrollModal({
       title={title}
       open={open}
       onCancel={onCancel}
-      // These scroll-body dialogs hold long interactive lists (e.g. dnd-kit bundle
-      // reorder); a click on the mask that escapes the content must not close one.
-      mask={{ closable: false }}
+      // Long interactive lists (e.g. dnd-kit bundle reorder) must not close under a
+      // stray mask click; a dialog that used to be a plain `Modal` opts back in.
+      mask={{ closable: maskClosable }}
       width={width}
       footer={footer}
       okText={okText}
