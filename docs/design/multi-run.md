@@ -2,11 +2,11 @@
 
 > 状态：设计中 → 第一期实现中
 > 分支：`feat/multi-run`
-> 相关文件：`src/main/ipc/run.ts`、`src/main/core/run-registry.ts`、`src/renderer/src/views/RunsSection.tsx`
+> 相关文件：`src/main/ipc/dsh/run.ts`、`src/main/core/shared/run-registry.ts`、`src/renderer/src/views/RunsSection.tsx`
 
 ## 1. 背景与目标
 
-当前应用是**严格的单进程模型**：`src/main/ipc/run.ts` 用模块级单例
+当前应用是**严格的单进程模型**：`src/main/ipc/dsh/run.ts` 用模块级单例
 `let running: RuntimeState | null` 持有唯一运行中的 dsh；托盘、关窗守卫、
 `useRunRuntime` 全部假设「最多一个进程」。启动第二个 profile 会直接失败
 （`run.alreadyRunning`）。
@@ -91,7 +91,7 @@ const runs = new Map<string, RuntimeState>()   // key = id
   `stopAllRuns()`（关窗/退出托盘时统一清理）。
 
 纯决策逻辑（id、去重判断、时长格式化）抽到
-`src/main/core/run-registry.ts`，不依赖 Electron/子进程，纳入 core 单测。
+`src/main/core/shared/run-registry.ts`，不依赖 Electron/子进程，纳入 core 单测。
 
 ### 3.3 IPC 契约变更
 
@@ -232,8 +232,8 @@ run.inputPlaceholder / run.failTitle / run.exited / run.portInUse`。
 **第一期（本分支）——多进程底座 + 运行页 + Profile 解耦**
 
 1. `shared/types.ts`：`RunMode` / `RunInfo`、扩展 `RunEvent`。
-2. `core/run-registry.ts` + 单测：纯决策逻辑。
-3. `ipc/run.ts`：注册表化，按 id 的 start/stop/list/logs/input。
+2. `core/shared/run-registry.ts` + 单测：纯决策逻辑。
+3. `ipc/dsh/run.ts`：注册表化，按 id 的 start/stop/list/logs/input。
 4. `preload` + `shared/api.ts`：契约升级。
 5. `main/index.ts`：托盘聚合、关窗守卫、退出清理。
 6. 渲染层：`useRuns` hook、`RunsSection` 页、`RunsModals`（迁移 `RunFailModal`）、
@@ -249,7 +249,7 @@ run.inputPlaceholder / run.failTitle / run.exited / run.portInUse`。
 ## 6. 测试与验收
 
 - `pnpm run typecheck`（node + web）通过。
-- `pnpm test`：新增 `core/run-registry.test.ts`；既有 core 用例不回归。
+- `pnpm test`：新增 `core/shared/run-registry.test.ts`；既有 core 用例不回归。
 - 手工验收：
   1. 同时启动 2+ 个不同 profile（app 模式），控制台独立流式输出。
   2. 同一 profile 二次启动被拒并提示。

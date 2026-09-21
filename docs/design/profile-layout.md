@@ -1,7 +1,7 @@
 # Profile 布局设计（与宿主一致）
 
 > 状态：已实现
-> 相关文件：`src/main/core/appState.ts`、`src/main/core/home.ts`、`src/main/ipc/dsh.ts`、`src/renderer/src/views/DshSection.tsx`
+> 相关文件：`src/main/core/profile/appState.ts`、`src/main/core/profile/home.ts`、`src/main/ipc/dsh/dsh.ts`、`src/renderer/src/views/DshSection.tsx`
 
 ## 1. 背景
 
@@ -71,7 +71,7 @@ Launcher 读写 profile 时严格按宿主契约，不引入私有字段：
 
 宿主按 bundle 层 → profile → home → `--patch` 的顺序应用各层的 `insert` 条目；同一
 loader entry id 被插入两次会以 `duplicate loader entry id` 硬失败。Launcher 在
-`run:start` 前用 `findInsertConflicts`（`core/combo.ts`）复算一次：发现重复就返回
+`run:start` 前用 `findInsertConflicts`（`core/store/combo.ts`）复算一次：发现重复就返回
 `run.insertConflict` 并点名冲突的层，而不是把宿主堆栈甩给用户；Profile 详情页也展示
 同样的告警，便于启动前发现。id 覆盖型 patch（`config`/`disabled`）允许跨层重复，
 不计入。典型冲突：一个 profile 同时含 `@deepseek-ai/dsh-web-app` 与某个自带官方

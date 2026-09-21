@@ -2,8 +2,8 @@
 
 > 状态：MCP 轨与密钥已实现；Skills 轨已实现
 > 分支：`dev`（`1b81daf` 起）
-> 相关文件：`src/main/core/mcp.ts`、`src/main/core/mcp-secrets.ts`、`src/main/core/skills.ts`、
-> `src/main/core/yaml.ts`、`src/main/ipc/extensions.ts`、
+> 相关文件：`src/main/core/mcp/mcp.ts`、`src/main/core/mcp/secrets.ts`、`src/main/core/skills/skills.ts`、
+> `src/main/core/patch/yaml.ts`、`src/main/ipc/extensions/extensions.ts`、
 > `src/renderer/src/views/ExtensionsSection.tsx`、`McpView.tsx`、`SkillsView.tsx`、`ExtensionsModals.tsx`
 
 ## 1. 背景与目标
@@ -34,7 +34,7 @@ dsh 有两类「扩展」能力，launcher 此前都无法管理：
 
 ### 3.1 行级读写，不做整文件 YAML 重写
 
-`core/mcp.ts` 与 `core/patch.ts` 构成行级编辑器：
+`core/mcp/mcp.ts` 与 `core/patch/patch.ts` 构成行级编辑器：
 
 - 读：`parseNamedRows` 按 `name === '@deepseek-ai/dsh-mcp-client'` 过滤，
   `extractKeyValue` 抽取每行的 `config` 体；
@@ -50,7 +50,7 @@ dsh 有两类「扩展」能力，launcher 此前都无法管理：
 ### 3.2 `!!js` 与 js-yaml
 
 js-yaml 拒绝未知显式标签，cordis 的 `!!js` 必须注册其 **RESOLVED 名**
-`tag:yaml.org,2002:js`（短名不匹配，见 `core/yaml.ts`，MCP 与 skill-filesystem
+`tag:yaml.org,2002:js`（短名不匹配，见 `core/patch/yaml.ts`，MCP 与 skill-filesystem
 config 解析共用）。标签是 load-only：launcher 永远不把 `!!js` dump 回 js-yaml。
 
 ### 3.3 分层与诊断
@@ -69,10 +69,10 @@ config 解析共用）。标签是 load-only：launcher 永远不把 `!!js` dump
 但 dsh 在 spawn MCP 子进程前会**清洗环境变量形状的凭据**，OS 级环境变量传不进
 子进程 —— 值必须出现在 **dsh 进程自身**的环境里。补齐的另一半：
 
-- **存储**：`core/mcp-secrets.ts`，name → value，经注入的 safeStorage cipher
+- **存储**：`core/mcp/secrets.ts`，name → value，经注入的 safeStorage cipher
   （同 GitHub token，`main/index.ts` 接线）静态加密落 `app.sqlite`；
   无 OS 密钥环时以 `plain:` 前缀明文兜底（诚实降级，不假装加密）。
-- **注入**：`ipc/run.ts` 组装 `buildDshLaunch` 时把 `mcpSecretsEnv()` 并入子进程
+- **注入**：`ipc/dsh/run.ts` 组装 `buildDshLaunch` 时把 `mcpSecretsEnv()` 并入子进程
   env；用户在启动面板 env 编辑器里显式设置的值优先生效。
 - **边界**：renderer 只见名字（`ext:mcpSecrets` 返回 names，值单向保存、永不回读）；
   `exportSettings` 剥离整张表；导入设置时保留本机密钥（同 token 的处理）；
@@ -85,7 +85,7 @@ UI：MCP 视图顶部「Launcher 密钥」折叠面板（增删名字）；env �
 
 ### 5.1 根解析（镜像 dsh 的 `skill-filesystem`）
 
-`core/skills.ts` 复刻 provider 的根序（rank 越小越优先）：
+`core/skills/skills.ts` 复刻 provider 的根序（rank 越小越优先）：
 
 | rank | 来源 | 路径 | launcher 视角 |
 |---|---|---|---|
@@ -134,10 +134,10 @@ config 行（`- id: … / name: '@deepseek-ai/dsh-skill-filesystem'`）从 home 
 
 ## 7. 测试
 
-- `core/mcp.test.ts`：行读写的回归锁定（含缩进感知 blockEnd、嵌套列表行）；
-- `core/mcp-secrets.test.ts`：存取/清除、cipher 往返、`plain:` 兜底、非法名、
+- `core/mcp/mcp.test.ts`：行读写的回归锁定（含缩进感知 blockEnd、嵌套列表行）；
+- `core/mcp/mcp-secrets.test.ts`：存取/清除、cipher 往返、`plain:` 兜底、非法名、
   导出剥离；
-- `core/skills.test.ts`：根解析（config 行 + 默认根 + includeDefaultRoots）、
+- `core/skills/skills.test.ts`：根解析（config 行 + 默认根 + includeDefaultRoots）、
   frontmatter 接受规则（含旧键拒绝与布尔容错）、列表 + issue、创建/改名冲突/
   回收站删除（仅可写根）、ZIP 导入（单包/根包/多包/包装层、无 SKILL.md、
   zip-slip 守卫、重名冲突、all-or-nothing）。

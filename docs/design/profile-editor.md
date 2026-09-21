@@ -1,7 +1,7 @@
 # Profile 编辑工作台设计
 
 > 状态：已实现（P0/P1）
-> 相关文件：`src/renderer/src/views/ProfileDetail.tsx`、`src/renderer/src/components/CodeEditor.tsx`、`src/renderer/src/lib/monaco.ts`、`src/main/core/profile.ts`、`src/main/ipc/profile.ts`
+> 相关文件：`src/renderer/src/views/ProfileDetail.tsx`、`src/renderer/src/components/CodeEditor.tsx`、`src/renderer/src/lib/monaco.ts`、`src/main/core/profile/profile.ts`、`src/main/ipc/profile/profile.ts`
 
 ## 1. 背景
 

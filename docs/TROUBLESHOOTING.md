@@ -156,7 +156,7 @@ Get-Process | Where-Object { $_.ProcessName -like '*Dsh*' } | Stop-Process -Forc
 
 ## 9. 手动重装 / 接入 dsh（无 GUI）
 
-启动器的官方安装布局（见 `core/dsh.ts`）：
+启动器的官方安装布局（见 `core/dsh/dsh.ts`）：
 
 ```
 <versionRepo>/<name>/node_modules/@deepseek-ai/dsh      # 安装本体（<name> 官方安装固定为 official）

@@ -1,7 +1,7 @@
 # 启动参数设计（Launch Parameters）
 
 > 状态：第一期已实现（`feat/multi-run`）
-> 关联：`docs/design/multi-run.md`、`src/main/core/launch-spec.ts`、`src/main/core/launch-options.ts`
+> 关联：`docs/design/multi-run.md`、`src/main/core/profile/launch-spec.ts`、`src/main/core/profile/launch-options.ts`
 > 界面：运行页「高级启动参数」
 
 ## 1. 背景
@@ -59,7 +59,7 @@ export interface LaunchOptions {
 }
 ```
 
-`core/launch-options.ts` 负责归一化/校验（`sanitizeLaunchOptions`），并把
+`core/profile/launch-options.ts` 负责归一化/校验（`sanitizeLaunchOptions`），并把
 便捷端口编译进透传参数（`effectiveArgs`：`[...args, '--port', String(port)]`，
 端口放最后以压过手写的 `--port`）。
 
@@ -76,7 +76,7 @@ export interface LaunchOptions {
 
 ## 5. 安全校验（主进程，IPC 边界）
 
-`core/launch-options.ts`（纯函数 + patch 存在性检查）：
+`core/profile/launch-options.ts`（纯函数 + patch 存在性检查）：
 
 - `args`：拒绝含 `\0`/`\n`/`\r` 的项；拒绝 launcher 保留 flag
   `--profile`、`--patch`、`--from-default-profile`、`--dump-config`、
@@ -129,9 +129,9 @@ export interface LaunchOptions {
 
 ## 9. 测试与验收
 
-- `core/launch-options.test.ts`：保留 flag/env 键、控制字符、缺失/目录 patch、
+- `core/profile/launch-options.test.ts`：保留 flag/env 键、控制字符、缺失/目录 patch、
   端口范围、`effectiveArgs` 端口置后。
-- `core/launch-spec.test.ts`：无参时命令不变；patch 在 `--profile` 后、透传参数最后；
+- `core/profile/launch-spec.test.ts`：无参时命令不变；patch 在 `--profile` 后、透传参数最后；
   额外 env 合并且不破坏 bundled-node 契约。
 - 手工：给两个 web profile 各设不同 `--port` 并同时启动，均正常监听；`--resume`
   类参数透传生效；非法 env key 被拒并有明确提示；重启应用后默认参数仍在。
