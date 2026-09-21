@@ -282,7 +282,7 @@ export function ImportProfileModal(p: ImportProfileModalProps): JSX.Element {
         {done && missing.length > 0 && (
           <Alert type="warning" showIcon
             title={t('profile.import.missingTitle')}
-            description={`${missing.join('、')}　${t('profile.import.missingDesc')}`}
+            description={`${missing.join(t('common.listSep'))}　${t('profile.import.missingDesc')}`}
           />
         )}
       </Space>
@@ -417,7 +417,7 @@ export function MirrorProfileModal(p: MirrorProfileModalProps): JSX.Element {
           <Alert type={result.missing.length > 0 ? 'warning' : 'success'} showIcon
             title={t('profile.migrate.done')}
             description={result.missing.length > 0
-              ? t('profile.migrate.missing', { missing: result.missing.join('、') })
+              ? t('profile.migrate.missing', { missing: result.missing.join(t('common.listSep')) })
               : undefined} />
         )}
       </Space>

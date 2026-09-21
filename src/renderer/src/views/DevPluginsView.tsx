@@ -13,6 +13,7 @@ import { Alert, Button, Dropdown, Empty, Input, Modal, Radio, Select, Space, Spi
 import type { MenuProps } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
+import { fmtDateTime } from '../lib/format.ts'
 import ConfirmMenu, { type MenuAction } from '../components/ConfirmMenu.tsx'
 import FieldLabel from '../components/FieldLabel.tsx'
 import Panel from '../components/Panel.tsx'
@@ -331,7 +332,7 @@ export default function DevPluginsView(): JSX.Element {
   const scopeText = (meta: DevDiagnosisMeta | undefined): string => {
     if (meta === undefined) return ''
     const host = hostLabel(hosts.find(h => h.id === meta.dshId), meta.dshName)
-    const at = new Date(meta.at).toLocaleString()
+    const at = fmtDateTime(meta.at)
     return meta.profile !== undefined && meta.profile !== ''
       ? t('plugin.dev.detectedAt', { time: at, host, profile: meta.profile })
       : t('plugin.dev.detectedAtHost', { time: at, host })
@@ -389,7 +390,7 @@ export default function DevPluginsView(): JSX.Element {
                       <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, marginTop: 2, wordBreak: 'break-all' }}>
                         <Tooltip title={p.dir}>{t('plugin.dev.dir')}: {p.dir}</Tooltip>
                         {p.workspaceRoot !== undefined && <span> · {t('plugin.dev.workspace')}: {p.workspaceRoot}</span>}
-                        <span> · {used.length > 0 ? t('plugin.dev.usedBy', { profiles: used.join('、') }) : t('plugin.dev.unused')}</span>
+                        <span> · {used.length > 0 ? t('plugin.dev.usedBy', { profiles: used.join(t('common.listSep')) }) : t('plugin.dev.unused')}</span>
                       </div>
                     </div>
                     <Space size={4} wrap style={{ flexShrink: 0 }}>

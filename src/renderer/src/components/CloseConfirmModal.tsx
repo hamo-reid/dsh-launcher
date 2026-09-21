@@ -48,7 +48,7 @@ export default function CloseConfirmModal(p: CloseConfirmModalProps): JSX.Elemen
     >
       <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
         {hasRunning && (
-          <Alert type="warning" showIcon title={t('window.close.runningWarn', { profile: runningNames.join('、') })} />
+          <Alert type="warning" showIcon title={t('window.close.runningWarn', { profile: runningNames.join(t('common.listSep')) })} />
         )}
 
         <Space orientation="vertical" style={{ width: '100%' }}>

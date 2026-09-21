@@ -310,7 +310,7 @@ const loadSeq = useRef(0)
     if (!result.ok) { void message.error(apiErrorText(result)); return }
     const { added, removed } = result.value
     if (added.length === 0 && removed.length === 0) void message.info(t('profile.detail.reconcileNoChange'))
-    else void message.success(t('profile.detail.reconcileDone', { added: added.join('、') || '—', removed: removed.join('、') || '—' }))
+    else void message.success(t('profile.detail.reconcileDone', { added: added.join(t('common.listSep')) || '—', removed: removed.join(t('common.listSep')) || '—' }))
     void load()
     onChanged?.()
   }
@@ -963,13 +963,13 @@ const loadSeq = useRef(0)
                 {validation.missingBundles.length > 0 && (
                   <div>
                     <div style={{ fontWeight: 600, marginBottom: 4 }}>{t('profile.workspace.missingBundles')}</div>
-                    <div style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: token.fontSizeSM }}>{validation.missingBundles.join('、')}</div>
+                    <div style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: token.fontSizeSM }}>{validation.missingBundles.join(t('common.listSep'))}</div>
                   </div>
                 )}
                 {validation.unclaimedBundles.length > 0 && (
                   <div>
                     <div style={{ fontWeight: 600, marginBottom: 4 }}>{t('profile.workspace.unclaimedBundles')}</div>
-                    <div style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: token.fontSizeSM }}>{validation.unclaimedBundles.join('、')}</div>
+                    <div style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: token.fontSizeSM }}>{validation.unclaimedBundles.join(t('common.listSep'))}</div>
                   </div>
                 )}
               </Space>

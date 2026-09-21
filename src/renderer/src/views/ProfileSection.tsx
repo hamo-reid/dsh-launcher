@@ -143,7 +143,7 @@ export default function ProfileSection() {
         <div>
           <div>{t('profile.export.zipPromptCount', { count: lb.value.length })}</div>
           <div style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', wordBreak: 'break-all', marginTop: 6 }}>
-            {lb.value.join('、')}
+            {lb.value.join(t('common.listSep'))}
           </div>
           <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, marginTop: 8 }}>
             {t('profile.export.zipPromptHint')}

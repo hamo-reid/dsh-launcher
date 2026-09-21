@@ -32,6 +32,8 @@ const zh = {
     'common.empty': '（空）',
     'common.unknown': '未知',
     'common.noData': '暂无数据',
+    /** Separator between items of an inline list. */
+    'common.listSep': '、',
     'common.unconfigured': '未配置',
     'common.edit': '修改',
     'common.confirm': '确认',

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Checkbox, Modal, Popconfirm, Select, Space, Spin, Tabs, Tag, Tooltip, message, theme } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
+import { fmtBytes } from '../lib/format.ts'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw'
@@ -42,15 +43,6 @@ const SOURCE_COLORS: Record<string, string> = {
   local: 'cyan',
   dsh: 'purple',
   store: 'default',
-}
-
-function fmtBytes(n: number): string {
-  if (n < 1024) return `${n} B`
-  const units = ['KB', 'MB', 'GB', 'TB']
-  let v = n
-  let i = -1
-  do { v /= 1024; i++ } while (v >= 1024 && i < units.length - 1)
-  return `${v.toFixed(v >= 100 ? 0 : 1)} ${units[i]}`
 }
 
 // ── Plugin detail: usage + README ──────────────────────────────────────────
@@ -124,7 +116,7 @@ export function PluginDetailModal(p: PluginDetailModalProps): JSX.Element {
                       ? t('plugin.detail.removeAllCascade', { name: target.name })
                       : t('plugin.detail.removeAllVersionsConfirm', { name: target.name }),
                     content: using.length > 0
-                      ? t('plugin.detail.removeAllCascadeList', { profiles: using.join('、') })
+                      ? t('plugin.detail.removeAllCascadeList', { profiles: using.join(t('common.listSep')) })
                       : undefined,
                     okText: t('common.confirm'),
                     okButtonProps: { danger: true },
@@ -196,7 +188,7 @@ export function PluginDetailModal(p: PluginDetailModalProps): JSX.Element {
                             <span style={{ fontFamily: 'monospace', marginInline: 6, color: token.colorText }}>{v}</span>
                             {inUse
                               ? (
-                                <Tooltip title={t('plugin.detail.inUseBy', { profiles: users.join('、') })}>
+                                <Tooltip title={t('plugin.detail.inUseBy', { profiles: users.join(t('common.listSep')) })}>
                                   <Tag color="green" style={{ marginInlineStart: 'auto' }}>{t('plugin.detail.versionInUse')}</Tag>
                                 </Tooltip>
                               )
@@ -852,7 +844,7 @@ export function PluginUpdatesModal(p: PluginUpdatesModalProps): JSX.Element {
         ))}
 
         {manual.length > 0 && (
-          <Alert type="info" showIcon title={t('plugin.update.manualHint', { names: manual.join('、') })} />
+          <Alert type="info" showIcon title={t('plugin.update.manualHint', { names: manual.join(t('common.listSep')) })} />
         )}
 
         {github?.rateLimited === true && (

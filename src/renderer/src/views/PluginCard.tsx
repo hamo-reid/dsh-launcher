@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { Button, Space, Tag, theme } from 'antd'
 import { useTranslation } from 'react-i18next'
 import ConfirmMenu, { type MenuAction } from '../components/ConfirmMenu.tsx'
+import { fmtBytes } from '../lib/format.ts'
 import type {
   InstalledOverviewRow, MarketAnnotation, PluginKind, PluginProvenance, PluginUpdateInfo,
 } from '../../../shared/types.ts'
@@ -33,15 +34,6 @@ const kindKey = (k: PluginKind): 'template' | 'bundle' | 'dependency' | 'storeOn
 /** i18n key suffix for a provenance. */
 const provKey = (p: PluginProvenance): 'store' | 'official' | 'subBundle' | 'localLink' | 'external' =>
   p === 'local-link' ? 'localLink' : p === 'sub-bundle' ? 'subBundle' : p
-
-function fmtBytes(n: number): string {
-  if (n < 1024) return `${n} B`
-  const units = ['KB', 'MB', 'GB', 'TB']
-  let v = n
-  let i = -1
-  do { v /= 1024; i++ } while (v >= 1024 && i < units.length - 1)
-  return `${v.toFixed(v >= 100 ? 0 : 1)} ${units[i]}`
-}
 
 export interface PluginCardProps {
   row: InstalledOverviewRow

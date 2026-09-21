@@ -5,6 +5,7 @@ import {
 import { ArrowUpOutlined, ArrowDownOutlined, FilterOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
+import { fmtDate } from '../lib/format.ts'
 import AppShell from '../components/AppShell.tsx'
 import EmptyState from '../components/EmptyState.tsx'
 import FieldLabel from '../components/FieldLabel.tsx'
@@ -25,11 +26,6 @@ type PluginView = 'overview' | 'download' | 'install' | 'market' | 'dev'
 const PAGE_SIZE = 25
 /** Cards per overview page (the grid paginates locally). */
 const CARDS_PER_PAGE = 24
-
-function fmtDate(iso: string): string {
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString()
-}
 
 /** 插件管理页：总览、下载中心、安装；详情 / 安装到 profile / 下载版本弹窗在 `PluginsModals`。
  * 下载中心：实时搜索（防抖）+ 分页加载更多 + 在库标记 + 可选版本下载。 */

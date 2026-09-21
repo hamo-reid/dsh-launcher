@@ -34,6 +34,8 @@ const en: typeof zh = {
     'common.empty': '(empty)',
     'common.unknown': 'Unknown',
     'common.noData': 'No data',
+    /** Separator between items of an inline list. */
+    'common.listSep': ', ',
     'common.unconfigured': 'Not set',
     'common.edit': 'Edit',
     'common.confirm': 'Confirm',

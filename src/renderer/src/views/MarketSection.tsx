@@ -14,6 +14,7 @@ import {
 import { DatabaseOutlined, GithubOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
+import { fmtNum } from '../lib/format.ts'
 import FilterChips from '../components/FilterChips.tsx'
 import Panel from '../components/Panel.tsx'
 import SearchInput from '../components/SearchInput.tsx'
@@ -23,8 +24,6 @@ import FieldLabel from '../components/FieldLabel.tsx'
 import { MODAL } from '../theme.ts'
 import { DownloadVersionModal, InstallToProfileModal, toStoreMap } from './PluginsModals.tsx'
 import type { MarketPlugin, MarketSort, MarketSourceState } from '../../../shared/types.ts'
-
-const num = (n: number): string => new Intl.NumberFormat().format(n)
 
 export default function MarketSection(): JSX.Element {
   const { t, i18n } = useTranslation()
@@ -292,8 +291,8 @@ export default function MarketSection(): JSX.Element {
                           <div style={{ wordBreak: 'break-word' }}>{descOf(p) || t('plugin.market.noDesc')}</div>
                           <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, marginTop: 4 }}>
                             <Tag style={{ marginInlineEnd: 4 }}>{catLabel(p.category)}</Tag>
-                            {p.stars != null && <span>★ {num(p.stars)}</span>}
-                            {p.downloads != null && <span>{p.stars != null ? ' · ' : ''}{num(p.downloads)}/mo</span>}
+                            {p.stars != null && <span>★ {fmtNum(p.stars)}</span>}
+                            {p.downloads != null && <span>{p.stars != null ? ' · ' : ''}{fmtNum(p.downloads)}/mo</span>}
                           </div>
                         </>
                       )}
@@ -335,8 +334,8 @@ export default function MarketSection(): JSX.Element {
             </div>
             {(detail.stars != null || detail.downloads != null) && (
               <div style={{ color: token.colorTextSecondary }}>
-                {detail.stars != null && <span>★ {num(detail.stars)}</span>}
-                {detail.downloads != null && <span>{detail.stars != null ? ' · ' : ''}{num(detail.downloads)}/mo</span>}
+                {detail.stars != null && <span>★ {fmtNum(detail.stars)}</span>}
+                {detail.downloads != null && <span>{detail.stars != null ? ' · ' : ''}{fmtNum(detail.downloads)}/mo</span>}
               </div>
             )}
             <div>

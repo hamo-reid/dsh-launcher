@@ -8,12 +8,7 @@ import { useTranslation } from 'react-i18next'
 import SectionHeading from '../components/SectionHeading.tsx'
 import FieldLabel from '../components/FieldLabel.tsx'
 import type { TrashItem } from '../../../shared/types.ts'
-
-function fmtBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
+import { fmtBytes, fmtDateTime } from '../lib/format.ts'
 
 interface TrashPanelProps {
   item: TrashItem
@@ -24,7 +19,7 @@ interface TrashPanelProps {
 export default function TrashPanel({ item, onRestore, onRemove }: TrashPanelProps): JSX.Element {
   const { t } = useTranslation()
   const { token } = theme.useToken()
-  const date = item.deletedAt !== '' ? new Date(item.deletedAt).toLocaleString() : t('common.unknown')
+  const date = item.deletedAt !== '' ? fmtDateTime(item.deletedAt) : t('common.unknown')
   return (
     <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
       <SectionHeading title={item.name} description={t('trash.deletedAtAtSize', { date, size: fmtBytes(item.sizeBytes) })} />
@@ -44,7 +39,7 @@ export default function TrashPanel({ item, onRestore, onRemove }: TrashPanelProp
         <FieldLabel>{t('trash.dependencies', { count: item.deps.length })}</FieldLabel>
         {item.deps.length === 0
           ? <div style={{ color: token.colorTextTertiary }}>{t('common.none')}</div>
-          : <div style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' }}>{item.deps.join('、')}</div>}
+          : <div style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' }}>{item.deps.join(t('common.listSep'))}</div>}
       </div>
 
       <div>
