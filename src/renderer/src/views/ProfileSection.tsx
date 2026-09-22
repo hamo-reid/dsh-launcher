@@ -4,6 +4,7 @@ import {
 } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
+import { PROFILE_DSH_KEY, readDshSelection, saveDshSelection } from '../lib/dshSelection.ts'
 import AppShell from '../components/AppShell.tsx'
 import EmptyState from '../components/EmptyState.tsx'
 import NavList from '../components/NavList.tsx'
@@ -32,9 +33,12 @@ export default function ProfileSection() {
   const { token } = theme.useToken()
   const [view, setView] = useState<View>('profiles')
 
-  // 本页 DSH 选择（默认取第一个已注册的 dsh；不写全局状态）。
+  // 本页 DSH 选择：记住上次选的那个（跨重启、跨 tab 切换），失效则回退到第一个
+  // 已注册的 dsh。只存在本页——不写任何全局「当前 DSH」。
   const [dshes, setDshes] = useState<{ id: string; name: string; version: string }[]>([])
-  const [dshId, setDshId] = useState<string>()
+  const [dshId, setDshId] = useState<string | undefined>(
+    () => readDshSelection(PROFILE_DSH_KEY) || undefined,
+  )
   const trash = useTrash(dshId)
 
   const [summaries, setSummaries] = useState<ProfileSummary[]>([])
@@ -69,6 +73,7 @@ export default function ProfileSection() {
   const changeDsh = (id: string): void => {
     if (id === dshId) return
     setDshId(id)
+    saveDshSelection(PROFILE_DSH_KEY, id)
     setSelected(null) // 换 home 后旧选中的 profile 不再有效
   }
 

@@ -18,6 +18,7 @@ import NavList from '../components/NavList.tsx'
 import Panel from '../components/Panel.tsx'
 import RunConsole from '../components/RunConsole.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
+import { RUN_DSH_KEY, readDshSelection, saveDshSelection } from '../lib/dshSelection.ts'
 import { useRuns } from './useRuns.tsx'
 import { RunConflictModal, RunFailModal } from './RunsModals.tsx'
 import RunLaunchModal from './RunLaunchModal.tsx'
@@ -124,9 +125,13 @@ export default function RunsSection(): JSX.Element {
   const run = useRuns()
 
   const [tab, setTab] = useState<RunTab>('launch')
-  // Run-page-local dsh selection (defaults to the active dsh but is not bound to it).
+  // Run-page-local dsh selection: remembered across restarts and tab switches,
+  // falling back to the first registered dsh when the stored one is gone. Not
+  // bound to any global "active dsh".
   const [dshes, setDshes] = useState<DshOption[]>([])
-  const [dshId, setDshId] = useState<string>()
+  const [dshId, setDshId] = useState<string | undefined>(
+    () => readDshSelection(RUN_DSH_KEY) || undefined,
+  )
   const [profiles, setProfiles] = useState<DshProfileInfo[]>([])
   const [dshLoading, setDshLoading] = useState(true)
   const [profilesLoading, setProfilesLoading] = useState(false)
@@ -176,6 +181,12 @@ export default function RunsSection(): JSX.Element {
     if (h > 0) return t('run.elapsed.hms', { h, m, s })
     if (m > 0) return t('run.elapsed.ms', { m, s })
     return t('run.elapsed.s', { s })
+  }
+
+  /** Switch the launch target, remembering it for the next visit. */
+  const selectDsh = (id: string): void => {
+    setDshId(id)
+    saveDshSelection(RUN_DSH_KEY, id)
   }
 
   // Quick launch: saved mode + parameters, stay on the launch tab.
@@ -252,44 +263,51 @@ export default function RunsSection(): JSX.Element {
 
   // ── Tab: 启动 ───────────────────────────────────────────────────────────────
   const launchTab = (
-    <div style={{ height: '100%', overflowY: 'auto', padding: LAYOUT.pagePaddingLG, background: token.colorBgContainer }}>
-      <SectionHeading
-        title={t('run.launchTitle')}
-        description={t('run.quickLaunchDesc')}
-        extra={
-          <Space>
-            <span style={{ color: token.colorTextSecondary }}>{t('run.selectDsh')}</span>
-            <Select
-              value={dshId}
-              onChange={value => setDshId(String(value))}
-              style={{ width: 220 }}
-              loading={dshLoading}
-              aria-label={t('run.selectDsh')}
-              placeholder={t('dsh.selectPlaceholder')}
-              options={dshes.map(d => ({ value: d.id, label: d.name }))}
-            />
-          </Space>
-        }
-      />
-      {profilesLoading ? (
-        <Spin />
-      ) : profiles.length === 0 ? (
-        <EmptyState title={t('run.profilesEmpty')} description={t('run.empty.desc')} />
-      ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 12 }}>
-          {profiles.map(info => (
-            <LaunchTile
-              key={info.name}
-              name={info.name}
-              meta={t('run.tileMeta', { bundles: info.bundles, deps: info.dependencies })}
-              running={runningKeys.has(`${dshId}::${info.name}`)}
-              onLaunch={() => quickLaunch(info.name)}
-              onConfigure={() => configure(info.name)}
-            />
-          ))}
+    <AppShell
+      flush
+      contentBg={token.colorBgContainer}
+      sider={
+        // The rail's header block: which dsh this page launches into. It sits
+        // here rather than in the content heading so the target is visible (and
+        // switchable) without scrolling the tile grid.
+        <div style={{ padding: 12, borderBottom: `1px solid ${token.colorSplit}` }}>
+          <div style={{ marginBottom: 6, color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>
+            {t('run.selectDsh')}
+          </div>
+          <Select
+            value={dshId}
+            onChange={value => selectDsh(String(value))}
+            style={{ width: '100%' }}
+            loading={dshLoading}
+            aria-label={t('run.selectDsh')}
+            placeholder={t('dsh.selectPlaceholder')}
+            options={dshes.map(d => ({ value: d.id, label: d.name }))}
+          />
         </div>
-      )}
-    </div>
+      }
+    >
+      <div style={{ height: '100%', overflowY: 'auto', padding: LAYOUT.pagePaddingLG }}>
+        <SectionHeading title={t('run.launchTitle')} description={t('run.quickLaunchDesc')} />
+        {profilesLoading ? (
+          <Spin />
+        ) : profiles.length === 0 ? (
+          <EmptyState title={t('run.profilesEmpty')} description={t('run.empty.desc')} />
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 12 }}>
+            {profiles.map(info => (
+              <LaunchTile
+                key={info.name}
+                name={info.name}
+                meta={t('run.tileMeta', { bundles: info.bundles, deps: info.dependencies })}
+                running={runningKeys.has(`${dshId}::${info.name}`)}
+                onLaunch={() => quickLaunch(info.name)}
+                onConfigure={() => configure(info.name)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </AppShell>
   )
 
   // ── Tab: 进程管理 ───────────────────────────────────────────────────────────
