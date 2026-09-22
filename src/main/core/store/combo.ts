@@ -51,6 +51,12 @@ function bundlePatchRel(bundleDir: string): string {
   return declaredBundlePatch(bundleDir) ?? PATCH_FILE_NAME
 }
 
+/** A profile's resolved search roots. Callers that resolve MANY bundles — every
+ * loop below — should build this once and pass it down: building it walks the
+ * install anchor and compiles a Node lookup chain, so rebuilding it per bundle is
+ * the difference between one walk and N. */
+type SearchRoots = readonly { dir: string }[]
+
 /**
  * Locate a bundle package's patch file: its declared `dsh.bundle.patch` (else the
  * `cordis.patch.yml` default), under the nearest directory `moduleSearchRoots`
@@ -69,8 +75,10 @@ function bundlePatchRel(bundleDir: string): string {
  * dangling candidate is skipped rather than returned, so the result is always
  * readable.
  */
-export function resolveBundlePatch(ctx: DshContext, bundle: string, profile: string): string | undefined {
-  for (const { dir } of moduleSearchRoots(ctx, profile)) {
+export function resolveBundlePatch(
+  ctx: DshContext, bundle: string, profile: string, roots?: SearchRoots,
+): string | undefined {
+  for (const { dir } of roots ?? moduleSearchRoots(ctx, profile)) {
     const bundleDir = join(dir, bundle)
     if (!existsSync(bundleDir)) continue
     const patchPath = join(bundleDir, bundlePatchRel(bundleDir))
@@ -91,9 +99,10 @@ function readUserPatch(ctx: DshContext, profile: string): string {
  */
 export function listComboPlugins(ctx: DshContext, profile: string): ComboPlugin[] {
   const { bundles } = readManifest(ctx, profile)
+  const roots = moduleSearchRoots(ctx, profile)
   const rows: ComboPlugin[] = []
   for (const bundle of bundles) {
-    const path = resolveBundlePatch(ctx, bundle, profile)
+    const path = resolveBundlePatch(ctx, bundle, profile, roots)
     if (path === undefined) { cplog.debug('combo: bundle patch not found', { bundle, profile }); continue }
     for (const row of parseNamedRows(readFileSync(path, 'utf8'))) {
       rows.push({ id: row.id, name: row.name ?? '', bundle, disabled: row.disabled })
@@ -117,8 +126,9 @@ export function listComboPlugins(ctx: DshContext, profile: string): ComboPlugin[
 export function composeProfileLayers(ctx: DshContext, profile: string): ProfileLayer[] {
   const layers: ProfileLayer[] = []
   const { bundles } = readManifest(ctx, profile)
+  const roots = moduleSearchRoots(ctx, profile)
   for (const bundle of bundles) {
-    const patchPath = resolveBundlePatch(ctx, bundle, profile)
+    const patchPath = resolveBundlePatch(ctx, bundle, profile, roots)
     if (patchPath === undefined) continue
     layers.push({
       source: 'bundle',
@@ -149,8 +159,9 @@ export function findInsertConflicts(
 ): InsertConflict[] {
   const layers: { source: InsertConflictLayer['source']; label?: string; bundle?: string; text: string }[] = []
   const { bundles } = readManifest(ctx, profile)
+  const roots = moduleSearchRoots(ctx, profile)
   for (const bundle of bundles) {
-    const patchPath = resolveBundlePatch(ctx, bundle, profile)
+    const patchPath = resolveBundlePatch(ctx, bundle, profile, roots)
     if (patchPath === undefined) continue
     layers.push({ source: 'bundle', bundle, text: readFileSync(patchPath, 'utf8') })
   }
@@ -180,7 +191,8 @@ export function findInsertConflicts(
  * profile would fail to load them at boot. */
 export function listMissingBundles(ctx: DshContext, profile: string): string[] {
   const { bundles } = readManifest(ctx, profile)
-  return bundles.filter(bundle => resolveBundlePatch(ctx, bundle, profile) === undefined)
+  const roots = moduleSearchRoots(ctx, profile)
+  return bundles.filter(bundle => resolveBundlePatch(ctx, bundle, profile, roots) === undefined)
 }
 
 /**
@@ -227,8 +239,8 @@ export function validateComposition(
  * is still a bundle, so the two judgements must not be conflated —
  * `reconcileBundles` drops a layer on this one alone.
  */
-function declaresBundle(ctx: DshContext, pkgName: string, profile: string): boolean {
-  for (const { dir } of moduleSearchRoots(ctx, profile)) {
+function declaresBundle(ctx: DshContext, pkgName: string, profile: string, roots?: SearchRoots): boolean {
+  for (const { dir } of roots ?? moduleSearchRoots(ctx, profile)) {
     if (declaredBundlePatch(join(dir, pkgName)) !== undefined) return true
   }
   return false
@@ -250,19 +262,20 @@ export function reconcileBundles(ctx: DshContext, profile: string): { added: str
   }
   const deps = Object.keys(manifest.dependencies ?? {})
   const bundles = manifest.dsh?.profile?.bundles ?? []
+  const roots = moduleSearchRoots(ctx, profile)
   const next = [...bundles]
   const removed: string[] = []
   for (const name of next) {
     // Only dependency-managed bundles can be dropped; in-box template bundles
     // are not dependencies and are never touched.
-    if (deps.includes(name) && !declaresBundle(ctx, name, profile)) {
+    if (deps.includes(name) && !declaresBundle(ctx, name, profile, roots)) {
       next.splice(next.indexOf(name), 1)
       removed.push(name)
     }
   }
   const added: string[] = []
   for (const name of deps) {
-    if (!next.includes(name) && declaresBundle(ctx, name, profile)) {
+    if (!next.includes(name) && declaresBundle(ctx, name, profile, roots)) {
       next.push(name)
       added.push(name)
     }
@@ -278,8 +291,9 @@ export function reconcileBundles(ctx: DshContext, profile: string): { added: str
  * defines it. Empty string when no bundle declares that row's config. */
 export function defaultConfigText(ctx: DshContext, profile: string, id: string): string {
   const { bundles } = readManifest(ctx, profile)
+  const roots = moduleSearchRoots(ctx, profile)
   for (const bundle of bundles) {
-    const patchPath = resolveBundlePatch(ctx, bundle, profile)
+    const patchPath = resolveBundlePatch(ctx, bundle, profile, roots)
     if (patchPath === undefined) continue
     const value = extractKeyValue(readFileSync(patchPath, 'utf8'), id, 'config')
     if (value !== undefined) return value
@@ -298,8 +312,9 @@ export function defaultConfigText(ctx: DshContext, profile: string, id: string):
 export function listMcpServers(ctx: DshContext, profile: string): McpServer[] {
   const servers: McpServer[] = []
   const { bundles } = readManifest(ctx, profile)
+  const roots = moduleSearchRoots(ctx, profile)
   for (const bundle of bundles) {
-    const patchPath = resolveBundlePatch(ctx, bundle, profile)
+    const patchPath = resolveBundlePatch(ctx, bundle, profile, roots)
     if (patchPath === undefined) continue
     servers.push(...readMcpServers(readFileSync(patchPath, 'utf8'), 'bundle', bundle))
   }
@@ -316,7 +331,8 @@ export function listUnclaimedBundles(ctx: DshContext, profile: string): string[]
   // prune concern, not an activation prompt — so it must not be reported.
   const { bundles, dependencies } = readManifest(ctx, profile)
   const claimed = new Set(bundles)
+  const roots = moduleSearchRoots(ctx, profile)
   return dependencies
-    .filter(dep => !claimed.has(dep) && declaresBundle(ctx, dep, profile))
+    .filter(dep => !claimed.has(dep) && declaresBundle(ctx, dep, profile, roots))
     .sort()
 }
