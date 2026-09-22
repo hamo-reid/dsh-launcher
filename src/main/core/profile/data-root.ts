@@ -12,7 +12,7 @@
  * derived from `DshContext.home` alone (docs/design/profile-layout.md §7).
  */
 import { cp, mkdir, rename } from 'node:fs/promises'
-import { existsSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, lstatSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join, sep } from 'node:path'
 import { discoverVersionRepo } from '../dsh/version-repo.ts'
 import { logger } from '../shared/logger.ts'
@@ -152,13 +152,49 @@ export function verifyCopy(src: string, dst: string): CopyVerification {
   return { ok: missing.length === 0 && mismatched.length === 0, missing, mismatched }
 }
 
+/**
+ * Whether a version repo's relocation is COMPLETE — which means the homes beside
+ * it came too.
+ *
+ * The two are inseparable: `install.ts` and `discoverVersionRepo` both define a
+ * home as `<dirname(versionDir)>/homes/<name>`, so a repo landing without its
+ * homes leaves every profile unreachable, and the registry rewrite points each
+ * entry at a directory that does not exist. Verifying the repo alone cannot see
+ * that, and the gap only bites on a RE-RUN: a first attempt where the repo copied
+ * but a home failed would verify clean, be reported `already-there`, and skip the
+ * homes for good.
+ */
+function verifyDshVersions(from: string, to: string): CopyVerification {
+  const repo = verifyCopy(from, to)
+  if (!repo.ok) return repo
+  for (const instance of dshInstancesOf(from)) {
+    const src = join(dirname(from), 'homes', instance.name)
+    if (!existsSync(src)) continue
+    const home = verifyCopy(src, join(dirname(to), 'homes', instance.name))
+    if (!home.ok) return home
+  }
+  return repo
+}
+
 // ── the move ─────────────────────────────────────────────────────────────────
 
-/** Skip pnpm's cache anywhere in the tree (the filter sees absolute paths).
- * Normalising to the platform separator first keeps this right for a source
- * path that arrived with forward slashes. */
+/** What the copy filter skips: pnpm's cache anywhere in the tree, and any link
+ * whose target is gone.
+ *
+ * The cache is skipped because it is rebuildable and can run to gigabytes. A
+ * dangling link is skipped because the copy DEREFERENCES: it would throw ENOENT
+ * and fail the whole move, and one stale junction left behind by an earlier
+ * install must not block a migration — there is no content behind it to lose.
+ * Paths are normalised to the platform separator first, so a source that arrived
+ * with forward slashes still matches. */
 function keepEntry(src: string): boolean {
-  return !src.replaceAll('/', sep).split(sep).includes(PNPM_STORE)
+  if (src.replaceAll('/', sep).split(sep).includes(PNPM_STORE)) return false
+  try {
+    if (lstatSync(src).isSymbolicLink()) statSync(src)
+    return true
+  } catch {
+    return false
+  }
 }
 
 /** Copy one tree, renaming an occupied destination aside first. Directories are
@@ -266,12 +302,14 @@ export async function moveDataRoot(plan: DataRootPlan, keys: DataRootItemKey[]):
   for (const item of plan.items) {
     if (!keys.includes(item.key)) continue
     const base = { key: item.key, from: item.from, to: item.to }
+    // A version repo is only done when the homes beside it came too.
+    const verify = item.key === 'dshVersions' ? verifyDshVersions : verifyCopy
 
     if (item.absent) {
       results.push({ ...base, status: 'absent' })
       continue
     }
-    if (verifyCopy(item.from, item.to).ok) {
+    if (verify(item.from, item.to).ok) {
       results.push({ ...base, status: 'already-there' })
       if (item.key === 'dshVersions') remap = planDshRemap(item.from, item.to)
       continue
@@ -281,7 +319,7 @@ export async function moveDataRoot(plan: DataRootPlan, keys: DataRootItemKey[]):
       const moved = item.key === 'dshVersions'
         ? await moveDshVersions(item.from, item.to)
         : await copyTree(item.from, item.to)
-      const check = verifyCopy(item.from, item.to)
+      const check = verify(item.from, item.to)
       if (!check.ok) {
         const detail = `${check.missing.length} missing, ${check.mismatched.length} size-mismatched`
         logger.error(`data root: verification failed for ${item.key} (${detail})`)

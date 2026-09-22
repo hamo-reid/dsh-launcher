@@ -4,7 +4,7 @@
  * exclusion and the idempotent re-run after a partial failure).
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
@@ -201,8 +201,52 @@ describe('moveDataRoot', () => {
     expect(existsSync(join(moved.archived ?? '', 'stale.txt'))).toBe(true)
   })
 
-  it('moves a version repo together with the homes beside it', async () => {
-    const base = join(root, 'dsh-move')
+  it('does not report a half-moved version repo as already there', async () => {
+    const base = join(root, 'half-moved')
+    const srcRepo = join(base, 'src', 'dsh', 'versions')
+    makeDsh(srcRepo, 'inst')
+    write(join(base, 'src', 'dsh', 'homes', 'inst', 'profiles', 'p', 'package.json'), '{}')
+    // The state a first attempt leaves when a home copy fails: the repo landed
+    // and verifies clean, its home did not.
+    cpSync(srcRepo, join(base, 'dst', 'dsh', 'versions'), { recursive: true })
+
+    const plan = planDataRootMove({
+      plugins: join(base, 'src', 'plugins'),
+      skillLibrary: join(base, 'src', 'skill-library'),
+      dshVersions: srcRepo,
+    }, join(base, 'dst'))
+    const outcome = await moveDataRoot(plan, ['dshVersions'])
+
+    // Verifying the repo alone would say "already-there" and skip the homes for
+    // good, pointing every profile at a directory that never arrives.
+    expect(outcome.results[0].status).toBe('moved')
+    expect(existsSync(join(base, 'dst', 'dsh', 'homes', 'inst', 'profiles', 'p', 'package.json'))).toBe(true)
+  })
+
+  it('copies past a dangling link instead of failing the whole move', async () => {
+    const base = join(root, 'dangling-link')
+    const src = join(base, 'src', 'plugins')
+    write(join(src, 'archive', 'pkg', 'package.json'), '{}')
+    // A junction left by an earlier install, its target long gone. The copy
+    // dereferences, so without the filter this would throw ENOENT and fail the
+    // whole item.
+    symlinkSync(join(base, 'gone'), join(src, 'archive', 'broken'), 'junction')
+
+    const plan = planDataRootMove({
+      plugins: src,
+      skillLibrary: join(base, 'src', 'skill-library'),
+      dshVersions: join(base, 'src', 'dsh', 'versions'),
+    }, join(base, 'dst'))
+    const outcome = await moveDataRoot(plan, ['plugins'])
+
+    expect(outcome.failed).toEqual([])
+    expect(outcome.results[0].status).toBe('moved')
+    expect(existsSync(join(base, 'dst', 'plugins', 'archive', 'pkg', 'package.json'))).toBe(true)
+    // The dead link is skipped, not reproduced as a broken entry.
+    expect(existsSync(join(base, 'dst', 'plugins', 'archive', 'broken'))).toBe(false)
+  })
+
+  it('moves a version repo together with the homes beside it', async () => {    const base = join(root, 'dsh-move')
     const srcRepo = join(base, 'src', 'dsh', 'versions')
     makeDsh(srcRepo, 'inst')
     write(join(base, 'src', 'dsh', 'homes', 'inst', 'profiles', 'p', 'package.json'), '{}')
