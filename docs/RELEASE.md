@@ -38,8 +38,10 @@ git push origin dev
 git checkout release && git merge dev
 #    此时放行 fast-forward（release 落后于 dev），不应产生合并冲突
 
-# 5) 打 ANNOTATED tag，message 直接读该 changelog（重要：必须 -a，tag 页才显示）
-git tag -a v0.1.5 -F docs/releases/v0.1.5.md
+# 5) 打 ANNOTATED tag，message 直接读该 changelog
+#    `-a` 必须：轻量 tag 在 GitHub tag 页不显示 message；
+#    `--cleanup=verbatim` 必须，见「注意事项」——少了它 tag 页会丢掉所有标题。
+git tag -a v0.1.5 -F docs/releases/v0.1.5.md --cleanup=verbatim
 
 # 6) 推送分支 + tag（推送 tag 即触发流水线）
 git push origin release v0.1.5
@@ -52,6 +54,11 @@ git push origin release:main
 
 - **必须用 annotated tag（`-a`）**：轻量 tag 在 GitHub 的 tag 页面不显示 message。
   Release 正文由 workflow 读 `docs/releases/<tag>.md`，与 tag message 保持一致。
+- **打 tag 必须带 `--cleanup=verbatim`**：`git tag -F` 默认按 `strip` 清理，会把
+  changelog 里**所有 `#` 开头的行当注释删掉**——也就是标题与**每一个 `####` 分类标题**，
+  于是 tag 页只剩一串没有归属的条目，与 Release 正文对不上。历史 tag（≤ `v0.4.0-beta1`）
+  都是这样打的（`v0.4.0-beta1` 的 tag message 74 行 vs 文件 108 行），需要时可用
+  `git tag -d <tag> && git tag -a <tag> -F <file> --cleanup=verbatim` 重打。
 - **tag 一律从 `release` 打**，避免 main/release 与 tag 指向不一致。
 - **每次发版后必须 `git push origin release:main`**，使 `main` 永不落后于最后发版
   （见 BRANCHING.md「硬性约定」）。
