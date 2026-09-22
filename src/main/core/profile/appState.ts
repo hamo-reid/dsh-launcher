@@ -2,7 +2,7 @@
  * Application-level state aggregated from persisted settings — the single
  * dependency source for the IPC layer.
  *
- * The dsh registry, effective directories and the plugin-store location all
+ * The dsh registry, the launcher data root and every directory derived from it
  * live here, derived from `AppSettings` (never module globals that drift out of
  * sync). The only injected piece is the Electron `userData` path
  * (via {@link configureAppState}); `core` itself stays free of Electron imports.
@@ -111,29 +111,78 @@ export function dshScopes(): DshScope[] {
   }))
 }
 
-// ── directory defaults ──────────────────────────────────────────────────────
+// ── launcher data root ──────────────────────────────────────────────────────
+//
+// One configured root owns the three launcher-private directories. It never
+// covers profiles: those stay at `<home>/profiles`, derived from `DshContext.home`
+// alone (docs/design/profile-layout.md §7). The settings database and the logs
+// are not covered either — they stay under `userData`.
 
-/** Default plugin store under `userData` — used until the user chooses one. */
-function defaultPluginDir(): string {
-  return join(userData, 'plugins')
+/** Whitespace-only counts as unset, matching the settings-store coercion. */
+function nonEmpty(v: unknown): string | undefined {
+  return typeof v === 'string' && v.trim() !== '' ? v : undefined
 }
 
-/** The effective plugin store dir: the user-configured one, else the default. */
+/** The effective data root: the configured one, else the Electron `userData`
+ * dir. Defaulting to `userData` is what keeps the on-disk layout identical to
+ * every build that predates `dataRoot` — nothing moves unless one is set.
+ * Throws when neither is available: a relative path would otherwise silently
+ * resolve against the process cwd. */
+export function dataRoot(): string {
+  const configured = nonEmpty(loadSettings().dataRoot)
+  if (configured !== undefined) return configured
+  if (userData === '') throw new Error('app data root is unknown: configureAppState() has not run')
+  return userData
+}
+
+/** The CONFIGURED root, or `undefined` when unset. The settings page renders
+ * this rather than the effective value, so an empty field stays visibly empty
+ * instead of silently adopting — and thereby persisting — the default. */
+export function configuredDataRoot(): string | undefined {
+  return nonEmpty(loadSettings().dataRoot)
+}
+
+/** The effective plugin store dir. A configured root owns it; otherwise the
+ * pre-`dataRoot` single-dir setting; otherwise `<userData>/plugins`. */
 export function pluginDir(): string {
-  const dir = loadSettings().pluginDir
-  return typeof dir === 'string' && dir.trim() !== '' ? dir : defaultPluginDir()
+  const s = loadSettings()
+  if (nonEmpty(s.dataRoot) !== undefined) return join(dataRoot(), 'plugins')
+  return nonEmpty(s.pluginDir) ?? join(userData, 'plugins')
 }
 
-/** Default base of the local dsh version repository. */
-function defaultVersionDir(): string {
-  return join(userData, 'dsh', 'versions')
-}
-
-/** The dsh version repository location from settings (default fallback). Empty /
- * whitespace counts as unset, mirroring `pluginDir()`. */
+/** The dsh version repository. Same precedence as {@link pluginDir}, rooted at
+ * `<dataRoot>/dsh/versions` (each installed version is one subdirectory). */
 export function dshVersionDir(): string {
-  const dir = loadSettings().dshVersionDir
-  return typeof dir === 'string' && dir.trim() !== '' ? dir : defaultVersionDir()
+  const s = loadSettings()
+  if (nonEmpty(s.dataRoot) !== undefined) return join(dataRoot(), 'dsh', 'versions')
+  return nonEmpty(s.dshVersionDir) ?? join(userData, 'dsh', 'versions')
+}
+
+/** The launcher-global skill library. It never had a single-dir setting of its
+ * own, so it simply follows the root; `core/skills/library.ts` installs entries
+ * from here into a dsh's own `<home>/skills`. */
+export function skillLibraryDir(): string {
+  return join(dataRoot(), 'skill-library')
+}
+
+/** Single-dir settings still recorded but no longer consulted because a
+ * `dataRoot` is configured. Surfaced so the settings page can point the user at
+ * data that is still sitting in the old location — the same "keep the field,
+ * report the stale path" treatment {@link legacyProfilesDir} gives the removed
+ * profiles override. Only paths that differ from the derived one are returned. */
+export function legacyDirOverrides(): { key: 'pluginDir' | 'dshVersionDir'; path: string }[] {
+  const s = loadSettings()
+  if (nonEmpty(s.dataRoot) === undefined) return []
+  const out: { key: 'pluginDir' | 'dshVersionDir'; path: string }[] = []
+  const plugin = nonEmpty(s.pluginDir)
+  if (plugin !== undefined && resolve(plugin) !== resolve(join(dataRoot(), 'plugins'))) {
+    out.push({ key: 'pluginDir', path: plugin })
+  }
+  const versions = nonEmpty(s.dshVersionDir)
+  if (versions !== undefined && resolve(versions) !== resolve(join(dataRoot(), 'dsh', 'versions'))) {
+    out.push({ key: 'dshVersionDir', path: versions })
+  }
+  return out
 }
 
 /** True when a genuinely fresh install should run the onboarding wizard: no
@@ -144,8 +193,9 @@ export function shouldRunOnboarding(): boolean {
   if (s.onboarded === true) return false
   const hasUserData =
     (s.dshes?.length ?? 0) > 0 ||
-    (typeof s.pluginDir === 'string' && s.pluginDir.trim() !== '') ||
-    (typeof s.dshVersionDir === 'string' && s.dshVersionDir.trim() !== '')
+    nonEmpty(s.dataRoot) !== undefined ||
+    nonEmpty(s.pluginDir) !== undefined ||
+    nonEmpty(s.dshVersionDir) !== undefined
   return !hasUserData
 }
 

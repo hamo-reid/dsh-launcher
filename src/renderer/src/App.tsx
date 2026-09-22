@@ -11,7 +11,7 @@ import OnboardingModal from './components/OnboardingModal.tsx'
 import CloseConfirmModal from './components/CloseConfirmModal.tsx'
 import DownloadPanel from './components/DownloadPanel.tsx'
 import { HEALTH_DIRTY_EVENT } from './lib/ipc.ts'
-import type { HealthIssue } from '../../shared/types.ts'
+import type { HealthIssue, OnboardingState } from '../../shared/types.ts'
 
 // Views are lazy so a tab's heavy deps (markdown renderer, dnd-kit) only parse
 // when that section is first opened, keeping the initial bundle + startup lean.
@@ -32,7 +32,10 @@ export default function App() {
   const { antdLocale } = useAppLang()
   const [tab, setTab] = useState<Tab>('run')
   const [onboarding, setOnboarding] = useState<'loading' | 'open' | 'done'>('loading')
-  const [onboardDefaults, setOnboardDefaults] = useState({ pluginDir: '', dshVersionDir: '' })
+  const [onboardDefaults, setOnboardDefaults] = useState<OnboardingState['defaults']>({
+    dataRoot: '',
+    derived: { plugins: '', skillLibrary: '', dshVersions: '' },
+  })
   // One-time legacy → versioned store migration is never silent: ask first.
   const [migration, setMigration] = useState<'checking' | 'needed' | 'running' | 'skip'>('checking')
   // Bumped after a store migration so the plugins view remounts and re-reads the

@@ -39,7 +39,8 @@ Launcher 在覆盖目录读写，宿主启动时却去 `<DSH_HOME>/profiles` 找
 | 机器级 home patch | `<home>/cordis.patch.yml` | 宿主 + Launcher |
 | 启动参数（args/patches/env/port）、上次运行模式 | Launcher 设置（`launchOptions` / `runModes`） | 仅 Launcher；只在 spawn 时作为参数传入，不写进 profile |
 | 回收站 | `<home>/profiles/.trash` | 仅 Launcher（宿主不枚举 profile，无影响） |
-| 插件库 / 导入临时目录 / dsh 版本库 | Launcher `userData` | 仅 Launcher |
+| 插件库 / 技能库 / dsh 版本库 | Launcher 数据根（`dataRoot`，默认 `userData`） | 仅 Launcher |
+| 设置数据库 / 日志 / 导入临时目录 | Launcher `userData` | 仅 Launcher |
 
 ## 4. 兼容处理（旧 `profilesDir`）
 
@@ -82,5 +83,7 @@ roster 的替代 app bundle。
 1. 任何 profile 路径都必须由 `DshContext.home` 派生（`profilesDir(ctx)` /
    `profileDir(ctx, name)`），不得引入第二个根。
 2. Launcher 写入 profile 的内容必须是宿主可识别的规范字段；Launcher 专有状态
-   只存自己的设置或 `userData`。
+   只存自己的设置或数据根（`dataRoot`，默认 `userData`）。
 3. 启动命令的 `DSH_HOME` 必须等于 `entry.home`，与直接启动保持等价。
+4. `dataRoot` 只覆盖 Launcher 私有目录（插件库 / 技能库 / dsh 版本库）；profile
+   位置与它无关 —— 仍恒为 `<home>/profiles`，只由 `DshContext.home` 派生。

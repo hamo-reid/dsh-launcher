@@ -15,6 +15,7 @@ import { registerHomeDataIpc } from './ipc/profile/home-data.ts'
 import { registerTrashIpc } from './ipc/profile/trash.ts'
 import { registerMarketIpc } from './ipc/plugins/market.ts'
 import { registerSettingsIpc } from './ipc/app/settings.ts'
+import { registerDataRootIpc } from './ipc/app/data-root.ts'
 import { registerStoreIpc } from './ipc/plugins/migration.ts'
 import { registerExtensionsIpc } from './ipc/extensions/extensions.ts'
 import { hookWindowMaximize, registerWindowIpc } from './ipc/app/window.ts'
@@ -30,7 +31,7 @@ import { repairArchiveLinks } from './core/store/plugins.ts'
 import { initGithubAuth, setTokenCipher } from './core/github/auth.ts'
 import { setMcpSecretCipher } from './core/mcp/secrets.ts'
 import { setSkillTrash } from './core/skills/skills.ts'
-import { setSkillLibraryDir, setSkillLibraryTrash } from './core/skills/library.ts'
+import { setSkillLibraryTrash } from './core/skills/library.ts'
 
 /** Domain-tagged logger for renderer-sourced messages (`{domain:"renderer"}`). */
 const rlog = child('renderer')
@@ -331,6 +332,7 @@ registerExtensionsIpc()
   registerHomeDataIpc()
   registerTrashIpc()
   registerSettingsIpc()
+  registerDataRootIpc()
   registerWindowIpc()
   registerLogsIpc()
 }
@@ -373,10 +375,9 @@ app.whenReady().then(async () => {
   setMcpSecretCipher(secretCipher)
   // Skill deletion moves the entry to the OS recycle bin (reversible there).
   setSkillTrash(path => shell.trashItem(path))
-  // The launcher-global skill library lives under userData; deletions from it
-  // use the same recycle-bin mover.
+  // The launcher-global skill library takes its location from the data root
+  // (see `skillLibraryDir`); deletions from it use the same recycle-bin mover.
   setSkillLibraryTrash(path => shell.trashItem(path))
-  setSkillLibraryDir(join(app.getPath('userData'), 'skill-library'))
   initGithubAuth()
   // Give app-level state the Electron `userData` dir for its defaults.
   configureAppState(app.getPath('userData'))

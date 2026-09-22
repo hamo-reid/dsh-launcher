@@ -10,7 +10,6 @@ import {
 } from '../../core/store/plugins.ts'
 import { listComboPlugins } from '../../core/store/combo.ts'
 import { dshScopes, pluginDir, profilesRootFor } from '../../core/profile/appState.ts'
-import { patchSettings } from '../../core/settings/settings.ts'
 import { inlineRelativeImages } from '../../core/shared/app-util.ts'
 import { fetchPackageVersions, npmSearch } from '../../core/store/npm.ts'
 import { attachPluginSizes } from '../../core/store/overview.ts'
@@ -22,11 +21,16 @@ import type {
   ComboPlugin, InstalledOverviewRow, IpcResult, NpmSearchHit, PackageVersionInfo, PluginUsagePoint,
 } from '../../../shared/types.ts'
 
-/** Validate + persist the plugin-store location (shared by `plugins:setDir`
- * and the onboarding wizard). On success the dir is made usable and saved. */
-export function setPluginStoreDir(dir: string): IpcResult<boolean> {
-  // Validate the chosen location before persisting it, so the user gets a
-  // precise message instead of a quiet failure on next install.
+/** Validate a candidate plugin dir and make it usable: create it, prove it is
+ * writable, reject a non-object `package.json`, and initialise the pnpm
+ * project. Returns the resolved path.
+ *
+ * It deliberately does NOT persist anything. The launcher data root owns that
+ * write (`ipc/app/data-root.ts`), and keeping the two apart is what lets a
+ * failed migration leave the settings untouched. */
+export function ensurePluginStore(dir: string): IpcResult<string> {
+  // Validate the chosen location before it is used, so the user gets a precise
+  // message instead of a quiet failure on the next install.
   const trimmed = dir.trim()
   if (trimmed === '') return fail(E.nameInvalid)
   const target = resolve(trimmed)
@@ -49,8 +53,7 @@ export function setPluginStoreDir(dir: string): IpcResult<boolean> {
       }
     }
     initStore(target)
-    patchSettings({ pluginDir: target })
-    return { ok: true, value: true }
+    return { ok: true, value: target }
   } catch (error) {
     return fail(E.storeUnusable, { detail: String(error) })
   }
@@ -64,9 +67,6 @@ export function registerStoreIpc(): void {
       return failFromError(error)
     }
   })
-
-  handle('plugins:setDir', (_event, dir: string): IpcResult<boolean> =>
-    setPluginStoreDir(dir))
 
   handle('plugins:list', async (): Promise<IpcResult<{ name: string; version: string }[]>> => {
     try {

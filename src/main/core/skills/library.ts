@@ -20,7 +20,7 @@ import { join } from 'node:path'
 import { logger } from '../shared/logger.ts'
 import { E, throwE } from '../shared/errors.ts'
 import { listSkills, parseSkillText, type ParsedSkill } from './skills.ts'
-import { contextForEntry, readDshState } from '../profile/appState.ts'
+import { contextForEntry, readDshState, skillLibraryDir } from '../profile/appState.ts'
 import type { SkillLibEntry, SkillLibInstall, SkillLibIssue } from '../../../shared/types.ts'
 
 /** The injected OS-recycle-bin move; main wires `shell.trashItem`, tests a fake. */
@@ -31,22 +31,12 @@ export function setSkillLibraryTrash(next: ((target: string) => Promise<void>) |
   trash = next
 }
 
-let dir: string | null = null
-
-/** Wire the library directory (main passes `<userData>/skill-library`). */
-export function setSkillLibraryDir(next: string | null): void {
-  dir = next
-}
-
-function root(): string {
-  if (dir === null) throw new Error('skill library dir is not wired')
-  return dir
-}
-
-/** The wired library directory (for callers composing raw file operations). */
-export function skillLibraryDir(): string {
-  return root()
-}
+/** The library directory, re-exported for the callers that compose raw file
+ * operations against it. It derives from the launcher data root
+ * (`appState.skillLibraryDir`) rather than being injected at startup, so a root
+ * change takes effect on the next call — there is no wiring step to redo, and
+ * no window in which this module holds a stale path. */
+export { skillLibraryDir }
 
 function toEntry(skill: ParsedSkill, path: string, dir: string): SkillLibEntry {
   return {
@@ -66,7 +56,7 @@ function toEntry(skill: ParsedSkill, path: string, dir: string): SkillLibEntry {
 export function listSkillLibrary(): { skills: SkillLibEntry[]; issues: SkillLibIssue[] } {
   const skills: SkillLibEntry[] = []
   const issues: SkillLibIssue[] = []
-  const base = root()
+  const base = skillLibraryDir()
   let entries
   try {
     entries = readdirSync(base, { withFileTypes: true })
@@ -111,7 +101,7 @@ export function writeSkillLib(previousName: string | null, text: string): SkillL
   const parsed = parseSkillText(text)
   if (!parsed.ok) throw new Error(parsed.reason)
   const name = parsed.skill.name
-  const destDir = join(root(), name)
+  const destDir = join(skillLibraryDir(), name)
   const destFile = join(destDir, 'SKILL.md')
   // Only a CHANGED name is a rename; editing in place keeps the bundle as is.
   const renaming = previousName !== null && previousName !== name
@@ -119,15 +109,15 @@ export function writeSkillLib(previousName: string | null, text: string): SkillL
   if (renaming && previous === undefined) {
     throw new Error(`skill "${previousName}" is not in the library`)
   }
-  if (previous !== undefined && (existsSync(destDir) || existsSync(join(root(), `${name}.md`)))) {
+  if (previous !== undefined && (existsSync(destDir) || existsSync(join(skillLibraryDir(), `${name}.md`)))) {
     throwE(E.extSkillExists, { detail: name })
   }
   if (previous !== undefined) {
-    if (previous.dir !== root()) renameSync(previous.dir, destDir) // bundle rename
+    if (previous.dir !== skillLibraryDir()) renameSync(previous.dir, destDir) // bundle rename
     else { mkdirSync(destDir, { recursive: true }); renameSync(previous.path, destFile) } // flat → bundle
   } else if (previousName === null) {
     // Fresh creation: the destination must not collide with another entry.
-    if (existsSync(destDir) || existsSync(join(root(), `${name}.md`))) {
+    if (existsSync(destDir) || existsSync(join(skillLibraryDir(), `${name}.md`))) {
       throwE(E.extSkillExists, { detail: name })
     }
     mkdirSync(destDir, { recursive: true })
@@ -140,7 +130,7 @@ export function writeSkillLib(previousName: string | null, text: string): SkillL
   if (readFileSync(destFile, 'utf8') !== text) throw new Error('write verify failed')
   // An in-place edit of a flat `<name>.md` entry just became a bundle — drop
   // the flat file so the library does not keep two same-named skills.
-  if (previousName === name) rmSync(join(root(), `${name}.md`), { force: true })
+  if (previousName === name) rmSync(join(skillLibraryDir(), `${name}.md`), { force: true })
   logger.info(`skill library: wrote ${destFile}`)
   return toEntry(parsed.skill, destFile, destDir)
 }
@@ -151,7 +141,7 @@ export async function deleteSkillLib(name: string): Promise<void> {
   const found = findEntry(name)
   if (found === undefined) throw new Error(`skill "${name}" is not in the library`)
   if (trash === null) throw new Error('skill library trash mover is not wired')
-  const target = found.dir !== root() ? found.dir : found.path
+  const target = found.dir !== skillLibraryDir() ? found.dir : found.path
   await trash(target)
   logger.info(`skill library: moved to recycle bin ${target}`)
 }
@@ -159,7 +149,7 @@ export async function deleteSkillLib(name: string): Promise<void> {
 /** Whether a library entry is a bundle (`<name>/SKILL.md`) or a flat
  * `<name>.md` — a flat entry's `dir` is the library ROOT itself. */
 export function skillLibShape(lib: SkillLibEntry): 'bundle' | 'flat' {
-  return lib.dir === root() ? 'flat' : 'bundle'
+  return lib.dir === skillLibraryDir() ? 'flat' : 'bundle'
 }
 
 /**

@@ -544,6 +544,73 @@ export interface DshEntry {
   dir?: string
 }
 
+// ── launcher data root ───────────────────────────────────────────────────────
+
+/** A launcher-owned directory that a data-root change relocates. Profiles are
+ * deliberately absent: they stay at `<home>/profiles` and are never derived
+ * from the data root (see `docs/design/profile-layout.md` §7). */
+export type DataRootItemKey = 'plugins' | 'skillLibrary' | 'dshVersions'
+
+/** The live state the settings page renders. */
+export interface DataRootState {
+  /** The configured root, or `''` when unset — the field renders empty rather
+   * than adopting (and thereby persisting) the effective default. */
+  configured: string
+  /** The effective root: the configured one, else the Electron `userData` dir. */
+  effective: string
+  /** The three directories the root derives, whether or not it is set. */
+  derived: { plugins: string; skillLibrary: string; dshVersions: string }
+  /** Single-dir settings still on disk but no longer consulted because a root
+   * is configured. Lets the page point at data left in the old location. */
+  legacy: { key: 'pluginDir' | 'dshVersionDir'; path: string }[]
+}
+
+/** What relocating one item would cost, for the confirmation dialog. */
+export interface DataRootPlanItem {
+  key: DataRootItemKey
+  from: string
+  to: string
+  /** The source is missing — there is nothing to move. */
+  absent: boolean
+  /** Top-level entries under `from` (0 when absent). */
+  entries: number
+  /** The destination already holds data; it is renamed aside before the copy. */
+  occupied: boolean
+}
+
+/** The dry run the user confirms. A non-empty `blockers` means "not now". */
+export interface DataRootPlan {
+  target: string
+  items: DataRootPlanItem[]
+  blockers: string[]
+}
+
+export type DataRootMoveStatus = 'moved' | 'already-there' | 'absent' | 'failed'
+
+/** The outcome of relocating one item. Items are independent: one failure does
+ * not stop the others, but it does stop the settings from being switched. */
+export interface DataRootMoveResult {
+  key: DataRootItemKey
+  status: DataRootMoveStatus
+  from: string
+  to: string
+  /** The destination renamed aside to make room, when one was. */
+  archived?: string
+  /** Why it failed (only on a `failed` status). */
+  detail?: string
+}
+
+export interface DataRootApplyResult {
+  /** The root in effect after the call — the new one, or the old one on failure. */
+  effective: string
+  /** Whether the settings were switched. False when any requested item failed,
+   * which is what keeps a half-migrated root from ever being pointed at. */
+  applied: boolean
+  moved: DataRootMoveResult[]
+  /** Keys that failed; the settings deliberately stayed on the old root. */
+  failed: DataRootItemKey[]
+}
+
 // ── health check (disk ↔ app sync) ───────────────────────────────────────────
 
 /** What a health check flagged on the disk vs. the app's recorded state. */
@@ -832,14 +899,17 @@ export interface OnboardingState {
   /** True when a fresh install should show the wizard. */
   required: boolean
   /** The current effective defaults the wizard seeds its fields with. */
-  defaults: { pluginDir: string; dshVersionDir: string }
+  defaults: {
+    dataRoot: string
+    derived: { plugins: string; skillLibrary: string; dshVersions: string }
+  }
 }
 
 /** The values the wizard saves on completion, for `settings:completeOnboarding`. */
 export interface OnboardingPayload {
   uiLanguage?: string
-  pluginDir?: string
-  dshVersionDir?: string
+  /** The single launcher data root; the three launcher dirs derive from it. */
+  dataRoot?: string
   /** Preferred node for launching dsh (`'system'` | `'bundled'`). */
   nodePreference?: 'system' | 'bundled'
 }

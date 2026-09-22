@@ -10,7 +10,16 @@ import type { DevPlugin, LaunchOptions, MarketSource, McpLibEntry, RunMode } fro
 
 /** The merged settings shape callers see (a union of the three stored rows). */
 export interface AppSettings {
-  /** Directory where downloaded/installed plugins are kept. */
+  /** Single launcher data root. When set, the three launcher-owned directories
+   * derive from it — `<dataRoot>/plugins`, `<dataRoot>/skill-library`,
+   * `<dataRoot>/dsh/versions` — and `pluginDir` / `dshVersionDir` no longer
+   * apply. Unset falls back to the Electron `userData` dir, which is the
+   * layout every build before this field used. Never covers profiles: those
+   * stay at `<home>/profiles` (see docs/design/profile-layout.md §7). */
+  dataRoot?: string
+  /** Directory where downloaded/installed plugins are kept. Superseded by
+   * `dataRoot` when that is set; retained as the pre-`dataRoot` value so a
+   * cleared root restores it and a migration still knows the old location. */
   pluginDir?: string
   /** Base directory holding the local dsh version repository (one subdir per version). */
   dshVersionDir?: string
@@ -62,7 +71,7 @@ export interface AppSettings {
 
 /** The `prefs` row: user preferences (no registry / no per-profile config). */
 export type PrefsSettings = Pick<AppSettings,
-  'pluginDir' | 'dshVersionDir' | 'uiLanguage' | 'closeToTray' | 'askOnClose' |
+  'dataRoot' | 'pluginDir' | 'dshVersionDir' | 'uiLanguage' | 'closeToTray' | 'askOnClose' |
   'nodePreference' | 'onboarded' | 'marketSource' | 'marketUrl' | 'githubTokenEnc' |
   'mcpSecrets' | 'mcpLibrary' | 'devPlugins'>
 /** The `dsh` row: the registered dsh installs. */
@@ -71,15 +80,19 @@ export type DshSettings = Pick<AppSettings, 'dshes'>
 export type LaunchSettings = Pick<AppSettings, 'launchOptions' | 'runModes'>
 
 /** Current on-disk schema version. Bump when a migration is added. */
-export const CURRENT_SCHEMA_VERSION = 1
+export const CURRENT_SCHEMA_VERSION = 2
 
 type Migration = (s: AppSettings) => AppSettings
 /** Ordered migrations keyed by the version they upgrade FROM (`v → v+1`).
- * 0 → 1 is the storage split, handled structurally, so no data-shape step. */
+ * 0 → 1 is the storage split, handled structurally, so no data-shape step.
+ * 1 → 2 adds the optional `dataRoot` field — purely additive, so there is no
+ * step either; the bump exists so `importSettings` refuses a newer export
+ * instead of silently dropping the root on an older build. */
 const MIGRATIONS: Record<number, Migration> = {}
 
 export function splitPrefs(s: AppSettings): PrefsSettings {
   return {
+    ...(s.dataRoot !== undefined ? { dataRoot: s.dataRoot } : {}),
     ...(s.pluginDir !== undefined ? { pluginDir: s.pluginDir } : {}),
     ...(s.dshVersionDir !== undefined ? { dshVersionDir: s.dshVersionDir } : {}),
     ...(s.uiLanguage !== undefined ? { uiLanguage: s.uiLanguage } : {}),
@@ -171,6 +184,8 @@ export function normalizeSettings(raw: unknown): AppSettings {
     typeof v === 'string' && v.trim() !== '' ? v : undefined
   const bool = (v: unknown): boolean | undefined => (typeof v === 'boolean' ? v : undefined)
 
+  const dataRoot = nonEmptyString(raw.dataRoot)
+  if (dataRoot !== undefined) out.dataRoot = dataRoot
   const pluginDir = nonEmptyString(raw.pluginDir)
   if (pluginDir !== undefined) out.pluginDir = pluginDir
   const dshVersionDir = nonEmptyString(raw.dshVersionDir)

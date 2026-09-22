@@ -8,6 +8,10 @@
 import type {
   AppUpdateInfo,
   ComboPlugin,
+  DataRootApplyResult,
+  DataRootItemKey,
+  DataRootPlan,
+  DataRootState,
   DshDataImportResult,
   DshDataManifest,
   DshEntry,
@@ -230,8 +234,9 @@ export interface WindowApi {
   }
 
   plugins: {
+    /** The effective store dir, derived from the launcher data root. Change it
+     * through `settings.applyDataRoot`. */
     getDir: () => Promise<IpcResult<{ dir: string }>>
-    setDir: (dir: string) => Promise<IpcResult<boolean>>
     list: () => Promise<IpcResult<InstalledPlugin[]>>
     add: (source: string, name?: string) => Promise<IpcResult<string>>
     addLocal: () => Promise<IpcResult<string>>
@@ -337,6 +342,18 @@ export interface WindowApi {
     setUiLanguage: (lng: string) => Promise<IpcResult<boolean>>
     getOnboardingState: () => Promise<IpcResult<OnboardingState>>
     pickDir: (opts?: { title?: string; defaultPath?: string }) => Promise<IpcResult<string>>
+    /** The launcher data root: the configured value, what it derives, and any
+     * single-dir setting it superseded. */
+    getDataRoot: () => Promise<IpcResult<DataRootState>>
+    /** Dry-run a relocation. Read-only, so it is safe while typing a path. */
+    previewDataRoot: (dir: string) => Promise<IpcResult<DataRootPlan>>
+    /** Switch the root, optionally migrating the data first (`''` resets to the
+     * default). The settings switch only when every requested item copied and
+     * verified. */
+    applyDataRoot: (
+      dir: string,
+      opts?: { migrate?: boolean; items?: DataRootItemKey[] },
+    ) => Promise<IpcResult<DataRootApplyResult>>
     completeOnboarding: (payload: OnboardingPayload) => Promise<IpcResult<boolean>>
     /** Disk-vs-app sync health: missing dsh executables / homes / store / plugins. */
     checkHealth: () => Promise<IpcResult<HealthIssue[]>>
@@ -401,8 +418,8 @@ export interface WindowApi {
     installOfficial: (options?: { versionDir?: string; name?: string; version?: string; force?: boolean }) => Promise<IpcResult<{ id: string }>>
     /** Published `@deepseek-ai/dsh` versions + dist-tags (for the official-install picker). */
     pkgVersions: () => Promise<IpcResult<PackageVersionInfo>>
+    /** Derived from the launcher data root; see `settings.applyDataRoot`. */
     getVersionDir: () => Promise<IpcResult<{ dir: string }>>
-    setVersionDir: (dir: string) => Promise<IpcResult<boolean>>
     probe: (path?: string) => Promise<IpcResult<DshEntry[]>>
     addManual: (alias: string, execPath: string) => Promise<IpcResult<DshEntry>>
     rename: (id: string, name: string) => Promise<IpcResult<boolean>>

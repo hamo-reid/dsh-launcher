@@ -26,6 +26,7 @@ function resetSettings(): void {
     onboarded: undefined,
     pluginDir: undefined,
     dshVersionDir: undefined,
+    dataRoot: undefined,
     dshes: undefined,
   })
 }
@@ -54,6 +55,11 @@ describe('shouldRunOnboarding', () => {
 
   it('is false for an upgraded user with a dshVersionDir but no flag', () => {
     saveSettings({ dshVersionDir: '/some/versions' })
+    expect(shouldRunOnboarding()).toBe(false)
+  })
+
+  it('is false for an upgraded user with only a dataRoot but no flag', () => {
+    saveSettings({ dataRoot: '/some/root' })
     expect(shouldRunOnboarding()).toBe(false)
   })
 

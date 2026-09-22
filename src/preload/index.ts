@@ -5,6 +5,10 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
   ComboPlugin,
+  DataRootApplyResult,
+  DataRootItemKey,
+  DataRootPlan,
+  DataRootState,
   DshDataImportResult,
   DshDataManifest,
   DshEntry,
@@ -239,8 +243,6 @@ const api = {
   plugins: {
     getDir: (): Promise<IpcResult<{ dir: string }>> =>
       ipcRenderer.invoke('plugins:getDir'),
-    setDir: (dir: string): Promise<IpcResult<boolean>> =>
-      ipcRenderer.invoke('plugins:setDir', dir),
     list: (): Promise<IpcResult<InstalledPlugin[]>> =>
       ipcRenderer.invoke('plugins:list'),
     add: (source: string, name?: string): Promise<IpcResult<string>> =>
@@ -350,6 +352,14 @@ const api = {
       ipcRenderer.invoke('settings:getOnboardingState'),
     pickDir: (opts?: { title?: string; defaultPath?: string }): Promise<IpcResult<string>> =>
       ipcRenderer.invoke('settings:pickDir', opts),
+    getDataRoot: (): Promise<IpcResult<DataRootState>> =>
+      ipcRenderer.invoke('settings:getDataRoot'),
+    previewDataRoot: (dir: string): Promise<IpcResult<DataRootPlan>> =>
+      ipcRenderer.invoke('settings:previewDataRoot', dir),
+    applyDataRoot: (
+      dir: string, opts?: { migrate?: boolean; items?: DataRootItemKey[] },
+    ): Promise<IpcResult<DataRootApplyResult>> =>
+      ipcRenderer.invoke('settings:applyDataRoot', dir, opts),
     completeOnboarding: (payload: OnboardingPayload): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('settings:completeOnboarding', payload),
     checkHealth: (): Promise<IpcResult<HealthIssue[]>> =>
@@ -406,8 +416,6 @@ const api = {
       ipcRenderer.invoke('dsh:pkgVersions'),
     getVersionDir: (): Promise<IpcResult<{ dir: string }>> =>
       ipcRenderer.invoke('dsh:getVersionDir'),
-    setVersionDir: (dir: string): Promise<IpcResult<boolean>> =>
-      ipcRenderer.invoke('dsh:setVersionDir', dir),
     probe: (path?: string): Promise<IpcResult<DshEntry[]>> => ipcRenderer.invoke('dsh:probe', path),
     addManual: (alias: string, execPath: string): Promise<IpcResult<DshEntry>> =>
       ipcRenderer.invoke('dsh:addManual', alias, execPath),

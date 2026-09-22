@@ -17,7 +17,6 @@ import { listProfileInfos } from '../../core/profile/home.ts'
 import { startDshDownload } from '../../core/store/downloads.ts'
 import { clearDshLaunchConfig } from '../../core/profile/launch-config.ts'
 import { listRuns } from './run.ts'
-import { patchSettings } from '../../core/settings/settings.ts'
 import { fetchPackageVersions } from '../../core/store/npm.ts'
 import { majorOfVersion } from '../../core/shared/version.ts'
 import { fail, failFromError, E } from '../../core/shared/errors.ts'
@@ -87,28 +86,6 @@ async function deleteDshFiles(entry: DshEntry): Promise<void> {
   for (const name of instanceNames) {
     const h = join(homes, name)
     await rm(h, { recursive: true, force: true })
-  }
-}
-
-/** Persist the dsh version-repository dir (shared by `dsh:setVersionDir` and
- * the onboarding wizard). Empty string resets to the default. */
-export function setVersionDirValue(dir: string): IpcResult<boolean> {
-  try {
-    const trimmed = dir.trim()
-    if (trimmed === '') {
-      patchSettings({ dshVersionDir: undefined })
-      return { ok: true, value: true }
-    }
-    // Normalize to an absolute path; create-allowed (the repo dir is made on
-    // first install), so only an existing non-directory is rejected up front.
-    const target = resolve(trimmed)
-    if (existsSync(target) && !statSync(target).isDirectory()) {
-      return fail(E.storeNotDir, { path: target })
-    }
-    patchSettings({ dshVersionDir: target })
-    return { ok: true, value: true }
-  } catch (error) {
-    return failFromError(error)
   }
 }
 
@@ -307,8 +284,10 @@ export function registerDshIpc(): void {
   // download center (version → install → register) instead of blocking the dialog.
   // Returns the new session id; the caller closes its dialog immediately.
   handle('dsh:installOfficial', (_event, options?: { versionDir?: string; name?: string; version?: string; force?: boolean }): IpcResult<{ id: string }> => {
-      const currentRoot = dshVersionDir()
-      let versionDir = currentRoot
+      // The dialog may pick a one-off location for THIS install; the persistent
+      // root belongs to the settings page alone (`settings:applyDataRoot`), so
+      // this never writes the setting back.
+      let versionDir = dshVersionDir()
       const requested = options?.versionDir?.trim()
       if (requested !== undefined && requested !== '') {
         const repoDir = resolve(requested)
@@ -324,9 +303,6 @@ export function registerDshIpc(): void {
           return fail(E.storeUnusable, { detail: String(error) })
         }
         versionDir = repoDir
-        // 用户在安装对话框把版本库指向了非当前设置的目录：写回设置，让「官方安装到指定目录」
-        // 持久可锚定（删除/清理用 entry.versionDir 而不是之后可能变化的 dshVersionDir()）。
-        if (repoDir !== currentRoot) patchSettings({ dshVersionDir: repoDir })
       }
       const name = safeVersionName(options?.name)
       const target = join(versionDir, name)
@@ -359,10 +335,10 @@ export function registerDshIpc(): void {
     ok: true, value: await fetchPackageVersions('@deepseek-ai/dsh'),
   }))
 
-  // DSH version repository location (settings).
+  // DSH version repository location, read-only here: it DERIVES from the
+  // launcher data root, so `settings:applyDataRoot` is the only thing that
+  // changes it. The channel stays for the install dialog's default.
   handle('dsh:getVersionDir', (): IpcResult<{ dir: string }> => ({
     ok: true, value: { dir: dshVersionDir() },
   }))
-  handle('dsh:setVersionDir', (_event, dir: string): IpcResult<boolean> =>
-    setVersionDirValue(dir))
 }

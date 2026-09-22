@@ -8,8 +8,9 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { loadSettings, openDatabase, saveSettings } from '../settings/settings.ts'
 import {
-  configureAppState, dshEntryById, dshScopes, dshVersionDir, effectiveProfileDir,
-  legacyProfilesDir, pluginDir, readDshState, updateDshState, writeDshState,
+  configureAppState, configuredDataRoot, dataRoot, dshEntryById, dshScopes, dshVersionDir,
+  effectiveProfileDir, legacyDirOverrides, legacyProfilesDir, pluginDir, readDshState,
+  skillLibraryDir, updateDshState, writeDshState,
 } from './appState.ts'
 import type { DshEntry } from '../../../shared/types.ts'
 
@@ -28,7 +29,7 @@ afterAll(() => rmSync(root, { recursive: true, force: true }))
 beforeEach(() => {
   saveSettings({
     ...loadSettings(),
-    dshes: undefined, pluginDir: undefined, dshVersionDir: undefined,
+    dshes: undefined, pluginDir: undefined, dshVersionDir: undefined, dataRoot: undefined,
   })
 })
 
@@ -95,19 +96,56 @@ describe('legacyProfilesDir', () => {
   })
 })
 
-describe('directory defaults', () => {
-  it('pluginDir falls back to <userData>/plugins', () => {
-    expect(pluginDir()).toBe(join(root, 'userData', 'plugins'))
+describe('launcher data root', () => {
+  const userData = (): string => join(root, 'userData')
+
+  it('defaults every launcher dir under <userData> when unset', () => {
+    expect(dataRoot()).toBe(userData())
+    expect(configuredDataRoot()).toBeUndefined()
+    expect(pluginDir()).toBe(join(userData(), 'plugins'))
+    expect(dshVersionDir()).toBe(join(userData(), 'dsh', 'versions'))
+    expect(skillLibraryDir()).toBe(join(userData(), 'skill-library'))
   })
-  it('pluginDir honours the configured value', () => {
-    saveSettings({ pluginDir: '/store' })
+
+  it('still honours the pre-dataRoot single-dir settings', () => {
+    saveSettings({ pluginDir: '/store', dshVersionDir: '/versions' })
     expect(pluginDir()).toBe('/store')
-  })
-  it('dshVersionDir defaults to <userData>/dsh/versions', () => {
-    expect(dshVersionDir()).toBe(join(root, 'userData', 'dsh', 'versions'))
-  })
-  it('dshVersionDir honours the configured value', () => {
-    saveSettings({ dshVersionDir: '/versions' })
     expect(dshVersionDir()).toBe('/versions')
+    // The skill library never had a single-dir setting, so it keeps the default.
+    expect(skillLibraryDir()).toBe(join(userData(), 'skill-library'))
+  })
+
+  it('puts all three under a configured root, superseding the single-dir settings', () => {
+    saveSettings({ dataRoot: '/data', pluginDir: '/store', dshVersionDir: '/versions' })
+    expect(dataRoot()).toBe('/data')
+    expect(configuredDataRoot()).toBe('/data')
+    expect(pluginDir()).toBe(join('/data', 'plugins'))
+    expect(dshVersionDir()).toBe(join('/data', 'dsh', 'versions'))
+    expect(skillLibraryDir()).toBe(join('/data', 'skill-library'))
+  })
+
+  it('restores the single-dir settings when the root is cleared (never deleted)', () => {
+    saveSettings({ dataRoot: '/data', pluginDir: '/store', dshVersionDir: '/versions' })
+    saveSettings({ ...loadSettings(), dataRoot: undefined })
+    expect(configuredDataRoot()).toBeUndefined()
+    expect(pluginDir()).toBe('/store')
+    expect(dshVersionDir()).toBe('/versions')
+  })
+})
+
+describe('legacyDirOverrides', () => {
+  it('reports a single-dir setting left behind by an active root', () => {
+    saveSettings({ dataRoot: '/data', pluginDir: '/store' })
+    expect(legacyDirOverrides()).toEqual([{ key: 'pluginDir', path: '/store' }])
+  })
+
+  it('stays quiet when that setting agrees with the derived path', () => {
+    saveSettings({ dataRoot: '/data', pluginDir: join('/data', 'plugins') })
+    expect(legacyDirOverrides()).toEqual([])
+  })
+
+  it('stays quiet without a root — the single-dir settings are live then', () => {
+    saveSettings({ pluginDir: '/store' })
+    expect(legacyDirOverrides()).toEqual([])
   })
 })

@@ -1,5 +1,5 @@
 ﻿/**
- * The launcher-global skill library: settings-free CRUD inside the wired
+ * The launcher-global skill library: CRUD inside the data-root-derived
  * library dir (dsh-agnostic), acceptance rules shared with the skills track,
  * recycle-bin delete, zip import into the library, install-to-dsh as a plain
  * directory copy (with an explicit overwrite for reinstalls), and drift
@@ -13,11 +13,11 @@ import { join } from 'node:path'
 import { renderSkillFile, installedEntry, installZipSkills, parseSkillText, writableSkillRoot } from './skills.ts'
 import {
   deleteSkillLib, installSkillToDsh, listSkillLibrary, readSkillLibFile, scanSkillInstalls,
-  setSkillLibraryDir, setSkillLibraryTrash, skillLibraryDir, skillLibShape, skillLibTextOf, writeSkillLib,
+  setSkillLibraryTrash, skillLibraryDir, skillLibShape, skillLibTextOf, writeSkillLib,
 } from './library.ts'
-import { contextForEntry, updateDshState } from '../profile/appState.ts'
+import { configureAppState, contextForEntry, updateDshState } from '../profile/appState.ts'
 import { AppError } from '../shared/errors.ts'
-import { openDatabase } from '../settings/settings.ts'
+import { openDatabase, updateSettings } from '../settings/settings.ts'
 
 let root: string
 let lib: string
@@ -37,13 +37,16 @@ function writeLib(name: string, text: string): void {
 
 beforeAll(async () => {
   root = mkdtempSync(join(tmpdir(), 'pm-skill-lib-'))
-  lib = join(root, 'library')
+  // The library is `<dataRoot>/skill-library`, so rooting the data root at the
+  // temp tree puts it exactly where the old injection used to point.
+  lib = join(root, 'skill-library')
   home = join(root, 'home')
   trashDir = join(root, 'trash')
   mkdirSync(home, { recursive: true })
   await openDatabase(join(root, 'app.sqlite'))
+  configureAppState(root)
+  updateSettings(draft => { draft.dataRoot = root })
   updateDshState(dshes => [...dshes, ENTRY()])
-  setSkillLibraryDir(lib)
   setSkillLibraryTrash(async target => {
     mkdirSync(trashDir, { recursive: true })
     renameSync(target, join(trashDir, target.split(/[\\/]/).pop() ?? target))
@@ -52,7 +55,6 @@ beforeAll(async () => {
 
 afterAll(() => {
   setSkillLibraryTrash(null)
-  setSkillLibraryDir(null)
   rmSync(root, { recursive: true, force: true })
 })
 

@@ -6,7 +6,9 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import {
   askOnCloseEnabled, closeToTrayEnabled, exportSettings, importSettings, loadSettings, patchSettings,
 } from '../../core/settings/settings.ts'
-import { dshVersionDir, pluginDir, readDshState, shouldRunOnboarding } from '../../core/profile/appState.ts'
+import {
+  dataRoot, dshVersionDir, pluginDir, readDshState, shouldRunOnboarding, skillLibraryDir,
+} from '../../core/profile/appState.ts'
 import { failFromError } from '../../core/shared/errors.ts'
 import { handle } from '../handle.ts'
 import { checkHealth } from '../../core/dsh/health.ts'
@@ -14,8 +16,7 @@ import { checkAppUpdate } from '../../core/github/updates.ts'
 import { githubAuthState, probeGithubRateLimit, setGithubToken } from '../../core/github/auth.ts'
 import { nodeEnvironment } from '../../core/dsh/node-env.ts'
 import { nodePreferenceValue } from '../../core/settings/settings.ts'
-import { setPluginStoreDir } from '../plugins/plugins.ts'
-import { setVersionDirValue } from '../dsh/dsh.ts'
+import { applyDataRoot } from './data-root.ts'
 import type {
   AppUpdateInfo, GithubAuthState, GithubRateLimit, HealthIssue, IpcResult, NodeEnvironment, OnboardingPayload,
   OnboardingState,
@@ -126,7 +127,10 @@ export function registerSettingsIpc(): void {
         ok: true,
         value: {
           required: shouldRunOnboarding(),
-          defaults: { pluginDir: pluginDir(), dshVersionDir: dshVersionDir() },
+          defaults: {
+            dataRoot: dataRoot(),
+            derived: { plugins: pluginDir(), skillLibrary: skillLibraryDir(), dshVersions: dshVersionDir() },
+          },
         },
       }
     } catch (error) {
@@ -149,26 +153,21 @@ export function registerSettingsIpc(): void {
     }
   })
 
-  /** Persist the wizard's choices and mark onboarding complete. Reuses the same
-   * directory-save rules as the settings page (`plugins:setDir` / `dsh:setVersionDir`). */
-  handle('settings:completeOnboarding', (_event, payload: OnboardingPayload): IpcResult<boolean> => {
+  /** Persist the wizard's choices and mark onboarding complete. The directory
+   * rules are the data root's own (`applyDataRoot`), so the wizard and the
+   * settings page cannot drift apart. A fresh install has nothing to migrate. */
+  handle('settings:completeOnboarding', async (_event, payload: OnboardingPayload): Promise<IpcResult<boolean>> => {
     try {
-      const { uiLanguage, pluginDir, dshVersionDir } = payload ?? {}
-      if (typeof pluginDir === 'string' && pluginDir.trim() !== '') {
-        const res = setPluginStoreDir(pluginDir)
-        if (!res.ok) return res
-      }
-      if (typeof dshVersionDir === 'string') {
-        const res = setVersionDirValue(dshVersionDir)
+      const { uiLanguage, dataRoot: root, nodePreference } = payload ?? {}
+      if (typeof root === 'string' && root.trim() !== '') {
+        const res = await applyDataRoot(root, { migrate: false })
         if (!res.ok) return res
       }
       patchSettings({
         ...(typeof uiLanguage === 'string' && uiLanguage.trim() !== ''
           ? { uiLanguage: uiLanguage.trim() }
           : {}),
-        ...(payload.nodePreference === 'system' || payload.nodePreference === 'bundled'
-          ? { nodePreference: payload.nodePreference }
-          : {}),
+        ...(nodePreference === 'system' || nodePreference === 'bundled' ? { nodePreference } : {}),
         onboarded: true,
       })
       return { ok: true, value: true }

@@ -80,6 +80,9 @@ export const E = {
   storeInstallFailed: 'store.installFailed',
   storeOperationFailed: 'store.operationFailed',
   pluginNotInstalled: 'plugin.notInstalled',
+  // launcher data root
+  dataRootBusy: 'dataRoot.busy',
+  dataRootNested: 'dataRoot.nested',
   // market
   marketEntryNotFound: 'market.entryNotFound',
   // extensions (MCP rows)

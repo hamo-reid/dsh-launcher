@@ -4,12 +4,14 @@ import { DownloadOutlined, FolderOpenOutlined, UploadOutlined } from '@ant-desig
 import { useTranslation } from 'react-i18next'
 import Panel from '../components/Panel.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
-import ConfigRow from '../components/ConfigRow.tsx'
+import DirField from '../components/DirField.tsx'
+import DerivedDirs from '../components/DerivedDirs.tsx'
+import DataRootMoveModal from './DataRootMoveModal.tsx'
 import { useThemeMode } from '../ThemeProvider.tsx'
 import { useAppLang } from '../i18n'
-import { apiErrorText } from '../lib/ipc.ts'
+import { apiErrorText, requestHealthRefresh } from '../lib/ipc.ts'
 import type { ThemeMode } from '../theme.ts'
-import type { GithubAuthState, GithubRateLimit, NodeEnvironment } from '../../../shared/types.ts'
+import type { DataRootState, GithubAuthState, GithubRateLimit, NodeEnvironment } from '../../../shared/types.ts'
 
 /** 设置页：外观(主题 + 语言) + 目录配置(DSH 版本库 / 插件保存位置)。 */
 export default function SettingsSection() {
@@ -17,8 +19,10 @@ export default function SettingsSection() {
   const { token } = theme.useToken()
   const { mode, setMode } = useThemeMode()
   const { language, setLanguage } = useAppLang()
-  const [versionDir, setVersionDir] = useState('')
-  const [pluginDir, setPluginDir] = useState('')
+  const [dataRootInput, setDataRootInput] = useState('')
+  const [dataRootState, setDataRootState] = useState<DataRootState>()
+  const [rootBusy, setRootBusy] = useState(false)
+  const [migrateOpen, setMigrateOpen] = useState(false)
   const [closeToTray, setCloseToTray] = useState(true)
   const [askOnClose, setAskOnClose] = useState(true)
   const [nodeEnv, setNodeEnv] = useState<NodeEnvironment>()
@@ -28,10 +32,10 @@ export default function SettingsSection() {
   const [githubLimit, setGithubLimit] = useState<GithubRateLimit>()
 
   const load = async (): Promise<void> => {
-    const v = await window.api.dsh.getVersionDir()
-    if (v.ok) setVersionDir(v.value.dir)
-    const p = await window.api.plugins.getDir()
-    if (p.ok) setPluginDir(p.value.dir)
+    const d = await window.api.settings.getDataRoot()
+    // The field shows the CONFIGURED root, so an unset one stays visibly empty
+    // rather than adopting — and thereby persisting — the effective default.
+    if (d.ok) { setDataRootState(d.value); setDataRootInput(d.value.configured) }
     const c = await window.api.settings.getCloseToTray()
     if (c.ok) setCloseToTray(c.value)
     const a = await window.api.settings.getAskOnClose()
@@ -92,16 +96,33 @@ export default function SettingsSection() {
     setGithubLimit(r.value)
   }
 
-  const saveVersionDir = async (value: string): Promise<string> => {
-    const res = await window.api.dsh.setVersionDir(value)
-    if (res.ok) { setVersionDir(value); return '' }
-    return apiErrorText(res)
+  const derived: DataRootState['derived'] = dataRootState?.derived
+    ?? { plugins: '', skillLibrary: '', dshVersions: '' }
+
+  /** `dir === ''` resets to the default. Data is only copied when `migrate`
+   * is set, which the move dialog drives after previewing. */
+  const applyRoot = async (dir: string, migrate: boolean): Promise<void> => {
+    setRootBusy(true)
+    const res = await window.api.settings.applyDataRoot(dir, { migrate })
+    setRootBusy(false)
+    if (!res.ok) { void message.error(apiErrorText(res)); return }
+    if (res.value.applied) {
+      void message.success(t('settings.dataRoot.applied'))
+    } else {
+      // A failed item deliberately leaves the settings on the OLD root.
+      void message.error(t('settings.dataRoot.partial', { items: res.value.failed.join(t('common.listSep')) }))
+    }
+    requestHealthRefresh()
+    await load()
   }
 
-  const savePluginDir = async (value: string): Promise<string> => {
-    const res = await window.api.plugins.setDir(value)
-    if (res.ok) { setPluginDir(value); return '' }
-    return apiErrorText(res)
+  const browseDataRoot = async (): Promise<void> => {
+    const res = await window.api.settings.pickDir({
+      title: t('settings.dataRoot'),
+      defaultPath: dataRootInput.trim() === '' ? dataRootState?.effective : dataRootInput,
+    })
+    if (!res.ok) { void message.error(apiErrorText(res)); return }
+    if (res.value !== '') setDataRootInput(res.value)
   }
 
   const exportSettings = async (): Promise<void> => {
@@ -277,18 +298,44 @@ export default function SettingsSection() {
         </Panel>
 
         <Panel title={t('settings.section.directories')}>
-          <ConfigRow
-            title={t('settings.dshVersionDir')}
-            description={t('settings.dshVersionDir.desc')}
-            value={versionDir}
-            onSave={saveVersionDir}
+          <DirField
+            title={t('settings.dataRoot')}
+            desc={t('settings.dataRoot.desc')}
+            value={dataRootInput}
+            onChange={setDataRootInput}
+            onBrowse={() => void browseDataRoot()}
+            browseLabel={t('onboarding.browse')}
           />
-          <div style={{ margin: '10px 0', borderTop: `1px solid ${token.colorSplit}` }} />
-          <ConfigRow
-            title={t('settings.pluginDir')}
-            description={t('settings.pluginDir.desc')}
-            value={pluginDir}
-            onSave={savePluginDir}
+          <Space style={{ marginBottom: token.paddingLG }}>
+            <Button type="primary" loading={rootBusy} onClick={() => void applyRoot(dataRootInput.trim(), false)}>
+              {t('common.save')}
+            </Button>
+            <Button disabled={dataRootInput.trim() === ''} onClick={() => setMigrateOpen(true)}>
+              {t('settings.dataRoot.migrate')}
+            </Button>
+            <Button
+              disabled={dataRootState === undefined || dataRootState.configured === ''}
+              onClick={() => void applyRoot('', false)}
+            >
+              {t('settings.dataRoot.reset')}
+            </Button>
+          </Space>
+          <DerivedDirs derived={derived} />
+          {(dataRootState?.legacy.length ?? 0) > 0 && (
+            <Alert
+              type="warning"
+              showIcon
+              title={t('settings.dataRoot.legacyTitle')}
+              description={t('settings.dataRoot.legacyDesc', {
+                paths: (dataRootState?.legacy ?? []).map(l => l.path).join(t('common.listSep')),
+              })}
+            />
+          )}
+          <DataRootMoveModal
+            open={migrateOpen}
+            target={dataRootInput.trim()}
+            onClose={() => setMigrateOpen(false)}
+            onApplied={() => { setMigrateOpen(false); requestHealthRefresh(); void load() }}
           />
         </Panel>
 

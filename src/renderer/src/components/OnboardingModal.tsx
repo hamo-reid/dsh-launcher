@@ -1,59 +1,32 @@
 import { useEffect, useState } from 'react'
-import { Button, Input, Modal, Segmented, message, theme } from 'antd'
-import { FolderOpenOutlined } from '@ant-design/icons'
+import { Modal, Segmented, message, theme } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { useAppLang } from '../i18n'
 import { apiErrorText } from '../lib/ipc.ts'
 import { MODAL } from '../theme.ts'
-import type { NodeEnvironment } from '../../../shared/types.ts'
+import DirField from './DirField.tsx'
+import DerivedDirs from './DerivedDirs.tsx'
+import type { NodeEnvironment, OnboardingState } from '../../../shared/types.ts'
 
 interface Props {
-  /** The effective default directories the wizard is seeded with. */
-  defaults: { pluginDir: string; dshVersionDir: string }
+  /** The effective defaults the wizard is seeded with, plus what they derive. */
+  defaults: OnboardingState['defaults']
   /** Called once the wizard has persisted the user's choices. */
   onComplete: () => void
 }
 
-/** A single directory field (label + hint + input + Browse… button). */
-function DirField(props: {
-  title: string
-  desc: string
-  value: string
-  onChange: (v: string) => void
-  onBrowse: () => void
-  browseLabel: string
-}) {
-  const { token } = theme.useToken()
-  return (
-    <div style={{ marginBottom: token.paddingLG }}>
-      <div style={{ fontWeight: 600 }}>{props.title}</div>
-      <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, margin: '4px 0 8px' }}>
-        {props.desc}
-      </div>
-      <div style={{ display: 'flex', gap: token.paddingSM }}>
-        <Input
-          value={props.value}
-          onChange={e => props.onChange(e.target.value)}
-          style={{ flex: 1, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' }}
-        />
-        <Button icon={<FolderOpenOutlined />} onClick={props.onBrowse} style={{ flexShrink: 0 }}>
-          {props.browseLabel}
-        </Button>
-      </div>
-    </div>
-  )
-}
-
-/** First-run onboarding wizard — sets the UI language plus the two data
- * directories. Forced (no close/cancel) so a fresh install is configured at
- * least once; seeded with working defaults the user can override via Browse….
- * Completed choices are persisted and never shown again. */
+/** First-run onboarding wizard — sets the UI language, the node runtime and the
+ * launcher data root. Forced (no close/cancel) so a fresh install is configured
+ * at least once; seeded with working defaults the user can override via Browse….
+ * Completed choices are persisted and never shown again.
+ *
+ * A fresh install has no data to relocate, so the wizard only writes the root —
+ * migrating an existing library is the settings page's job. */
 export default function OnboardingModal({ defaults, onComplete }: Props) {
   const { t } = useTranslation()
   const { token } = theme.useToken()
   const { language, setLanguage } = useAppLang()
-  const [pluginDir, setPluginDir] = useState(defaults.pluginDir)
-  const [versionDir, setVersionDir] = useState(defaults.dshVersionDir)
+  const [dataRoot, setDataRoot] = useState(defaults.dataRoot)
   const [nodePref, setNodePref] = useState<'system' | 'bundled'>('system')
   const [nodeEnv, setNodeEnv] = useState<NodeEnvironment>()
   const [busy, setBusy] = useState(false)
@@ -71,24 +44,20 @@ export default function OnboardingModal({ defaults, onComplete }: Props) {
     return () => { alive = false }
   }, [])
 
-  const browse = async (kind: 'plugin' | 'version'): Promise<void> => {
+  const browse = async (): Promise<void> => {
     const res = await window.api.settings.pickDir({
-      title: kind === 'plugin' ? t('onboarding.pluginDir') : t('onboarding.versionDir'),
-      defaultPath: kind === 'plugin' ? pluginDir : versionDir,
+      title: t('onboarding.dataRoot'),
+      defaultPath: dataRoot,
     })
     if (!res.ok) { void message.error(apiErrorText(res)); return }
-    if (res.value !== '') {
-      if (kind === 'plugin') setPluginDir(res.value)
-      else setVersionDir(res.value)
-    }
+    if (res.value !== '') setDataRoot(res.value)
   }
 
   const save = async (): Promise<void> => {
     setBusy(true)
     const res = await window.api.settings.completeOnboarding({
       uiLanguage: language,
-      pluginDir,
-      dshVersionDir: versionDir,
+      dataRoot,
       nodePreference: nodePref,
     })
     setBusy(false)
@@ -151,21 +120,14 @@ export default function OnboardingModal({ defaults, onComplete }: Props) {
         </div>
 
         <DirField
-          title={t('onboarding.pluginDir')}
-          desc={t('onboarding.pluginDir.desc')}
-          value={pluginDir}
-          onChange={setPluginDir}
-          onBrowse={() => void browse('plugin')}
+          title={t('onboarding.dataRoot')}
+          desc={t('onboarding.dataRoot.desc')}
+          value={dataRoot}
+          onChange={setDataRoot}
+          onBrowse={() => void browse()}
           browseLabel={t('onboarding.browse')}
         />
-        <DirField
-          title={t('onboarding.versionDir')}
-          desc={t('onboarding.versionDir.desc')}
-          value={versionDir}
-          onChange={setVersionDir}
-          onBrowse={() => void browse('version')}
-          browseLabel={t('onboarding.browse')}
-        />
+        <DerivedDirs derived={defaults.derived} />
       </div>
     </Modal>
   )
