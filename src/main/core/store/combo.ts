@@ -5,8 +5,9 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
-import { dshHome, homePatchPath, installAnchor, profileDir, profilePatchPath, profilesDir } from '../profile/home.ts'
+import { homePatchPath, profileDir, profilePatchPath } from '../profile/home.ts'
 import { readManifest } from '../profile/manifest.ts'
+import { moduleSearchRoots } from './module-resolve.ts'
 import {
   assertPatchDocValid, collectInsertIds, extractKeyValue, PATCH_FILE_NAME, parseClassifiedRows, parseNamedRows,
   parsePatchRows,
@@ -24,43 +25,54 @@ const cplog = child('combo')
 /** Re-export the shared composed-plugin shape. */
 export type { ComboPlugin } from '../../../shared/types.ts'
 
-/** Candidate node_modules roots a bundle may be installed under, nearest first:
- * the dsh installation anchor (so in-box bundles come from the same install the
- * running dsh loads), then the profile, the shared profiles root, the dsh home.
- * Mirrors the host's install-anchor-first resolution. */
-function bundleRoots(ctx: DshContext, profile: string): string[] {
-  const roots: string[] = []
-  const anchor = installAnchor(ctx)
-  if (anchor !== undefined) roots.push(join(anchor, 'node_modules'))
-  roots.push(join(profileDir(ctx, profile), 'node_modules'))
-  roots.push(join(profilesDir(ctx), 'node_modules'))
-  roots.push(join(dshHome(ctx), 'node_modules'))
-  return roots
-}
-
-/** The patch filename a bundle package declares via `dsh.bundle.patch` — the
- * host's contract — falling back to the historical `cordis.patch.yml` for a
- * package that omits the field or cannot be read. */
-function bundlePatchRel(bundleDir: string): string {
+/** The patch filename a bundle package declares via `dsh.bundle.patch`, or
+ * `undefined` when it declares none (or its manifest is unreadable). Both bundle
+ * judgements read through here: {@link bundlePatchRel} turns the result into a
+ * filename, {@link declaresBundle} treats "declared at all" as the host's own
+ * bundle test. */
+function declaredBundlePatch(pkgDir: string): string | undefined {
   try {
-    const manifest = JSON.parse(readFileSync(join(bundleDir, 'package.json'), 'utf8')) as {
+    const manifest = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8')) as {
       dsh?: { bundle?: { patch?: unknown } }
     }
     const declared = manifest.dsh?.bundle?.patch
     if (typeof declared === 'string' && declared.trim() !== '') return declared
   } catch {
-    // missing/invalid manifest — fall through to the default filename
+    // missing/invalid manifest — not a declaration
   }
-  return PATCH_FILE_NAME
+  return undefined
 }
 
-/** Locate a bundle package's patch file: its declared `dsh.bundle.patch` (else
- * the `cordis.patch.yml` default), under the nearest resolvable node_modules
- * root. The host requires the declaration and fails loud without it; the
- * launcher is a viewer, so a package that omits it still resolves by filename. */
+/** The filename to look for inside a bundle dir: the declared `dsh.bundle.patch`,
+ * else the historical `cordis.patch.yml`. The host requires the declaration and
+ * fails loud without it; the launcher is a viewer, so a package that omits it
+ * still resolves by filename. */
+function bundlePatchRel(bundleDir: string): string {
+  return declaredBundlePatch(bundleDir) ?? PATCH_FILE_NAME
+}
+
+/**
+ * Locate a bundle package's patch file: its declared `dsh.bundle.patch` (else the
+ * `cordis.patch.yml` default), under the nearest directory `moduleSearchRoots`
+ * offers. The host requires the declaration and fails loud without it; the
+ * launcher is a viewer, so a package that omits it still resolves by filename.
+ *
+ * The candidate LIST is the point. On a pnpm install the anchor's
+ * `node_modules/@deepseek-ai/` holds only `dsh`, and every other bundle the
+ * manifest names is a transitive dependency of it, living under
+ * `.pnpm/<pkg>@<ver>_<hash>/node_modules` — so a plain root+name probe reports
+ * every official bundle as missing, and (through {@link declaresBundle}) lets
+ * `reconcileBundles` drop them from `dsh.profile.bundles`.
+ *
+ * Each candidate is judged by its PATCH file, never by `package.json`: a bundle
+ * tree may ship only the patch, and the host's contract is the patch itself. A
+ * dangling candidate is skipped rather than returned, so the result is always
+ * readable.
+ */
 export function resolveBundlePatch(ctx: DshContext, bundle: string, profile: string): string | undefined {
-  for (const root of bundleRoots(ctx, profile)) {
-    const bundleDir = join(root, bundle)
+  for (const { dir } of moduleSearchRoots(ctx, profile)) {
+    const bundleDir = join(dir, bundle)
+    if (!existsSync(bundleDir)) continue
     const patchPath = join(bundleDir, bundlePatchRel(bundleDir))
     if (existsSync(patchPath)) return patchPath
   }
@@ -206,19 +218,18 @@ export function validateComposition(
   return result
 }
 
-/** Whether a package (resolved from any node_modules root) declares a
- * `dsh.bundle.patch` — the host's own bundle test (`exportsPatch`). */
+/**
+ * Whether a package (from any `moduleSearchRoots` directory) declares a
+ * `dsh.bundle.patch` — the host's own bundle test (`exportsPatch`).
+ *
+ * `resolveBundlePatch` asks that same chain for a FILE; this asks for a
+ * DECLARATION. A package that declares a patch but whose patch cannot be resolved
+ * is still a bundle, so the two judgements must not be conflated —
+ * `reconcileBundles` drops a layer on this one alone.
+ */
 function declaresBundle(ctx: DshContext, pkgName: string, profile: string): boolean {
-  for (const root of bundleRoots(ctx, profile)) {
-    const manifestPath = join(root, pkgName, 'package.json')
-    if (!existsSync(manifestPath)) continue
-    try {
-      const pkg = JSON.parse(readFileSync(manifestPath, 'utf8')) as { dsh?: { bundle?: { patch?: unknown } } }
-      const patch = pkg.dsh?.bundle?.patch
-      if (typeof patch === 'string' && patch.trim() !== '') return true
-    } catch {
-      // skip unresolvable manifests
-    }
+  for (const { dir } of moduleSearchRoots(ctx, profile)) {
+    if (declaredBundlePatch(join(dir, pkgName)) !== undefined) return true
   }
   return false
 }

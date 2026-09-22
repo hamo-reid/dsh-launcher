@@ -1,51 +1,25 @@
 /**
- * Module resolution for the dev-plugin diagnosis.
+ * Module resolution for the dev-plugin diagnosis: which package a patch row's
+ * `name:`/`id:` means.
  *
- * Two questions, both about a NAME:
- *  1. Which package does it mean? A patch row carries either a `name:` (the
- *     package it loads) or just an `id:` that ADDRESSES a row some other layer
- *     inserted. The id → package map is per-composition and NOT a mechanical
- *     prefix: in `@deepseek-ai/dsh-base`'s patch `tool-bash` names
- *     `@deepseek-ai/dsh-tool-bash`, but `timer` names
- *     `@deepseek-ai/cordis-plugin-timer`. So the map is parsed out of the layers
- *     the target actually composes (`buildModuleIndex`), never assembled by
- *     string surgery.
- *  2. Where does it resolve on disk? The dev package's own tree, the dsh install,
- *     the profile, the shared profiles root, or the home.
+ * A patch row carries either a `name:` (the package it loads) or just an `id:`
+ * that ADDRESSES a row some other layer inserted. The id → package map is
+ * per-composition and NOT a mechanical prefix: in `@deepseek-ai/dsh-base`'s patch
+ * `tool-bash` names `@deepseek-ai/dsh-tool-bash`, but `timer` names
+ * `@deepseek-ai/cordis-plugin-timer`. So the map is parsed out of the layers the
+ * target actually composes (`buildModuleIndex`), never assembled by string
+ * surgery.
  *
- * Why this is no longer a `join(root, 'node_modules', name)` probe: the host
- * installs with pnpm, so `<install>/node_modules/@deepseek-ai/` holds ONLY `dsh`
- * and every other module sits under `.pnpm/<pkg>@<ver>_<hash>/node_modules` or the
- * `.pnpm/node_modules` hoist. Resolution therefore has to follow Node's own lookup
- * chain from the right anchor — and that anchor must be REALPATHED: a junction
- * path is not on any lookup chain, so a non-realpathed anchor resolves nothing at
- * all on a real install (`createRequire(<junction>/package.json).resolve(...)`
- * throws MODULE_NOT_FOUND).
- *
- * Entries are reported `dangling` when the directory entry exists but its link
- * target is gone. That is not a nicety: an install upgrade leaves junctions in
- * `<home>/profiles/node_modules` pointing at the previous version's `.pnpm` dir,
- * and every `existsSync` check reads those as absent — while replacing one needs
- * to know it is there.
+ * (Where a name resolves ON DISK — the dev tree, the dsh install, the profile, the
+ * shared profiles root, the home — is `module-resolve.ts`, which `combo.ts` shares.)
  */
-import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, statSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { join } from 'node:path'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { listComboPlugins } from './combo.ts'
-import { dshHome, homePatchPath, installAnchor, profileDir, profilePatchPath, profilesDir } from '../profile/home.ts'
+import { homePatchPath, profilePatchPath } from '../profile/home.ts'
 import { parseNamedRows } from '../patch/patch.ts'
-import { resolveBundleSubdepDir } from './subdeps.ts'
 import { createKeyedCache } from '../shared/keyed-cache.ts'
 import type { DshContext } from '../profile/appState.ts'
-import type { DevResolveRoot, DevResolveState, ModuleIndexInfo } from '../../../shared/types.ts'
-
-/** The package part of an import spec: `@s/p/sub/x` → `@s/p`, `p/sub` → `p`. */
-export function packageOf(spec: string): string {
-  const clean = spec.trim().replace(/\/+$/, '')
-  if (!clean.startsWith('@')) return clean.split('/')[0]
-  const parts = clean.split('/')
-  return parts.length >= 2 ? `${parts[0]}/${parts[1]}` : clean
-}
+import type { ModuleIndexInfo } from '../../../shared/types.ts'
 
 /** One row feeding the index, in composition order. */
 export interface ModuleIndexRow { id: string; name: string; source: string }
@@ -98,123 +72,6 @@ export function buildModuleIndex(rows: readonly ModuleIndexRow[], profile?: stri
     layers,
     ...(profile !== undefined && profile !== '' ? { profile } : {}),
   }
-}
-
-/** `realpathSync` that degrades to its input (a broken link must not throw). */
-function safeRealpath(path: string): string {
-  try { return realpathSync(path) } catch { return path }
-}
-
-/** Probe one candidate module dir, telling "absent" from "a link whose target is
- * gone". `undefined` = not a package here, so the search continues. */
-function probeModuleDir(dir: string): ProbedDir | undefined {
-  let link = false
-  try {
-    link = lstatSync(dir).isSymbolicLink()
-  } catch {
-    return undefined
-  }
-  if (link) {
-    try {
-      statSync(dir)
-    } catch {
-      // Keep the broken target: "repair this link" and "install this package" are
-      // different fixes, and only the target says which one applies.
-      let target: string | undefined
-      try { target = readlinkSync(dir) } catch { target = undefined }
-      return { dir, state: 'dangling', ...(target !== undefined ? { link: target } : {}) }
-    }
-  } else if (!statSync(dir).isDirectory()) {
-    return undefined
-  }
-  return existsSync(join(dir, 'package.json')) ? { dir, state: 'ok' } : undefined
-}
-
-/** Probe `pkg` through the Node lookup chain anchored at `fromDir`'s manifest —
- * how a package really resolves its dependencies (pnpm's links included). */
-function probeChain(fromDir: string, pkg: string): ProbedDir | undefined {
-  const anchor = join(fromDir, 'package.json')
-  if (!existsSync(anchor)) return undefined
-  for (const searchPath of createRequire(anchor).resolve.paths(pkg) ?? []) {
-    const hit = probeModuleDir(join(searchPath, pkg))
-    if (hit !== undefined) return hit
-  }
-  return undefined
-}
-
-/** The installed dsh PACKAGE dir (realpathed) — the anchor the host resolves its
- * own modules from. The install anchor itself is the version dir, whose manifest
- * resolves nothing (`@deepseek-ai/dsh` is its only neighbour there). */
-function hostPackageDir(ctx: DshContext): string | undefined {
-  const anchor = installAnchor(ctx)
-  if (anchor === undefined) return undefined
-  for (const rel of ['node_modules/@deepseek-ai/dsh', 'node_modules/.pnpm/node_modules/@deepseek-ai/dsh']) {
-    const dir = join(anchor, ...rel.split('/'))
-    if (existsSync(join(dir, 'package.json'))) return safeRealpath(dir)
-  }
-  const viaRequire = resolveBundleSubdepDir(anchor, '@deepseek-ai/dsh')
-  return viaRequire === undefined ? undefined : safeRealpath(viaRequire)
-}
-
-/** The plain module roots, nearest first — the shape `combo.ts`'s `bundleRoots`
- * uses, with "this profile" and "the shared profiles root" kept apart (the single
- * `host-fallback` label used to conflate them). */
-function moduleRoots(ctx: DshContext, profile?: string): { root: DevResolveRoot; dir: string }[] {
-  const roots: { root: DevResolveRoot; dir: string }[] = []
-  if (profile !== undefined && profile !== '') {
-    roots.push({ root: 'profile', dir: join(profileDir(ctx, profile), 'node_modules') })
-  }
-  roots.push({ root: 'host-fallback', dir: join(profilesDir(ctx), 'node_modules') })
-  roots.push({ root: 'home', dir: join(dshHome(ctx), 'node_modules') })
-  return roots
-}
-
-/** A probed directory: where it is, whether it is usable, and — when it is a link
- * whose target is gone — what it pointed at. */
-interface ProbedDir {
-  dir: string
-  state: DevResolveState
-  link?: string
-}
-
-/** Where a name resolves, or `undefined` when nothing has it. */
-export type ResolvedModule = ProbedDir & { root: DevResolveRoot }
-
-/**
- * Resolve `spec` the way the target would. `from` is the dev package dir (its own
- * chain wins — a `link:`'s imports resolve from the dev tree first); `profile`
- * adds that profile's `node_modules` to the host roots. A subpath spec
- * (`@scope/pkg/sub`) resolves by its package, so it stops being "missing".
- */
-export function resolveModule(
-  ctx: DshContext,
-  spec: string,
-  opts: { from?: string; profile?: string } = {},
-): ResolvedModule | undefined {
-  const pkg = packageOf(spec)
-  if (pkg === '') return undefined
-  if (opts.from !== undefined) {
-    const local = probeChain(safeRealpath(opts.from), pkg)
-    if (local !== undefined) return { ...local, root: 'monorepo' }
-  }
-  const anchor = installAnchor(ctx)
-  const host = hostPackageDir(ctx)
-  if (host !== undefined) {
-    const hit = probeChain(host, pkg)
-    if (hit !== undefined) return { ...hit, root: 'host' }
-  }
-  // A non-pnpm (or manually assembled) install keeps its modules flat beside the
-  // dsh package — the same place `combo.ts`'s bundleRoots looks. On a pnpm install
-  // this probe simply finds nothing and the chains above have already answered.
-  if (anchor !== undefined) {
-    const flat = probeModuleDir(join(anchor, 'node_modules', pkg))
-    if (flat !== undefined) return { ...flat, root: 'host' }
-  }
-  for (const { root, dir } of moduleRoots(ctx, opts.profile)) {
-    const hit = probeModuleDir(join(dir, pkg))
-    if (hit !== undefined) return { ...hit, root }
-  }
-  return undefined
 }
 
 /** One layer's rows from a patch file (`[]` when it is absent or unreadable). */

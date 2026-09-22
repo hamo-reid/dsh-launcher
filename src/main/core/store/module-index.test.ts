@@ -1,33 +1,17 @@
 /**
  * Dev-plugin resolution index: the id → package map parsed out of the layers a
- * target composes, and the package part of an import spec.
+ * target composes.
  *
  * The load-bearing property is that the map is PARSED, not assembled: on a real
  * install `tool-bash` names `@deepseek-ai/dsh-tool-bash` but `timer` names
  * `@deepseek-ai/cordis-plugin-timer`, so no prefix rule can derive it.
+ *
+ * (Resolving a name to a directory ON DISK is `module-resolve.ts`, tested there.)
  */
 import { describe, expect, it } from 'vitest'
-import { buildModuleIndex, packageOf, type ModuleIndexRow } from './module-index.ts'
+import { buildModuleIndex, type ModuleIndexRow } from './module-index.ts'
 
 const row = (id: string, name: string, source: string): ModuleIndexRow => ({ id, name, source })
-
-describe('packageOf', () => {
-  it('keeps a bare name and strips a subpath', () => {
-    expect(packageOf('hono')).toBe('hono')
-    expect(packageOf('dsh-base/sub/x')).toBe('dsh-base')
-  })
-
-  it('keeps both segments of a scoped name', () => {
-    expect(packageOf('@deepseek-ai/dsh-tool-bash')).toBe('@deepseek-ai/dsh-tool-bash')
-    expect(packageOf('@deepseek-ai/dsh-web-app/startup')).toBe('@deepseek-ai/dsh-web-app')
-    expect(packageOf('@deepseek-ai/dsh-tool-subagent/model-selection-settings')).toBe('@deepseek-ai/dsh-tool-subagent')
-  })
-
-  it('tolerates trailing slashes and whitespace', () => {
-    expect(packageOf('  @s/p/  ')).toBe('@s/p')
-    expect(packageOf('@scope')).toBe('@scope')
-  })
-})
 
 describe('buildModuleIndex', () => {
   it('binds an id to the package its declaring row names', () => {

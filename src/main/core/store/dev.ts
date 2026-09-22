@@ -21,9 +21,8 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, statSync, symli
 import { dirname, join, resolve } from 'node:path'
 import { loadSettings, updateSettings } from '../settings/settings.ts'
 import { parseNamedRows } from '../patch/patch.ts'
-import {
-  bindingFor, forgetModuleIndex, moduleIndexFor, packageOf, resolveModule, type ResolvedModule,
-} from './module-index.ts'
+import { bindingFor, forgetModuleIndex, moduleIndexFor } from './module-index.ts'
+import { packageOf, resolveModule, type ResolvedModule } from './module-resolve.ts'
 import { runPnpm } from '../dsh/pnpm.ts'
 import { createKeyedCache } from '../shared/keyed-cache.ts'
 import { logger } from '../shared/logger.ts'

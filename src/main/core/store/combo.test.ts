@@ -4,7 +4,7 @@
  * against a disposable profile tree with an explicit (anchor-less) dsh context.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { contextForEntry } from '../profile/appState.ts'
@@ -277,5 +277,127 @@ describe('listMcpServers', () => {
   it('returns nothing for a profile with no MCP rows', () => {
     mkProfile('p', [], {})
     expect(listMcpServers(ctx(), 'p')).toEqual([])
+  })
+})
+
+/**
+ * Bundle resolution against a pnpm-shaped install — the shape an official install
+ * actually produces.
+ *
+ * `<anchor>/node_modules/@deepseek-ai/` holds ONLY `dsh`; every other bundle a
+ * manifest names is a transitive dependency of it, living beside dsh's body in
+ * the store. A plain `join(root, name)` probe reports all of them as missing,
+ * which made `validateComposition` call a healthy profile broken and let
+ * `reconcileBundles` delete those layers from `dsh.profile.bundles`.
+ *
+ * The anchor here is a real directory tree, so `execPath` simply points inside it
+ * (`resolveInstallAnchor` walks up to the nearest `package.json`). No mocking —
+ * this file stays all-filesystem.
+ */
+describe('on a pnpm-shaped install', () => {
+  const anchor = (): string => join(root, 'install')
+  const nm = (): string => join(anchor(), 'node_modules')
+  /** dsh's real body in the virtual store. */
+  const storeDir = (): string => join(nm(), '.pnpm', '@deepseek-ai+dsh@1.0.0_hash')
+  const dshReal = (): string => join(storeDir(), 'node_modules', '@deepseek-ai', 'dsh')
+
+  const pnpmCtx = (): ReturnType<typeof contextForEntry> =>
+    contextForEntry({
+      id: 'a', name: 'dsh@a', execPath: join(nm(), '.bin', 'dsh.cmd'), version: '1.0.0', home: home(),
+    })
+
+  /** The install: the anchor's manifest, `dsh` junctioned into the store, and
+   * nothing else under `@deepseek-ai/`. */
+  function mkAnchor(): void {
+    mkdirSync(join(nm(), '.bin'), { recursive: true })
+    writeFileSync(join(nm(), '.bin', 'dsh.cmd'), '')
+    writeFileSync(join(anchor(), 'package.json'), JSON.stringify({ dependencies: { '@deepseek-ai/dsh': '1.0.0' } }))
+    mkdirSync(dshReal(), { recursive: true })
+    writeFileSync(join(dshReal(), 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: '1.0.0' }))
+    mkdirSync(join(nm(), '@deepseek-ai'), { recursive: true })
+    symlinkSync(dshReal(), join(nm(), '@deepseek-ai', 'dsh'), 'junction')
+  }
+
+  /** A bundle only dsh depends on: its body sits in the store beside dsh's,
+   * reachable through the lookup chain and nowhere else. */
+  function mkStoreBundle(bundle: string, patch: string, rel = './cordis.patch.yml'): string {
+    const dir = join(storeDir(), 'node_modules', bundle)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({
+      name: bundle, version: '1.0.0', dsh: { bundle: { patch: rel } },
+    }))
+    writeFileSync(join(dir, rel), patch)
+    return dir
+  }
+
+  beforeEach(() => { mkAnchor() })
+
+  it('resolves a bundle that exists only as a transitive dependency', () => {
+    mkProfile('p', ['@deepseek-ai/dsh-base'], {})
+    const dir = mkStoreBundle('@deepseek-ai/dsh-base', '- id: base-row\n')
+    // Faithful fixture: the flat root really does hold `dsh` and nothing else.
+    expect(existsSync(join(nm(), '@deepseek-ai', 'dsh-base'))).toBe(false)
+    expect(resolveBundlePatch(pnpmCtx(), '@deepseek-ai/dsh-base', 'p')).toBe(join(dir, 'cordis.patch.yml'))
+  })
+
+  it("honours a store-installed bundle's declared patch filename", () => {
+    mkProfile('p', ['@deepseek-ai/dsh-web-app'], {})
+    const dir = mkStoreBundle('@deepseek-ai/dsh-web-app', '- id: web-row\n', './custom.patch.yml')
+    expect(resolveBundlePatch(pnpmCtx(), '@deepseek-ai/dsh-web-app', 'p')).toBe(join(dir, 'custom.patch.yml'))
+  })
+
+  it('composes every declared layer and reports none of them missing', () => {
+    mkProfile('p', ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'], {})
+    mkStoreBundle('@deepseek-ai/dsh-base', '- id: base-row\n  name: pkg-base\n')
+    mkStoreBundle('@deepseek-ai/dsh-web-app', '- id: web-row\n')
+    expect(listComboPlugins(pnpmCtx(), 'p').map(r => [r.id, r.bundle])).toEqual([
+      ['base-row', '@deepseek-ai/dsh-base'],
+      ['web-row', '@deepseek-ai/dsh-web-app'],
+    ])
+    expect(listMissingBundles(pnpmCtx(), 'p')).toEqual([])
+    expect(validateComposition(pnpmCtx(), 'p').ok).toBe(true)
+    expect(composeProfileLayers(pnpmCtx(), 'p').map(l => l.source)).toEqual(['bundle', 'bundle'])
+  })
+
+  it('sees an activated bundle as declared, so reconcile leaves it alone', () => {
+    mkProfile('p', ['@deepseek-ai/dsh-web-app'], { '@deepseek-ai/dsh-web-app': 'link:/nowhere' })
+    mkStoreBundle('@deepseek-ai/dsh-web-app', '- id: web-row\n')
+    // The silent-data-loss regression: before, the layer resolved nowhere, so
+    // reconcile reported it as removed and rewrote the manifest.
+    expect(reconcileBundles(pnpmCtx(), 'p')).toEqual({ added: [], removed: [] })
+    expect(JSON.parse(readFileSync(join(profileDir('p'), 'package.json'), 'utf8')).dsh.profile.bundles)
+      .toEqual(['@deepseek-ai/dsh-web-app'])
+  })
+
+  it('offers an installed-but-inactive bundle for activation', () => {
+    mkProfile('p', [], { '@deepseek-ai/dsh-web-app': 'link:/nowhere' })
+    mkStoreBundle('@deepseek-ai/dsh-web-app', '- id: web-row\n')
+    expect(listUnclaimedBundles(pnpmCtx(), 'p')).toEqual(['@deepseek-ai/dsh-web-app'])
+  })
+
+  it('skips a dangling store entry rather than returning an unreadable path', () => {
+    mkProfile('p', ['@deepseek-ai/dsh-ghost'], {})
+    const scope = join(storeDir(), 'node_modules', '@deepseek-ai')
+    mkdirSync(scope, { recursive: true })
+    // A junction left by a previous install, its target long gone.
+    symlinkSync(join(root, 'previous-version'), join(scope, 'dsh-ghost'), 'junction')
+    expect(resolveBundlePatch(pnpmCtx(), '@deepseek-ai/dsh-ghost', 'p')).toBeUndefined()
+    expect(listMissingBundles(pnpmCtx(), 'p')).toEqual(['@deepseek-ai/dsh-ghost'])
+  })
+
+  it('still resolves a flat install that has no dsh package to anchor a chain', () => {
+    // Hand-assembled (non-pnpm) anchor: real dirs, and no `@deepseek-ai/dsh` for a
+    // chain to start from — the case the flat `<anchor>/node_modules` root is for.
+    const flat = join(root, 'flat-install')
+    const dir = join(flat, 'node_modules', '@deepseek-ai', 'dsh-base')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'cordis.patch.yml'), '- id: flat\n')
+    writeFileSync(join(flat, 'package.json'), JSON.stringify({ dependencies: { '@deepseek-ai/dsh': '1.0.0' } }))
+    const flatCtx = contextForEntry({
+      id: 'flat', name: 'dsh@flat', execPath: join(flat, 'node_modules', '.bin', 'dsh.cmd'),
+      version: '1.0.0', home: home(),
+    })
+    mkProfile('p', ['@deepseek-ai/dsh-base'], {})
+    expect(resolveBundlePatch(flatCtx, '@deepseek-ai/dsh-base', 'p')).toBe(join(dir, 'cordis.patch.yml'))
   })
 })
