@@ -1,5 +1,5 @@
 /**
- * 预设 — one dsh's agent presets, as a whole.
+ * 预设 — one dsh's agent presets, as a roster.
  *
  * A preset is a directory dsh discovers: its `agent.cordis.yml` is what mounts,
  * and the four things this page owns are its id, name, description and
@@ -13,8 +13,14 @@
  * profile says which, and hovering it names every row no resolver found.
  */
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { Alert, Button, List, Popconfirm, Skeleton, Space, Tag, Tooltip, Typography, message, theme } from 'antd'
-import { CodeOutlined, DeleteOutlined, FolderOpenOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import {
+  Alert, Button, Dropdown, List, Popconfirm, Popover, Skeleton, Space, Tag, Tooltip, Typography,
+  message, theme,
+} from 'antd'
+import {
+  CodeOutlined, DeleteOutlined, DownOutlined, FolderOpenOutlined, InfoCircleOutlined, PlusOutlined,
+  ReloadOutlined,
+} from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
 import AppShell from '../components/AppShell.tsx'
@@ -26,6 +32,10 @@ import { PresetCopyModal, PresetMetaModal } from './presets/PresetModals.tsx'
 import type {
   DshEntry, PresetGrade, PresetListing, PresetMetaInput, PresetRow,
 } from '../../../shared/types.ts'
+
+/** Beyond this the description is cut short and offered in full on hover, so a
+ * verbose preset cannot push the rest of the row out of view. */
+const DESCRIPTION_CLAMP = 78
 
 export default function PresetsSection(): JSX.Element {
   const { t } = useTranslation()
@@ -153,78 +163,105 @@ export default function PresetsSection(): JSX.Element {
     )
   }
 
-  const row = (preset: PresetRow): ReactNode => (
-    <List.Item key={preset.id}>
-      <div style={{ display: 'flex', gap: token.padding, width: '100%', alignItems: 'flex-start' }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <Space size={6} wrap>
-            <Typography.Text strong>{preset.name ?? preset.id}</Typography.Text>
-            <Typography.Text code type="secondary">{preset.id}</Typography.Text>
-            <Tag>{t(preset.trust === 'user' ? 'preset.sourceUser' : 'preset.sourceSystem')}</Tag>
-            <Tag>{t('preset.priority', { value: preset.order ?? '—' })}</Tag>
-            {preset.broken === undefined
-              ? null
-              : <Tooltip title={preset.broken}><Tag color="error">{t('preset.broken')}</Tag></Tooltip>}
-          </Space>
-          <div style={{ marginTop: 4, color: token.colorTextSecondary }}>
-            {preset.description ?? t('preset.noDescription')}
+  /** One row: what the preset says about itself, how it grades, and the four
+   * things the launcher may do to it. */
+  const row = (preset: PresetRow): ReactNode => {
+    const description = preset.description ?? t('preset.noDescription')
+    const text = (
+      <div
+        style={{
+          marginTop: 4,
+          color: token.colorTextSecondary,
+          maxWidth: `${String(DESCRIPTION_CLAMP)}ch`,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {description}
+      </div>
+    )
+    return (
+      <List.Item key={preset.id}>
+        <div style={{ display: 'flex', gap: token.paddingLG, width: '100%', alignItems: 'flex-start' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <Space size={8} wrap>
+              <Typography.Text strong style={{ fontSize: token.fontSizeLG }}>
+                {preset.name ?? preset.id}
+              </Typography.Text>
+              <Typography.Text code type="secondary">{preset.id}</Typography.Text>
+              <Tag>{t(preset.trust === 'user' ? 'preset.sourceUser' : 'preset.sourceSystem')}</Tag>
+              <Typography.Text type="secondary">{t('preset.priority', { value: preset.order ?? '—' })}</Typography.Text>
+              {preset.broken === undefined
+                ? null
+                : <Tooltip title={preset.broken}><Tag color="error">{t('preset.broken')}</Tag></Tooltip>}
+            </Space>
+            {description.length > DESCRIPTION_CLAMP ? <Tooltip title={description}>{text}</Tooltip> : text}
+            <Space size={4} wrap style={{ marginTop: 8 }}>
+              {profiles.length === 0
+                ? <Typography.Text type="secondary">{t('preset.noProfiles')}</Typography.Text>
+                : profiles.map(profile => {
+                  const cell = gradeOf(preset.id, profile)
+                  return (
+                    <Tooltip key={profile} title={gradeTip(cell)}>
+                      <Tag color={gradeColor(cell)}>{`${profile} · ${gradeText(cell)}`}</Tag>
+                    </Tooltip>
+                  )
+                })}
+            </Space>
           </div>
-          <Space size={4} wrap style={{ marginTop: 6 }}>
-            {profiles.length === 0
-              ? <Typography.Text type="secondary">{t('preset.noProfiles')}</Typography.Text>
-              : profiles.map(profile => {
-                const cell = gradeOf(preset.id, profile)
-                return (
-                  <Tooltip key={profile} title={gradeTip(cell)}>
-                    <Tag color={gradeColor(cell)}>{`${profile} · ${gradeText(cell)}`}</Tag>
-                  </Tooltip>
-                )
-              })}
+          <Space size={4} style={{ flexShrink: 0 }}>
+            {preset.editable
+              ? <Button size="small" onClick={() => setEditing(preset)}>{t('preset.edit')}</Button>
+              : (
+                // A disabled button fires no pointer events, so the reason rides
+                // a wrapper that still can.
+                <Tooltip title={t('preset.readOnlyHint')}>
+                  <span style={{ display: 'inline-block' }}>
+                    <Button size="small" disabled style={{ pointerEvents: 'none' }}>{t('preset.edit')}</Button>
+                  </span>
+                </Tooltip>
+              )}
+            <Button size="small" onClick={() => setCopyFrom(preset.id)}>{t('preset.copy')}</Button>
+            {/* One entry point for the two editors, so the row keeps one action
+                of each weight rather than two identical icons. */}
+            <Dropdown
+              trigger={['click']}
+              placement="bottomRight"
+              menu={{
+                items: [
+                  { key: 'reveal', label: t('preset.reveal'), icon: <FolderOpenOutlined /> },
+                  { key: 'editor', label: t('preset.openEditor'), icon: <CodeOutlined /> },
+                ],
+                onClick: ({ key }) => void open(preset, key === 'editor'),
+              }}
+            >
+              <Button size="small" aria-label={`${t('preset.open')}: ${preset.id}`}>
+                {t('preset.open')}
+                <DownOutlined style={{ fontSize: 10 }} />
+              </Button>
+            </Dropdown>
+            {!preset.editable ? null : (
+              <Popconfirm
+                title={t('preset.deleteConfirm', { id: preset.id })}
+                okText={t('common.delete')}
+                cancelText={t('common.cancel')}
+                onConfirm={() => void remove(preset)}
+              >
+                <Button
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  loading={busy === `remove:${preset.id}`}
+                  aria-label={`${t('preset.delete')}: ${preset.id}`}
+                />
+              </Popconfirm>
+            )}
           </Space>
         </div>
-        <Space size={4} wrap>
-          <Tooltip title={preset.editable ? undefined : t('preset.readOnlyHint')}>
-            <Button size="small" disabled={!preset.editable} onClick={() => setEditing(preset)}>
-              {t('preset.edit')}
-            </Button>
-          </Tooltip>
-          <Button size="small" onClick={() => setCopyFrom(preset.id)}>{t('preset.copy')}</Button>
-          <Tooltip title={t('preset.reveal')}>
-            <Button
-              size="small"
-              icon={<FolderOpenOutlined />}
-              aria-label={`${t('preset.reveal')}: ${preset.id}`}
-              onClick={() => void open(preset, false)}
-            />
-          </Tooltip>
-          <Tooltip title={t('preset.openEditor')}>
-            <Button
-              size="small"
-              icon={<CodeOutlined />}
-              aria-label={`${t('preset.openEditor')}: ${preset.id}`}
-              onClick={() => void open(preset, true)}
-            />
-          </Tooltip>
-          {!preset.editable ? null : (
-            <Popconfirm
-              title={t('preset.deleteConfirm', { id: preset.id })}
-              okText={t('common.delete')}
-              cancelText={t('common.cancel')}
-              onConfirm={() => void remove(preset)}
-            >
-              <Button
-                size="small"
-                danger
-                icon={<DeleteOutlined />}
-                loading={busy === `remove:${preset.id}`}
-                aria-label={`${t('preset.delete')}: ${preset.id}`}
-              />
-            </Popconfirm>
-          )}
-        </Space>
-      </div>
-    </List.Item>
-  )
+      </List.Item>
+    )
+  }
 
   const body = (): ReactNode => {
     if (selectedId === undefined) {
@@ -256,11 +293,17 @@ export default function PresetsSection(): JSX.Element {
       return <EmptyState title={t('preset.empty')} description={t('preset.emptyDesc')} />
     }
     return (
-      <Panel pad={false}>
+      <Panel
+        pad={false}
+        title={t('preset.summary', { presets: presets.length, profiles: profiles.length })}
+        description={t('preset.legend')}
+      >
         <List dataSource={presets} rowKey="id" renderItem={row} />
       </Panel>
     )
   }
+
+  const roots = listing?.roots ?? []
 
   return (
     <AppShell
@@ -280,30 +323,37 @@ export default function PresetsSection(): JSX.Element {
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
         <SectionHeading
           title={selected === undefined ? t('preset.title') : t('preset.titleFor', { name: selected.name })}
-          description={(
-            <span>
-              {t('preset.desc')}
-              {(listing?.roots ?? []).map(root => (
-                <span key={root.path}>
-                  {' · '}
-                  {t(root.writable ? 'preset.rootUser' : 'preset.rootSystem')}：
-                  <Typography.Text code>{root.path}</Typography.Text>
-                  {root.exists ? '' : ` (${t('preset.rootMissing')})`}
-                </span>
-              ))}
-            </span>
-          )}
+          description={t('preset.desc')}
           extra={(
             <Space size={8}>
-              <Button
-                size="small"
-                type="primary"
-                icon={<PlusOutlined />}
-                disabled={presets.length === 0}
-                onClick={() => setCopyFrom(presets[0]?.id ?? null)}
+              {/* Long absolute paths belong behind a click, not wrapped across
+                  the header where they would dominate the page. */}
+              <Popover
+                trigger="click"
+                placement="bottomRight"
+                title={t('preset.rootsTitle')}
+                content={(
+                  <Space direction="vertical" size={10} style={{ maxWidth: 460 }}>
+                    {roots.map(root => (
+                      <div key={root.path}>
+                        <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>
+                          {t(root.writable ? 'preset.rootUser' : 'preset.rootSystem')}
+                          {root.exists ? '' : ` · ${t('preset.rootMissing')}`}
+                        </div>
+                        <Typography.Text
+                          code
+                          copyable={{ text: root.path }}
+                          style={{ fontSize: token.fontSizeSM, wordBreak: 'break-all' }}
+                        >
+                          {root.path}
+                        </Typography.Text>
+                      </div>
+                    ))}
+                  </Space>
+                )}
               >
-                {t('preset.copy.add')}
-              </Button>
+                <Button size="small" icon={<InfoCircleOutlined />}>{t('preset.location')}</Button>
+              </Popover>
               <Button
                 size="small"
                 icon={<ReloadOutlined />}
@@ -312,6 +362,15 @@ export default function PresetsSection(): JSX.Element {
                 onClick={() => { if (selectedId !== undefined) void load(selectedId) }}
               >
                 {t('common.refresh')}
+              </Button>
+              <Button
+                size="small"
+                type="primary"
+                icon={<PlusOutlined />}
+                disabled={presets.length === 0}
+                onClick={() => setCopyFrom(presets[0]?.id ?? null)}
+              >
+                {t('preset.copy.add')}
               </Button>
             </Space>
           )}
