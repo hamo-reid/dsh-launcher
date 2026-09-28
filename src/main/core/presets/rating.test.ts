@@ -1,0 +1,149 @@
+/**
+ * Per-profile grading: the same preset read against two profiles resolves a
+ * different set of modules, and the verdict says so without ever calling a
+ * preset the loader accepts broken.
+ */
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { contextForEntry } from '../profile/appState.ts'
+import { discoverPresets } from './roots.ts'
+import { gradePresets } from './rating.ts'
+import type { PresetRootInfo, PresetRow } from '../../../shared/types.ts'
+
+let root: string
+const home = (): string => join(root, 'home')
+const userRoot = (): string => join(home(), '.agent-presets')
+const installDsh = (): string => join(root, 'install', 'node_modules', '@deepseek-ai', 'dsh')
+const ctx = (): ReturnType<typeof contextForEntry> =>
+  contextForEntry({ id: 'a', name: 'dsh@a', execPath: installDsh(), version: 'a', home: home() })
+
+/** An installed package directory (a manifest is what makes it resolvable). */
+function mkPackage(parent: string, name: string): void {
+  const dir = join(parent, 'node_modules', name)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name, version: '1.0.0' }))
+}
+
+/** A profile: its manifest, plus the packages it links itself. */
+function mkProfile(name: string, own: string[] = []): void {
+  const dir = join(home(), 'profiles', name)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({
+    name, dependencies: {}, dsh: { profile: { bundles: [] } },
+  }))
+  for (const pkg of own) mkPackage(dir, pkg)
+}
+
+/** A preset directory whose composition is the given rows. */
+function mkPreset(id: string, rows: string): void {
+  const dir = join(userRoot(), id)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'agent.cordis.yml'), rows)
+}
+
+/** The roster as discovery reads it, over the writable root only. */
+function roster(): PresetRow[] {
+  const rootInfo: PresetRootInfo = { path: userRoot(), trust: 'user', exists: true, writable: true }
+  return discoverPresets([rootInfo])
+}
+
+/** One row of a preset composition. */
+const row = (name: string, extra = ''): string => `- name: ${name}\n${extra}`
+
+/** The dsh package itself: the ancestor holding a manifest is the install
+ * anchor every package row resolves from. */
+function mkInstall(): void {
+  mkdirSync(installDsh(), { recursive: true })
+  writeFileSync(join(installDsh(), 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh' }))
+}
+
+beforeAll(() => {
+  root = mkdtempSync(join(tmpdir(), 'pm-preset-rating-'))
+  mkInstall()
+})
+
+afterAll(() => rmSync(root, { recursive: true, force: true }))
+
+beforeEach(() => {
+  rmSync(home(), { recursive: true, force: true })
+  mkInstall()
+  mkProfile('alpha', ['@acme/tool-local'])
+  mkProfile('beta')
+  mkPackage(join(root, 'install'), '@deepseek-ai/dsh-tool-fs')
+})
+
+describe('gradePresets', () => {
+  it('grades a preset that only names installed harness packages as ok everywhere', () => {
+    mkPreset('standard', row("'@deepseek-ai/dsh-tool-fs'") + row('cordis:group'))
+    expect(gradePresets(ctx(), roster(), ['alpha', 'beta'])).toEqual([
+      { presetId: 'standard', profile: 'alpha', level: 'ok', checked: 2, skipped: 0, conditional: 0, missing: [] },
+      { presetId: 'standard', profile: 'beta', level: 'ok', checked: 2, skipped: 0, conditional: 0, missing: [] },
+    ])
+  })
+
+  it('reports a profile-only package as missing in the profile that does not link it', () => {
+    mkPreset('local', "- id: local-tool\n  name: '@acme/tool-local'\n")
+    const grades = gradePresets(ctx(), roster(), ['alpha', 'beta'])
+    expect(grades.map(cell => [cell.profile, cell.level])).toEqual([['alpha', 'ok'], ['beta', 'incomplete']])
+    expect(grades[0].missing).toEqual([])
+    expect(grades[1].missing).toEqual([{ label: 'row "local-tool"', name: '@acme/tool-local' }])
+  })
+
+  it('resolves a preset-relative row against the preset directory', () => {
+    mkPreset('relative', row('./helper.mjs'))
+    writeFileSync(join(userRoot(), 'relative', 'helper.mjs'), 'export default 1\n')
+    expect(gradePresets(ctx(), roster(), ['alpha'])[0].level).toBe('ok')
+
+    mkPreset('relative-gone', row('./helper.mjs'))
+    const byId = new Map(gradePresets(ctx(), roster(), ['alpha']).map(cell => [cell.presetId, cell]))
+    expect(byId.get('relative-gone')?.missing).toEqual([{ label: 'row 1', name: './helper.mjs' }])
+  })
+
+  it('resolves a file: row, and refuses a malformed one', () => {
+    const target = join(userRoot(), 'target.mjs')
+    mkdirSync(userRoot(), { recursive: true })
+    writeFileSync(target, 'export default 1\n')
+    mkPreset('files', `${row(pathToFileURL(target).href)}${row('file:///%zz')}`)
+    const byId = new Map(gradePresets(ctx(), roster(), ['alpha']).map(cell => [cell.presetId, cell]))
+    expect(byId.get('files')?.missing).toEqual([{ label: 'row 2', name: 'file:///%zz' }])
+  })
+
+  it('calls an unreadable composition unusable, with the reason discovery gave', () => {
+    mkPreset('broken', '[1, 2\n')
+    const [cell] = gradePresets(ctx(), roster(), ['alpha'])
+    expect(cell.level).toBe('unusable')
+    expect(cell.reason).toContain('not valid YAML')
+    expect(cell.checked).toBe(0)
+  })
+
+  it('never judges a row the host would not start', () => {
+    mkPreset('off', "- id: off\n  name: '@acme/absent'\n  disabled: true\n")
+    expect(gradePresets(ctx(), roster(), ['alpha'])).toEqual([
+      { presetId: 'off', profile: 'alpha', level: 'ok', checked: 0, skipped: 1, conditional: 0, missing: [] },
+    ])
+  })
+
+  it('leaves a !!js specifier undecided instead of missing', () => {
+    mkPreset('gated', '- id: gated\n  name: !!js pickTool()\n')
+    expect(gradePresets(ctx(), roster(), ['alpha'])).toEqual([
+      { presetId: 'gated', profile: 'alpha', level: 'ok', checked: 0, skipped: 0, conditional: 1, missing: [] },
+    ])
+  })
+
+  it('grades every preset against every profile in roster order', () => {
+    mkPreset('one', row("'@deepseek-ai/dsh-tool-fs'"))
+    mkPreset('two', row("'@acme/tool-local'"))
+    const grades = gradePresets(ctx(), roster(), ['alpha', 'beta'])
+    expect(grades.map(cell => `${cell.presetId}/${cell.profile}`)).toEqual([
+      'one/alpha', 'one/beta', 'two/alpha', 'two/beta',
+    ])
+  })
+
+  it('grades nothing when the dsh has no profiles', () => {
+    mkPreset('standard', row("'@deepseek-ai/dsh-tool-fs'"))
+    expect(gradePresets(ctx(), roster(), [])).toEqual([])
+  })
+})

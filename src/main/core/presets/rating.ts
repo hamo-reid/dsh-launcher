@@ -1,0 +1,152 @@
+/**
+ * How well one preset fits one profile.
+ *
+ * A preset's rows name modules, and whether those modules exist depends on
+ * WHERE the session runs: the installed harness carries most of them, but a
+ * profile that links its own plugins — a store install, or a bundle that is only
+ * a dependency of that profile — resolves a different set. The host's own health
+ * check cannot answer this question: it walks the install chain alone, from a
+ * base inside the harness, because it judges a roster rather than a launch. This
+ * module answers the per-profile question instead, over the same resolution
+ * chain the launcher already uses for a profile's layer rows: the install's own
+ * Node lookup chain, then the profile's `node_modules`, then the shared profiles
+ * root, then the home.
+ *
+ * The verdict is deliberately three-valued. A composition that cannot be read at
+ * all is unusable; a readable one keeps its rows and reports the ones no
+ * resolver finds, because "this preset mostly works here" is a different answer
+ * from "this preset cannot mount here", and only the second one is hopeless.
+ */
+
+import { readFileSync, statSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { resolveModule } from '../store/module-resolve.ts'
+import { readComposition, type CompositionRead, type CompositionRow } from './rows.ts'
+import type { DshContext } from '../profile/appState.ts'
+import type { PresetGrade, PresetMissingRow, PresetRow } from '../../../shared/types.ts'
+
+/** Whether `path` names an existing regular file (any stat failure is a no). */
+function isFile(path: string): boolean {
+  try {
+    return statSync(path).isFile()
+  } catch {
+    // Absent, unreadable, or a dangling link all mean the same thing here: this
+    // row names no file the loader could import.
+    return false
+  }
+}
+
+/** This profile's answer for one package name, cached for the whole read: a
+ * preset repeats the same handful of packages, and one resolution walks the
+ * install anchor and compiles a Node lookup chain. */
+type PackageCache = Map<string, boolean>
+
+/** Whether one row's module resolves for this profile. */
+function rowResolves(
+  ctx: DshContext,
+  profile: string,
+  presetDir: string,
+  row: CompositionRow,
+  cache: PackageCache,
+): boolean {
+  if (row.kind === 'builtin') return true
+  if (row.kind === 'preset') return isFile(resolve(presetDir, row.name))
+  if (row.kind === 'file') {
+    try {
+      // A `file:` URL is what the host hands a resolver; an absolute path is the
+      // same thing spelled the way a person writes it.
+      return isFile(row.name.startsWith('file:') ? fileURLToPath(new URL(row.name)) : row.name)
+    } catch {
+      // A malformed URL names no file either.
+      return false
+    }
+  }
+  const cached = cache.get(row.name)
+  if (cached !== undefined) return cached
+  const found = resolveModule(ctx, row.name, { profile })
+  const ok = found !== undefined && found.state === 'ok'
+  cache.set(row.name, ok)
+  return ok
+}
+
+/** Read one preset's composition, reusing discovery's verdict when it already
+ * failed: a second read of a broken file would only race the same answer. */
+function compositionOf(preset: PresetRow): CompositionRead {
+  if (preset.broken !== undefined) return { ok: false, problem: preset.broken }
+  try {
+    return readComposition(readFileSync(preset.compositionPath, 'utf8'))
+  } catch {
+    // Discovery statted this file moments ago; any read failure now is the same
+    // answer as an unloadable one.
+    return { ok: false, problem: 'the composition file cannot be read' }
+  }
+}
+
+/** One preset's grade under one profile, from its already-read composition. */
+function gradeOne(
+  ctx: DshContext,
+  preset: PresetRow,
+  profile: string,
+  read: CompositionRead,
+  cache: PackageCache,
+): PresetGrade {
+  const identity = { presetId: preset.id, profile }
+  if (!read.ok) {
+    return {
+      ...identity, level: 'unusable', checked: 0, skipped: 0, conditional: 0, missing: [], reason: read.problem,
+    }
+  }
+  const enabled = read.rows.filter(row => !row.skipped)
+  const missing: PresetMissingRow[] = []
+  let conditional = 0
+  for (const row of enabled) {
+    // A `!!js` specifier is the loader's to decide; reporting it as missing
+    // would call a preset the loader accepts broken, which is the failure the
+    // host's own check goes out of its way to avoid.
+    if (row.conditional) {
+      conditional += 1
+      continue
+    }
+    if (rowResolves(ctx, profile, preset.dir, row, cache)) continue
+    missing.push({ label: row.label, name: row.name })
+  }
+  return {
+    ...identity,
+    level: missing.length === 0 ? 'ok' : 'incomplete',
+    checked: enabled.length - conditional,
+    skipped: read.rows.length - enabled.length,
+    conditional,
+    missing,
+  }
+}
+
+/**
+ * Grade every preset against every profile of one dsh.
+ * @param ctx - the dsh whose install chain and profiles are used.
+ * @param presets - the discovered roster.
+ * @param profiles - the profile names to grade against.
+ * @returns one cell per preset and profile, in roster order.
+ */
+export function gradePresets(
+  ctx: DshContext,
+  presets: readonly PresetRow[],
+  profiles: readonly string[],
+): PresetGrade[] {
+  // One cache per profile, shared by every preset: the same packages recur, and
+  // a profile's resolution chain is the expensive part of a probe.
+  const caches = new Map<string, PackageCache>()
+  const cells: PresetGrade[] = []
+  for (const preset of presets) {
+    const read = compositionOf(preset)
+    for (const profile of profiles) {
+      let cache = caches.get(profile)
+      if (cache === undefined) {
+        cache = new Map<string, boolean>()
+        caches.set(profile, cache)
+      }
+      cells.push(gradeOne(ctx, preset, profile, read, cache))
+    }
+  }
+  return cells
+}
