@@ -18,6 +18,7 @@ import { registerSettingsIpc } from './ipc/app/settings.ts'
 import { registerDataRootIpc } from './ipc/app/data-root.ts'
 import { registerStoreIpc } from './ipc/plugins/migration.ts'
 import { registerExtensionsIpc } from './ipc/extensions/extensions.ts'
+import { registerPresetsIpc } from './ipc/presets/presets.ts'
 import { hookWindowMaximize, registerWindowIpc } from './ipc/app/window.ts'
 import { registerLogsIpc } from './ipc/app/logs.ts'
 import { child, initLogger, logger, printBanner } from './core/shared/logger.ts'
@@ -32,6 +33,7 @@ import { initGithubAuth, setTokenCipher } from './core/github/auth.ts'
 import { setMcpSecretCipher } from './core/mcp/secrets.ts'
 import { setSkillTrash } from './core/skills/skills.ts'
 import { setSkillLibraryTrash } from './core/skills/library.ts'
+import { setPresetTrash } from './core/presets/authoring.ts'
 
 /** Domain-tagged logger for renderer-sourced messages (`{domain:"renderer"}`). */
 const rlog = child('renderer')
@@ -327,7 +329,8 @@ function registerIpc(): void {
   registerPluginsIpc()
   registerMarketIpc()
   registerStoreIpc()
-registerExtensionsIpc()
+  registerExtensionsIpc()
+  registerPresetsIpc()
   registerDshIpc()
   registerHomeDataIpc()
   registerTrashIpc()
@@ -378,6 +381,9 @@ app.whenReady().then(async () => {
   // The launcher-global skill library takes its location from the data root
   // (see `skillLibraryDir`); deletions from it use the same recycle-bin mover.
   setSkillLibraryTrash(path => shell.trashItem(path))
+  // Deleting a locally authored agent preset is reversible the same way; the
+  // composition itself is never rewritten by the launcher.
+  setPresetTrash(path => shell.trashItem(path))
   initGithubAuth()
   // Give app-level state the Electron `userData` dir for its defaults.
   configureAppState(app.getPath('userData'))

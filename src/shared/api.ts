@@ -46,6 +46,8 @@ import type {
   OnboardingState,
   PackageVersionInfo,
   PluginRow,
+  PresetListing,
+  PresetMetaInput,
   ProfileDetail,
   ProfileFileKind,
   ProfileLayer,
@@ -137,6 +139,25 @@ export interface WindowApi {
     /** The home patch layer's raw text (source mode). */
     readPatch: (dshId: string) => Promise<IpcResult<{ text: string; path: string }>>
     writePatch: (dshId: string, text: string) => Promise<IpcResult<boolean>>
+  }
+
+  /** Agent presets: one dsh's roster, graded against each of its profiles. The
+   * launcher edits only the display metadata of a locally authored preset; a
+   * preset's composition is the preset, and is edited outside — in the file
+   * manager or an editor this opens. */
+  preset: {
+    /** Roots, roster, profiles and one grade per preset/profile pairing. */
+    list: (dshId: string) => Promise<IpcResult<PresetListing>>
+    /** Store a locally authored preset's name, description and priority. */
+    saveMeta: (dshId: string, id: string, meta: PresetMetaInput) => Promise<IpcResult<boolean>>
+    /** Create a preset by copying an existing one into the writable root. */
+    copy: (dshId: string, fromId: string, toId: string, name: string) => Promise<IpcResult<boolean>>
+    /** Move a locally authored preset to the OS recycle bin. */
+    remove: (dshId: string, id: string) => Promise<IpcResult<boolean>>
+    /** Reveal the preset's directory in the OS file manager. */
+    reveal: (dshId: string, id: string) => Promise<IpcResult<boolean>>
+    /** Open the preset's directory in VS Code (its registered protocol). */
+    openEditor: (dshId: string, id: string) => Promise<IpcResult<boolean>>
   }
 
   /** Extensions surface. Track A is MCP servers — the `insert:` rows that mount

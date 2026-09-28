@@ -44,6 +44,8 @@ import type {
   OnboardingState,
   PackageVersionInfo,
   PluginRow,
+  PresetListing,
+  PresetMetaInput,
   ProfileDetail,
   ProfileFileKind,
   ProfileLayer,
@@ -156,6 +158,21 @@ const api = {
       ipcRenderer.invoke('home:readPatch', dshId),
     writePatch: (dshId: string, text: string): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('home:writePatch', dshId, text),
+  },
+
+  preset: {
+    list: (dshId: string): Promise<IpcResult<PresetListing>> =>
+      ipcRenderer.invoke('preset:list', dshId),
+    saveMeta: (dshId: string, id: string, meta: PresetMetaInput): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('preset:saveMeta', dshId, id, meta),
+    copy: (dshId: string, fromId: string, toId: string, name: string): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('preset:copy', dshId, fromId, toId, name),
+    remove: (dshId: string, id: string): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('preset:delete', dshId, id),
+    reveal: (dshId: string, id: string): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('preset:reveal', dshId, id),
+    openEditor: (dshId: string, id: string): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('preset:openEditor', dshId, id),
   },
 
   ext: {
