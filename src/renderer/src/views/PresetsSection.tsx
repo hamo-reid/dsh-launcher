@@ -298,7 +298,13 @@ export default function PresetsSection(): JSX.Element {
         title={t('preset.summary', { presets: presets.length, profiles: profiles.length })}
         description={t('preset.legend')}
       >
-        <List dataSource={presets} rowKey="id" renderItem={row} />
+        {/* antd's List.Item pads itself `12px 0`, so without this the rows would
+            sit flush against the panel while its own header is inset 16px. The
+            inset lives on the body rather than the rows, which keeps the
+            separators inside the same box as the text. */}
+        <div style={{ padding: `0 ${String(token.padding)}px` }}>
+          <List dataSource={presets} rowKey="id" renderItem={row} />
+        </div>
       </Panel>
     )
   }
