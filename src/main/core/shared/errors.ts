@@ -121,6 +121,12 @@ export const E = {
   runBadPort: 'run.badPort',
   runOpenHttpOnly: 'run.openHttpOnly',
   runInsertConflict: 'run.insertConflict',
+  // agent presets
+  presetNotFound: 'preset.notFound',
+  presetReadOnly: 'preset.readOnly',
+  presetExists: 'preset.exists',
+  presetBadId: 'preset.badId',
+  presetNoUserRoot: 'preset.noUserRoot',
   // misc
   npmNotFound: 'npm.notFound',
   yamlInvalid: 'yaml.invalid',

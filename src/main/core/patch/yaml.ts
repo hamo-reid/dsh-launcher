@@ -8,7 +8,7 @@
  * name here never matches. The tag is load-only — the launcher never dumps
  * `!!js` back through js-yaml — so `identify` always returns false.
  */
-import { CORE_SCHEMA, FAILSAFE_SCHEMA, defineScalarTag, load } from 'js-yaml'
+import { CORE_SCHEMA, FAILSAFE_SCHEMA, defineScalarTag, dump, load } from 'js-yaml'
 
 /** Sentinel prefix carrying a cordis `!!js` expression through js-yaml. */
 const JS_PREFIX = '\u0000dsh-js:'
@@ -24,6 +24,21 @@ export const CONFIG_SCHEMA = CORE_SCHEMA.withTags(jsExprTag)
 /** Parse one patch `config` body with the shared tolerant schema. */
 export function loadYaml(raw: string): unknown {
   return load(raw, { schema: CONFIG_SCHEMA })
+}
+
+/**
+ * Render a small document the launcher itself owns.
+ *
+ * The write-side counterpart of {@link loadYaml}, and the reason it lives here
+ * rather than in the one module that needs it: the repo keeps a single js-yaml
+ * importer, so the tolerant loader and the renderer can never drift apart. It
+ * only ever sees plain scalars a person typed — the `!!js` sentinel never
+ * reaches a dump, which is why the loader-only tag is no obstacle.
+ * @param value - the document to render.
+ * @returns the YAML text, newline-terminated.
+ */
+export function dumpYaml(value: unknown): string {
+  return dump(value, { lineWidth: -1, noRefs: true })
 }
 
 /** Whether a parsed scalar came from a `!!js` expression. */

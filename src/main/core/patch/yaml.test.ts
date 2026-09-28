@@ -8,7 +8,7 @@
  * reported as malformed YAML by any validator.
  */
 import { describe, expect, it } from 'vitest'
-import { loadStructureOnly } from './yaml.ts'
+import { dumpYaml, loadStructureOnly, loadYaml } from './yaml.ts'
 
 /** The config body `core/mcp/mcp.ts` renders for a server holding a secret. */
 const SECRET_CONFIG = [
@@ -44,5 +44,18 @@ describe('loadStructureOnly', () => {
 
   it('throws on malformed YAML, so a caller can report it as such', () => {
     expect(() => loadStructureOnly('a: [1,2')).toThrow()
+  })
+})
+
+describe('dumpYaml', () => {
+  it('renders a document the tolerant loader reads back unchanged', () => {
+    const text = dumpYaml({ name: '标准模式', description: 'a: b', order: 1 })
+    expect(text.endsWith('\n')).toBe(true)
+    expect(loadYaml(text)).toEqual({ name: '标准模式', description: 'a: b', order: 1 })
+  })
+
+  it('keeps a long description on one line', () => {
+    const description = 'x'.repeat(200)
+    expect(dumpYaml({ description })).toBe(`description: ${description}\n`)
   })
 })

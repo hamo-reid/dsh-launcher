@@ -13,10 +13,11 @@
  * capability, and a broken name must never become a preset that cannot start.
  */
 
-import { readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { METADATA_FILE } from '../../../shared/preset.ts'
-import { isJsExpr, loadYaml } from '../patch/yaml.ts'
+import { dumpYaml, isJsExpr, loadYaml } from '../patch/yaml.ts'
+import type { PresetMetaInput } from '../../../shared/types.ts'
 
 /** Display text a preset may publish about itself. */
 export interface PresetMetadata {
@@ -75,4 +76,45 @@ export function readPresetMetadata(dir: string): PresetMetadata {
     ...description === undefined ? {} : { description },
     ...order === undefined ? {} : { order },
   }
+}
+
+/**
+ * Render display metadata as the file's contents.
+ *
+ * Absent fields are omitted rather than written empty, so a preset with no
+ * description does not ship a key that reads as an intentional blank, and a
+ * preset with nothing to publish has no file at all.
+ * @param meta - the display text to store.
+ * @returns the YAML document, or undefined when there is nothing to store.
+ */
+export function renderPresetMetadata(meta: PresetMetaInput): string | undefined {
+  const name = text(meta.name)
+  const description = text(meta.description)
+  const order = typeof meta.order === 'number' && Number.isFinite(meta.order) ? meta.order : undefined
+  if (name === undefined && description === undefined && order === undefined) return undefined
+  return dumpYaml({
+    ...name === undefined ? {} : { name },
+    ...description === undefined ? {} : { description },
+    ...order === undefined ? {} : { order },
+  })
+}
+
+/**
+ * Store one preset's display metadata.
+ *
+ * Nothing to publish removes the file: an empty `preset.yml` would claim the
+ * preset publishes blank text, where its absence says it publishes none.
+ * @param dir - the preset directory to write into.
+ * @param meta - the display text to store.
+ */
+export function writePresetMetadata(dir: string, meta: PresetMetaInput): void {
+  const rendered = renderPresetMetadata(meta)
+  const path = join(dir, METADATA_FILE)
+  if (rendered === undefined) {
+    rmSync(path, { force: true })
+    return
+  }
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(path, rendered)
+  if (readFileSync(path, 'utf8') !== rendered) throw new Error('write verify failed')
 }
