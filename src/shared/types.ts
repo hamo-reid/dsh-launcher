@@ -1268,3 +1268,78 @@ export interface SkillLibOverviewRow {
   entry: SkillLibEntry
   installs: SkillLibInstall[]
 }
+
+// ── agent presets (a dsh's roster + per-profile grades) ──────────────────────
+
+/** Which root a preset was discovered under. A `system` preset ships with the
+ * deployment; a `user` one was authored locally, and is the only writable kind. */
+export type PresetTrust = 'system' | 'user'
+
+/** One directory a dsh's preset roster is composed from. */
+export interface PresetRootInfo {
+  path: string
+  trust: PresetTrust
+  exists: boolean
+  /** The launcher may create/edit/delete presets here (only the user root). */
+  writable: boolean
+}
+
+/** One discovered preset directory. */
+export interface PresetRow {
+  /** Stable identity: the preset directory's name. */
+  id: string
+  trust: PresetTrust
+  dir: string
+  /** Absolute path of the `agent.cordis.yml` that makes the directory a preset. */
+  compositionPath: string
+  /** Display name from `preset.yml`; absent falls back to the id. */
+  name?: string
+  description?: string
+  /** Declared priority within its own root; absent sorts last, then by id. */
+  order?: number
+  /** Whether the launcher may edit this preset's metadata here. */
+  editable: boolean
+  /** Why the preset cannot mount (composition missing/unloadable), when it can't. */
+  broken?: string
+}
+
+/** How well one preset fits one profile. */
+export type PresetGradeLevel = 'ok' | 'incomplete' | 'unusable'
+
+/** One composition row whose module no resolver on that profile could find. */
+export interface PresetMissingRow {
+  /** `row "id"` / `row N` — the wording the host itself reports. */
+  label: string
+  name: string
+}
+
+/** One preset's usability under one profile. */
+export interface PresetGrade {
+  presetId: string
+  profile: string
+  level: PresetGradeLevel
+  /** Enabled, statically decidable rows that were judged. */
+  checked: number
+  /** Rows the host would not start (`disabled:` truthy). */
+  skipped: number
+  /** Rows whose gate is a `!!js` expression only the loader can decide. */
+  conditional: number
+  missing: PresetMissingRow[]
+  /** Why the preset is unusable, set on an `unusable` grade. */
+  reason?: string
+}
+
+/** Everything the presets tab renders for one dsh, read in one call. */
+export interface PresetListing {
+  roots: PresetRootInfo[]
+  presets: PresetRow[]
+  profiles: string[]
+  grades: PresetGrade[]
+}
+
+/** The editable half of a preset's metadata. `''` and `null` clear the key. */
+export interface PresetMetaInput {
+  name: string
+  description: string
+  order: number | null
+}
