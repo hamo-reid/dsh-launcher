@@ -1,9 +1,9 @@
 /**
  * Dialogs for the presets page — split out so the list stays readable.
  *
- * Both edit only what the launcher owns: a locally authored preset's display
- * text, and the id a new preset claims. A composition is never offered here: it
- * is the preset, and the row's own actions open its directory for that.
+ * Both edit only what the launcher owns: a preset's display text, and the id a
+ * new preset claims. The plugin list is never offered here: it is the preset, and
+ * the row's own actions open the file that carries it.
  */
 import { useEffect, useState } from 'react'
 import { Button, Input, InputNumber, Modal, Segmented, Select, Space, theme } from 'antd'
@@ -11,11 +11,11 @@ import { useTranslation } from 'react-i18next'
 import FieldLabel from '../../components/FieldLabel.tsx'
 import { MODAL } from '../../theme.ts'
 import { PRESET_ID_RE } from '../../../../shared/preset.ts'
-import type { PresetMetaInput, PresetRow } from '../../../../shared/types.ts'
+import type { PresetListItem, PresetMetaInput } from '../../../../shared/types.ts'
 
 interface PresetMetaModalProps {
   /** The preset being edited, or null when the dialog is closed. */
-  preset: PresetRow | null
+  preset: PresetListItem | null
   saving: boolean
   onCancel: () => void
   onSubmit: (meta: PresetMetaInput) => void
@@ -96,7 +96,7 @@ interface PresetCreateModalProps {
    * this dsh ships no such preset. */
   initialMode: PresetCreateMode
   /** The roster, as the copy mode's sources. */
-  presets: PresetRow[]
+  presets: PresetListItem[]
   /** The built-in minimal preset to start from, or null when this dsh has none. */
   minimalId: string | null
   /** The preset the copy mode opens on. */
@@ -108,9 +108,10 @@ interface PresetCreateModalProps {
 
 /**
  * Create a preset: from the deployment's minimal preset, or from a copy of any
- * preset already on the roster. Both are directory copies, so a new preset is
- * as loadable as the one it starts from — which is the point of offering the
- * minimal preset, since every preset is otherwise a variation on a big one.
+ * preset already on the roster. Either way the new preset's plugin list is the
+ * source's, copied verbatim, so it is exactly as loadable as what it started
+ * from — which is the point of offering the minimal preset, since every other
+ * preset is a variation on a big one.
  */
 export function PresetCreateModal(props: PresetCreateModalProps): JSX.Element {
   const { t } = useTranslation()

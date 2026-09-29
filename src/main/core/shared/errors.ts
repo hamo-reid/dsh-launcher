@@ -127,6 +127,8 @@ export const E = {
   presetExists: 'preset.exists',
   presetBadId: 'preset.badId',
   presetNoUserRoot: 'preset.noUserRoot',
+  presetNoPlugins: 'preset.noPlugins',
+  presetBadComposition: 'preset.badComposition',
   // misc
   npmNotFound: 'npm.notFound',
   yamlInvalid: 'yaml.invalid',

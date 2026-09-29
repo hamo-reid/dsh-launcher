@@ -7,6 +7,10 @@
  * import directly from here.
  */
 
+import type { PresetModel } from './preset.ts'
+
+export type { PresetModel }
+
 // ── patch / profile layering ────────────────────────────────────────────────
 
 /** One plugin row visible in the UI: a `- id: ...` entry in a cordis patch layer. */
@@ -1269,13 +1273,13 @@ export interface SkillLibOverviewRow {
   installs: SkillLibInstall[]
 }
 
-// ── agent presets (a dsh's roster + per-profile grades) ──────────────────────
+// ── agent presets (one profile's roster, from either preset model) ───────────
 
 /** Which root a preset was discovered under. A `system` preset ships with the
  * deployment; a `user` one was authored locally, and is the only writable kind. */
 export type PresetTrust = 'system' | 'user'
 
-/** One directory a dsh's preset roster is composed from. */
+/** One directory a dsh's preset roster is composed from (directory model). */
 export interface PresetRootInfo {
   path: string
   trust: PresetTrust
@@ -1284,7 +1288,7 @@ export interface PresetRootInfo {
   writable: boolean
 }
 
-/** One discovered preset directory. */
+/** One discovered preset directory (directory model). */
 export interface PresetRow {
   /** Stable identity: the preset directory's name. */
   id: string
@@ -1301,6 +1305,67 @@ export interface PresetRow {
   editable: boolean
   /** Why the preset cannot mount (composition missing/unloadable), when it can't. */
   broken?: string
+}
+
+/** Which layer supplies one preset's definition. The two models name the same
+ * distinction differently, and this is the page's vocabulary for both. */
+export type PresetSource =
+  /** The shipped set, inside the installed presets package (directory model). */
+  | 'package'
+  /** A bundle layer's declaration (declaration model). */
+  | 'bundle'
+  /** This profile's own patch layer (declaration model). */
+  | 'profile'
+  /** The machine-level home patch layer (declaration model). */
+  | 'home'
+  /** `<home>/.agent-presets` (directory model). */
+  | 'user-dir'
+
+/** One preset the page renders, from either model. */
+export interface PresetListItem {
+  id: string
+  /** `system` for a preset the deployment supplies, `user` for a local one. */
+  trust: PresetTrust
+  /** Where the definition lives. */
+  source: PresetSource
+  /** The bundle that declares it, on a bundle layer. */
+  bundle?: string
+  name?: string
+  description?: string
+  order?: number
+  /** Why dsh cannot use this preset, when it cannot. */
+  broken?: string
+  /** Whether the launcher may edit this preset's display text here. */
+  editable: boolean
+  /** What "open" targets: a preset directory, or the file that declares it. */
+  location: string
+  /** Whether `location` is a directory or a file. */
+  locationKind: 'dir' | 'file'
+}
+
+/** One place a profile's roster can come from, for the page's location list. */
+export interface PresetPlace {
+  source: PresetSource
+  /** Absolute path: a preset root directory, or a patch file. */
+  path: string
+  bundle?: string
+  exists: boolean
+  /** The launcher may write here. */
+  writable: boolean
+}
+
+/** One preset directory the retired root still holds, which a declaration-model
+ * dsh no longer reads. */
+export interface PresetLegacyItem {
+  id: string
+  /** The directory on disk — untouched until a person removes it. */
+  dir: string
+  name?: string
+  description?: string
+  /** Why it cannot be migrated as it stands. */
+  problem?: string
+  /** Whether the id is already taken, so a migration would collide. */
+  taken: boolean
 }
 
 /** How well one preset fits one profile. */
@@ -1329,12 +1394,22 @@ export interface PresetGrade {
   reason?: string
 }
 
-/** Everything the presets tab renders for one dsh, read in one call. */
+/** Everything the presets tab renders for one profile, read in one call. */
 export interface PresetListing {
-  roots: PresetRootInfo[]
-  presets: PresetRow[]
-  profiles: string[]
+  /** The profile this listing is for. */
+  profile: string
+  /** Which preset model that profile's composition mounts. */
+  model: PresetModel
+  presets: PresetListItem[]
+  /** One grade per preset, for this profile. */
   grades: PresetGrade[]
+  /** The definition sources, in the order dsh applies them. */
+  places: PresetPlace[]
+  /** Directories the retired root still holds; empty on a directory-model dsh,
+   * where those directories ARE the roster. */
+  legacy: PresetLegacyItem[]
+  /** Roster-level diagnostics the page cannot show as a row. */
+  warnings: string[]
 }
 
 /** The editable half of a preset's metadata. `''` and `null` clear the key. */

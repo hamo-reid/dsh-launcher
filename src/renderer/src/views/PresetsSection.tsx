@@ -1,20 +1,24 @@
 /**
- * 预设 — one dsh's agent presets, as a roster.
+ * 预设 — one PROFILE's agent presets.
  *
- * A preset is a directory dsh discovers: its `agent.cordis.yml` is what mounts,
- * and the four things this page owns are its id, name, description and
- * priority. The composition is deliberately NOT edited here — every row opens
- * its directory in the file manager or VS Code, because a composition is a
- * Cordis file and a text editor is the tool for it.
+ * dsh has shipped two preset models and this page serves both without asking
+ * which one it is looking at: a preset is a DIRECTORY dsh scans (through
+ * 0.1.5-rc.2), or a declaration ROW in one of the profile's composed patch
+ * layers (0.2.0-rc.1 and later). The three things the page owns are the same
+ * either way — the preset's id, name, description and priority, plus where its
+ * definition lives. The plugin list is deliberately NOT edited here: it is the
+ * preset, and the row's Open action hands it to the editor of your choice.
  *
- * The grades are the point of the page: one preset can be fine under one
- * profile and short a handful of plugins under another, since a profile
- * resolves its own `node_modules` on top of the install chain. One tag per
- * profile says which, and hovering it names every row no resolver found.
+ * The profile is the scope, not a filter, because the newer model makes the
+ * roster a per-profile fact: two profiles of one dsh may select different bundle
+ * versions, and a declaration in one profile's patch layer does not exist in
+ * another's. The grade answers the question a version number cannot — can THIS
+ * profile resolve the rows this preset would start — since a profile resolves
+ * its own `node_modules` on top of the install chain.
  */
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
-  Alert, Button, Dropdown, List, Popover, Skeleton, Space, Tag, Tooltip, Typography, message, theme,
+  Alert, Button, Dropdown, List, Popover, Select, Skeleton, Space, Tag, Tooltip, Typography, message, theme,
 } from 'antd'
 import {
   CodeOutlined, DownOutlined, FolderOpenOutlined, InfoCircleOutlined, PlusOutlined,
@@ -30,7 +34,7 @@ import Panel from '../components/Panel.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
 import { PresetCreateModal, PresetMetaModal, type PresetCreateMode } from './presets/PresetModals.tsx'
 import type {
-  DshEntry, PresetGrade, PresetListing, PresetMetaInput, PresetRow,
+  DshEntry, PresetGrade, PresetLegacyItem, PresetListItem, PresetListing, PresetMetaInput, PresetSource,
 } from '../../../shared/types.ts'
 
 /** Beyond this the description is cut short and offered in full on hover, so a
@@ -41,6 +45,16 @@ const DESCRIPTION_CLAMP = 78
  * smallest composition, and an id the host's own display table knows by name. */
 const MINIMAL_PRESET_ID = 'minimal'
 
+/** The locale key naming where one definition comes from. `as const` keeps the
+ * values literal, which is what lets `t()` typecheck a looked-up key. */
+const SOURCE_KEY = {
+  package: 'preset.source.package',
+  bundle: 'preset.source.bundle',
+  profile: 'preset.source.profile',
+  home: 'preset.source.home',
+  'user-dir': 'preset.source.userDir',
+} as const satisfies Record<PresetSource, string>
+
 export default function PresetsSection(): JSX.Element {
   const { t } = useTranslation()
   const { token } = theme.useToken()
@@ -50,13 +64,17 @@ export default function PresetsSection(): JSX.Element {
   // Local view selection only — the launcher has no global "active dsh", so
   // this decides which roster is shown and nothing else.
   const [selectedId, setSelectedId] = useState<string>()
+  const [profiles, setProfiles] = useState<string[]>([])
+  const [profile, setProfile] = useState<string>()
   const [listing, setListing] = useState<PresetListing | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState('')
-  const [editing, setEditing] = useState<PresetRow | null>(null)
+  const [editing, setEditing] = useState<PresetListItem | null>(null)
   // The open create dialog and what it opens on, or null while it is closed.
   const [create, setCreate] = useState<{ mode: PresetCreateMode; from: string } | null>(null)
+  // Guards a late response from a profile the page has already left.
+  const generation = useRef(0)
 
   const refreshDshes = useCallback(async (): Promise<void> => {
     const r = await window.api.dsh.list()
@@ -70,9 +88,32 @@ export default function PresetsSection(): JSX.Element {
 
   useEffect(() => { void refreshDshes() }, [refreshDshes])
 
-  const load = useCallback(async (dshId: string): Promise<void> => {
+  // The profile list follows the dsh; the current choice survives a refresh when
+  // it still exists, and falls back to the first profile otherwise.
+  useEffect(() => {
+    if (selectedId === undefined) {
+      setProfiles([])
+      setProfile(undefined)
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      const r = await window.api.dsh.profiles(selectedId)
+      if (cancelled) return
+      if (!r.ok) { void message.error(apiErrorText(r)); return }
+      const names = r.value.map(p => p.name)
+      setProfiles(names)
+      setProfile(prev => (prev !== undefined && names.includes(prev) ? prev : names[0]))
+    })()
+    return () => { cancelled = true }
+  }, [selectedId])
+
+  const load = useCallback(async (dshId: string, profileName: string): Promise<void> => {
+    const mine = generation.current + 1
+    generation.current = mine
     setLoading(true)
-    const r = await window.api.preset.list(dshId)
+    const r = await window.api.preset.list(dshId, profileName)
+    if (generation.current !== mine) return
     setLoading(false)
     if (!r.ok) { setError(apiErrorText(r)); setListing(null); return }
     setError(null)
@@ -80,17 +121,25 @@ export default function PresetsSection(): JSX.Element {
   }, [])
 
   useEffect(() => {
-    if (selectedId === undefined) { setListing(null); return }
-    // Drop the previous dsh's roster first: an id that means one thing here and
-    // nothing there must never be shown against the new selection.
+    if (selectedId === undefined || profile === undefined) { setListing(null); return }
+    // Drop the previous profile's roster first: a preset that means one thing
+    // here and nothing there must never be shown against the new selection.
     setListing(null)
     setError(null)
-    void load(selectedId)
-  }, [selectedId, load])
+    void load(selectedId, profile)
+  }, [selectedId, profile, load])
 
   const selected = dshes.find(d => d.id === selectedId)
   const presets = listing?.presets ?? []
-  const profiles = listing?.profiles ?? []
+  const legacy = listing?.legacy ?? []
+  const warnings = listing?.warnings ?? []
+  const places = listing?.places ?? []
+  const model = listing?.model ?? null
+
+  /** Re-read the current profile, whatever the page last asked for. */
+  const reload = useCallback(async (): Promise<void> => {
+    if (selectedId !== undefined && profile !== undefined) await load(selectedId, profile)
+  }, [selectedId, profile, load])
 
   // The minimal starting point is the SHIPPED one: a user directory that happens
   // to be named `minimal` is not what "minimal instance" means, and a broken one
@@ -101,49 +150,60 @@ export default function PresetsSection(): JSX.Element {
 
   /** The minimal instance: a fresh preset off the deployment's smallest one. */
   const createPreset = async (mode: PresetCreateMode, fromId: string, toId: string, name: string): Promise<void> => {
-    if (selectedId === undefined) return
+    if (selectedId === undefined || profile === undefined) return
     setBusy('create')
-    const r = await window.api.preset.copy(selectedId, fromId, toId, name)
+    const r = await window.api.preset.copy(selectedId, profile, fromId, toId, name)
     setBusy('')
     if (!r.ok) { void message.error(apiErrorText(r)); return }
     void message.success(t('preset.create.done', { id: toId }))
     setCreate(null)
-    await load(selectedId)
+    await reload()
   }
 
   const saveMeta = async (meta: PresetMetaInput): Promise<void> => {
-    if (selectedId === undefined || editing === null) return
+    if (selectedId === undefined || profile === undefined || editing === null) return
     setBusy('save')
-    const r = await window.api.preset.saveMeta(selectedId, editing.id, meta)
+    const r = await window.api.preset.saveMeta(selectedId, profile, editing.id, meta)
     setBusy('')
     if (!r.ok) { void message.error(apiErrorText(r)); return }
     void message.success(t('preset.meta.saved'))
     setEditing(null)
-    await load(selectedId)
+    await reload()
   }
 
-  const remove = async (preset: PresetRow): Promise<void> => {
-    if (selectedId === undefined) return
+  const remove = async (preset: PresetListItem): Promise<void> => {
+    if (selectedId === undefined || profile === undefined) return
     // The confirmation dialog is already gone by now, so the spinner on the
-    // refresh button is what says the recycle-bin move is still running.
+    // refresh button is what says the removal is still running.
     setLoading(true)
-    const r = await window.api.preset.remove(selectedId, preset.id)
+    const r = await window.api.preset.remove(selectedId, profile, preset.id)
     setLoading(false)
     if (!r.ok) { void message.error(apiErrorText(r)); return }
     void message.success(t('preset.deleted', { id: preset.id }))
-    await load(selectedId)
+    await reload()
   }
 
-  const open = async (preset: PresetRow, editor: boolean): Promise<void> => {
-    if (selectedId === undefined) return
+  const migrate = async (item: PresetLegacyItem): Promise<void> => {
+    if (selectedId === undefined || profile === undefined) return
+    setBusy(`migrate:${item.id}`)
+    const r = await window.api.preset.migrate(selectedId, profile, item.id)
+    setBusy('')
+    if (!r.ok) { void message.error(apiErrorText(r)); return }
+    void message.success(t('preset.legacyMigrated', { id: item.id }))
+    await reload()
+  }
+
+  const open = async (preset: PresetListItem, editor: boolean): Promise<void> => {
+    if (selectedId === undefined || profile === undefined) return
     const r = editor
-      ? await window.api.preset.openEditor(selectedId, preset.id)
-      : await window.api.preset.reveal(selectedId, preset.id)
+      ? await window.api.preset.openEditor(selectedId, profile, preset.id)
+      : await window.api.preset.reveal(selectedId, profile, preset.id)
     if (!r.ok) void message.error(apiErrorText(r))
   }
 
-  const gradeOf = (presetId: string, profile: string): PresetGrade | undefined =>
-    listing?.grades.find(cell => cell.presetId === presetId && cell.profile === profile)
+  /** This preset's grade under the profile the page is showing. */
+  const gradeOf = (presetId: string): PresetGrade | undefined =>
+    listing?.grades.find(cell => cell.presetId === presetId)
 
   /** What a grade reads as. An `incomplete` grade leads with the count, which is
    * the whole reason the tag is worth looking at. */
@@ -177,9 +237,9 @@ export default function PresetsSection(): JSX.Element {
     )
   }
 
-  /** What the row's menu offers. A built-in preset keeps only the copy, since
-   * every other entry would write to a directory the deployment owns. */
-  const actionsFor = (preset: PresetRow): MenuAction[] => {
+  /** What the row's menu offers. A preset the deployment owns keeps only the
+   * copy, since every other entry would write where the launcher may not. */
+  const actionsFor = (preset: PresetListItem): MenuAction[] => {
     const actions: MenuAction[] = []
     if (preset.editable) actions.push({ key: 'edit', label: t('preset.edit') })
     actions.push({ key: 'copy', label: t('preset.copy') })
@@ -194,15 +254,15 @@ export default function PresetsSection(): JSX.Element {
     return actions
   }
 
-  const act = (preset: PresetRow, key: string): void => {
+  const act = (preset: PresetListItem, key: string): void => {
     if (key === 'edit') setEditing(preset)
     else if (key === 'copy') setCreate({ mode: 'copy', from: preset.id })
     else void remove(preset)
   }
 
-  /** One row: what the preset says about itself, how it grades, and the two
+  /** One row: what the preset says about itself, how it grades here, and the two
    * controls the launcher offers on it — open it, or act on it. */
-  const row = (preset: PresetRow): ReactNode => {
+  const row = (preset: PresetListItem): ReactNode => {
     const description = preset.description ?? t('preset.noDescription')
     const text = (
       <div
@@ -218,6 +278,7 @@ export default function PresetsSection(): JSX.Element {
         {description}
       </div>
     )
+    const cell = gradeOf(preset.id)
     return (
       <List.Item key={preset.id}>
         <div style={{ display: 'flex', gap: token.paddingLG, width: '100%', alignItems: 'flex-start' }}>
@@ -232,24 +293,20 @@ export default function PresetsSection(): JSX.Element {
               <Tooltip title={preset.editable ? undefined : t('preset.readOnlyHint')}>
                 <Tag>{t(preset.trust === 'user' ? 'preset.sourceUser' : 'preset.sourceSystem')}</Tag>
               </Tooltip>
+              {/* Where the definition lives. Two shipped presets and a local one
+                  can share a name, and only this says which file to open. */}
+              <Tooltip title={preset.bundle}>
+                <Tag color="blue">{t(SOURCE_KEY[preset.source])}</Tag>
+              </Tooltip>
               <Typography.Text type="secondary">{t('preset.priority', { value: preset.order ?? '—' })}</Typography.Text>
+              <Tooltip title={gradeTip(cell)}>
+                <Tag color={gradeColor(cell)}>{gradeText(cell)}</Tag>
+              </Tooltip>
               {preset.broken === undefined
                 ? null
                 : <Tooltip title={preset.broken}><Tag color="error">{t('preset.broken')}</Tag></Tooltip>}
             </Space>
             {description.length > DESCRIPTION_CLAMP ? <Tooltip title={description}>{text}</Tooltip> : text}
-            <Space size={4} wrap style={{ marginTop: 8 }}>
-              {profiles.length === 0
-                ? <Typography.Text type="secondary">{t('preset.noProfiles')}</Typography.Text>
-                : profiles.map(profile => {
-                  const cell = gradeOf(preset.id, profile)
-                  return (
-                    <Tooltip key={profile} title={gradeTip(cell)}>
-                      <Tag color={gradeColor(cell)}>{`${profile} · ${gradeText(cell)}`}</Tag>
-                    </Tooltip>
-                  )
-                })}
-            </Space>
           </div>
           <Space size={4} style={{ flexShrink: 0 }}>
             {/* One entry point for the two editors: opening a preset is one
@@ -277,9 +334,57 @@ export default function PresetsSection(): JSX.Element {
     )
   }
 
+  /**
+   * The directories the retired root still holds. They are on disk and dsh does
+   * not read them, so the page says so and offers the migration the host's own
+   * documentation describes — leaving the directory itself alone.
+   */
+  const legacyBlock = (): ReactNode => {
+    if (legacy.length === 0) return null
+    return (
+      <Alert
+        type="warning"
+        showIcon
+        style={{ marginBottom: token.padding }}
+        title={t('preset.legacyTitle')}
+        description={(
+          <Space direction="vertical" size={10} style={{ width: '100%' }}>
+            <span>{t('preset.legacyDesc')}</span>
+            {legacy.map(item => (
+              <div key={item.id} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <Typography.Text strong>{item.name ?? item.id}</Typography.Text>
+                <Typography.Text code type="secondary" copyable={{ text: item.dir }}>{item.id}</Typography.Text>
+                {item.taken
+                  ? <Tag>{t('preset.legacyTaken')}</Tag>
+                  : null}
+                {item.problem === undefined
+                  ? null
+                  : <Tooltip title={item.problem}><Tag color="error">{t('preset.legacyBroken')}</Tag></Tooltip>}
+                <span style={{ flex: 1 }} />
+                <Button
+                  size="small"
+                  type="primary"
+                  ghost
+                  disabled={item.taken || item.problem !== undefined}
+                  loading={busy === `migrate:${item.id}`}
+                  onClick={() => void migrate(item)}
+                >
+                  {t('preset.legacyMigrate')}
+                </Button>
+              </div>
+            ))}
+          </Space>
+        )}
+      />
+    )
+  }
+
   const body = (): ReactNode => {
     if (selectedId === undefined) {
       return <EmptyState title={t('preset.noDsh')} description={t('preset.noDshDesc')} />
+    }
+    if (profile === undefined) {
+      return <EmptyState title={t('preset.noProfile')} description={t('preset.noProfileDesc')} />
     }
     if (error !== null) {
       return (
@@ -290,11 +395,14 @@ export default function PresetsSection(): JSX.Element {
           description={(
             <Space direction="vertical" size={8}>
               <span>{error}</span>
-              <Button size="small" onClick={() => void load(selectedId)}>{t('common.refresh')}</Button>
+              <Button size="small" onClick={() => void reload()}>{t('common.refresh')}</Button>
             </Space>
           )}
         />
       )
+    }
+    if (listing !== null && model === 'none') {
+      return <EmptyState title={t('preset.noModel')} description={t('preset.noModelDesc')} />
     }
     if (loading && listing === null) {
       return (
@@ -303,27 +411,56 @@ export default function PresetsSection(): JSX.Element {
         </Panel>
       )
     }
-    if (presets.length === 0) {
+    if (presets.length === 0 && legacy.length === 0 && warnings.length === 0) {
       return <EmptyState title={t('preset.empty')} description={t('preset.emptyDesc')} />
+    }
+    if (presets.length === 0) {
+      // Nothing to list, but the retired root or a duplicate id still has
+      // something to say — that IS the page's content in this state.
+      return (
+        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          {warningsBlock()}
+          {legacyBlock()}
+        </Space>
+      )
     }
     return (
       <Panel
         pad={false}
-        title={t('preset.summary', { presets: presets.length, profiles: profiles.length })}
-        description={t('preset.legend')}
+        title={t('preset.summary', { presets: presets.length, profile: profile })}
+        description={t(model === 'declaration' ? 'preset.legendDeclaration' : 'preset.legendDirectory')}
       >
         {/* antd's List.Item pads itself `12px 0`, so without this the rows would
             sit flush against the panel while its own header is inset 16px. The
             inset lives on the body rather than the rows, which keeps the
             separators inside the same box as the text. */}
         <div style={{ padding: `0 ${String(token.padding)}px` }}>
+          {warningsBlock()}
+          {legacyBlock()}
           <List dataSource={presets} rowKey="id" renderItem={row} />
         </div>
       </Panel>
     )
   }
 
-  const roots = listing?.roots ?? []
+  /** A definition dsh takes but the page cannot list as a row — a preset id
+   * declared twice, which dsh itself refuses at activation. */
+  const warningsBlock = (): ReactNode => {
+    if (warnings.length === 0) return null
+    return (
+      <Alert
+        type="warning"
+        showIcon
+        style={{ marginBottom: token.padding }}
+        title={t('preset.warningsTitle')}
+        description={(
+          <ul style={{ margin: 0, paddingInlineStart: token.padding }}>
+            {warnings.map(line => <li key={line}>{line}</li>)}
+          </ul>
+        )}
+      />
+    )
+  }
 
   return (
     <AppShell
@@ -346,26 +483,40 @@ export default function PresetsSection(): JSX.Element {
           description={t('preset.desc')}
           extra={(
             <Space size={8}>
+              {/* The profile is the page's scope: on a dsh that declares its
+                  presets, each profile composes its own roster. */}
+              <Select
+                size="small"
+                style={{ minWidth: 140 }}
+                value={profile}
+                placeholder={t('preset.profile')}
+                aria-label={t('preset.profile')}
+                disabled={profiles.length === 0}
+                onChange={(value: string) => setProfile(value)}
+                options={profiles.map(name => ({ value: name, label: name }))}
+              />
               {/* Long absolute paths belong behind a click, not wrapped across
                   the header where they would dominate the page. */}
               <Popover
                 trigger="click"
                 placement="bottomRight"
-                title={t('preset.rootsTitle')}
+                title={t('preset.placesTitle')}
                 content={(
                   <Space direction="vertical" size={10} style={{ maxWidth: 460 }}>
-                    {roots.map(root => (
-                      <div key={root.path}>
+                    {places.map(place => (
+                      <div key={place.path}>
                         <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>
-                          {t(root.writable ? 'preset.rootUser' : 'preset.rootSystem')}
-                          {root.exists ? '' : ` · ${t('preset.rootMissing')}`}
+                          {t(SOURCE_KEY[place.source])}
+                          {place.bundle === undefined ? '' : ` · ${place.bundle}`}
+                          {place.writable ? '' : ` · ${t('preset.sourceSystem')}`}
+                          {place.exists ? '' : ` · ${t('preset.placeMissing')}`}
                         </div>
                         <Typography.Text
                           code
-                          copyable={{ text: root.path }}
+                          copyable={{ text: place.path }}
                           style={{ fontSize: token.fontSizeSM, wordBreak: 'break-all' }}
                         >
-                          {root.path}
+                          {place.path}
                         </Typography.Text>
                       </div>
                     ))}
@@ -378,8 +529,8 @@ export default function PresetsSection(): JSX.Element {
                 size="small"
                 icon={<ReloadOutlined />}
                 loading={loading}
-                disabled={selectedId === undefined}
-                onClick={() => { if (selectedId !== undefined) void load(selectedId) }}
+                disabled={profile === undefined}
+                onClick={() => void reload()}
               >
                 {t('common.refresh')}
               </Button>
@@ -388,7 +539,7 @@ export default function PresetsSection(): JSX.Element {
                 type="primary"
                 icon={<PlusOutlined />}
                 disabled={presets.length === 0}
-                onClick={() => setCreate({ mode: 'minimal', from: presets[0]?.id ?? '' })}
+                onClick={() => setCreate({ mode: 'minimal', from: minimalId ?? presets[0]?.id ?? '' })}
               >
                 {t('preset.new')}
               </Button>

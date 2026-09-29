@@ -45,12 +45,34 @@ export function readHomePatch(ctx: DshContext): { text: string; path: string } {
   return { text: existsSync(path) ? readFileSync(path, 'utf8') : '', path }
 }
 
-/** Write the machine-level home patch layer after YAML validation, then verify. */
-export function writeHomePatch(ctx: DshContext, text: string): void {
+/** Validate one patch layer's text and write it, then verify the result.
+ *
+ * The single write path for every layer the launcher owns, so a malformed
+ * assembly can never reach disk and a partial write is reported rather than
+ * discovered at the next launch.
+ * @param path - the patch file to write.
+ * @param text - the complete new document.
+ */
+export function writePatchFile(path: string, text: string): void {
   assertPatchDocValid(text)
-  const path = homePatchPath(ctx)
   writeFileSync(path, text)
   if (readFileSync(path, 'utf8') !== text) throw new Error('write verify failed')
+}
+
+/** Write the machine-level home patch layer after YAML validation, then verify. */
+export function writeHomePatch(ctx: DshContext, text: string): void {
+  writePatchFile(homePatchPath(ctx), text)
+}
+
+/** Read one profile's own patch layer. `text` is `''` when it does not exist. */
+export function readProfilePatch(ctx: DshContext, name: string): { text: string; path: string } {
+  const path = profilePatchPath(ctx, name)
+  return { text: existsSync(path) ? readFileSync(path, 'utf8') : '', path }
+}
+
+/** Write one profile's own patch layer after YAML validation, then verify. */
+export function writeProfilePatch(ctx: DshContext, name: string, text: string): void {
+  writePatchFile(profilePatchPath(ctx, name), text)
 }
 
 /** One profile's directory. */

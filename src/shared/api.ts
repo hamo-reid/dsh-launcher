@@ -141,23 +141,29 @@ export interface WindowApi {
     writePatch: (dshId: string, text: string) => Promise<IpcResult<boolean>>
   }
 
-  /** Agent presets: one dsh's roster, graded against each of its profiles. The
-   * launcher edits only the display metadata of a locally authored preset; a
-   * preset's composition is the preset, and is edited outside — in the file
-   * manager or an editor this opens. */
+  /** Agent presets: ONE profile's roster, with each preset graded against that
+   * profile. dsh has shipped two models — a preset directory, and a declaration
+   * row in a patch layer — and the surface is the same for both. The launcher
+   * edits only the display text of a preset it owns; the plugin list IS the
+   * preset, and is edited outside, in the file this opens. */
   preset: {
-    /** Roots, roster, profiles and one grade per preset/profile pairing. */
-    list: (dshId: string) => Promise<IpcResult<PresetListing>>
+    /** The profile's roster, its model, its definition sources and one grade per
+     * preset. */
+    list: (dshId: string, profile: string) => Promise<IpcResult<PresetListing>>
     /** Store a locally authored preset's name, description and priority. */
-    saveMeta: (dshId: string, id: string, meta: PresetMetaInput) => Promise<IpcResult<boolean>>
-    /** Create a preset by copying an existing one into the writable root. */
-    copy: (dshId: string, fromId: string, toId: string, name: string) => Promise<IpcResult<boolean>>
-    /** Move a locally authored preset to the OS recycle bin. */
-    remove: (dshId: string, id: string) => Promise<IpcResult<boolean>>
-    /** Reveal the preset's directory in the OS file manager. */
-    reveal: (dshId: string, id: string) => Promise<IpcResult<boolean>>
-    /** Open the preset's directory in VS Code (its registered protocol). */
-    openEditor: (dshId: string, id: string) => Promise<IpcResult<boolean>>
+    saveMeta: (dshId: string, profile: string, id: string, meta: PresetMetaInput) => Promise<IpcResult<boolean>>
+    /** Create a preset in this profile by copying an existing one. */
+    copy: (dshId: string, profile: string, fromId: string, toId: string, name: string) => Promise<IpcResult<boolean>>
+    /** Remove a preset the launcher owns: to the recycle bin on the directory
+     * model, out of the profile patch on the declaration model. */
+    remove: (dshId: string, profile: string, id: string) => Promise<IpcResult<boolean>>
+    /** Turn a directory the retired root still holds into a declaration in this
+     * profile. The directory is left where it is. */
+    migrate: (dshId: string, profile: string, id: string) => Promise<IpcResult<boolean>>
+    /** Reveal where the preset's definition lives in the OS file manager. */
+    reveal: (dshId: string, profile: string, id: string) => Promise<IpcResult<boolean>>
+    /** Open the preset's definition in VS Code (its registered protocol). */
+    openEditor: (dshId: string, profile: string, id: string) => Promise<IpcResult<boolean>>
   }
 
   /** Extensions surface. Track A is MCP servers — the `insert:` rows that mount

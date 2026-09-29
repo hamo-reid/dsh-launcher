@@ -161,18 +161,20 @@ const api = {
   },
 
   preset: {
-    list: (dshId: string): Promise<IpcResult<PresetListing>> =>
-      ipcRenderer.invoke('preset:list', dshId),
-    saveMeta: (dshId: string, id: string, meta: PresetMetaInput): Promise<IpcResult<boolean>> =>
-      ipcRenderer.invoke('preset:saveMeta', dshId, id, meta),
-    copy: (dshId: string, fromId: string, toId: string, name: string): Promise<IpcResult<boolean>> =>
-      ipcRenderer.invoke('preset:copy', dshId, fromId, toId, name),
-    remove: (dshId: string, id: string): Promise<IpcResult<boolean>> =>
-      ipcRenderer.invoke('preset:delete', dshId, id),
-    reveal: (dshId: string, id: string): Promise<IpcResult<boolean>> =>
-      ipcRenderer.invoke('preset:reveal', dshId, id),
-    openEditor: (dshId: string, id: string): Promise<IpcResult<boolean>> =>
-      ipcRenderer.invoke('preset:openEditor', dshId, id),
+    list: (dshId: string, profile: string): Promise<IpcResult<PresetListing>> =>
+      ipcRenderer.invoke('preset:list', dshId, profile),
+    saveMeta: (dshId: string, profile: string, id: string, meta: PresetMetaInput): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('preset:saveMeta', dshId, profile, id, meta),
+    copy: (dshId: string, profile: string, fromId: string, toId: string, name: string): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('preset:copy', dshId, profile, fromId, toId, name),
+    remove: (dshId: string, profile: string, id: string): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('preset:delete', dshId, profile, id),
+    migrate: (dshId: string, profile: string, id: string): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('preset:migrate', dshId, profile, id),
+    reveal: (dshId: string, profile: string, id: string): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('preset:reveal', dshId, profile, id),
+    openEditor: (dshId: string, profile: string, id: string): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('preset:openEditor', dshId, profile, id),
   },
 
   ext: {
