@@ -27,28 +27,35 @@ export type { ComboPlugin } from '../../../shared/types.ts'
 
 /** The patch filename a bundle package declares via `dsh.bundle.patch`, or
  * `undefined` when it declares none (or its manifest is unreadable). Both bundle
- * judgements read through here: {@link bundlePatchRel} turns the result into a
+ * judgements read through here: {@link bundlePatchRels} turns the result into
  * filename, {@link declaresBundle} treats "declared at all" as the host's own
  * bundle test. */
-function declaredBundlePatch(pkgDir: string): string | undefined {
+function declaredBundlePatches(pkgDir: string): string[] {
   try {
     const manifest = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8')) as {
       dsh?: { bundle?: { patch?: unknown } }
     }
     const declared = manifest.dsh?.bundle?.patch
-    if (typeof declared === 'string' && declared.trim() !== '') return declared
+    if (typeof declared === 'string' && declared.trim() !== '') return [declared]
+    // dsh accepts one file OR an ordered list, and 0.2.0-rc.1's web-app bundle
+    // uses the list form to carry its four agent-preset declarations as separate
+    // files. Reading only the string form silently dropped every one of them.
+    if (Array.isArray(declared)) {
+      return declared.filter((entry): entry is string => typeof entry === 'string' && entry.trim() !== '')
+    }
   } catch {
     // missing/invalid manifest — not a declaration
   }
-  return undefined
+  return []
 }
 
 /** The filename to look for inside a bundle dir: the declared `dsh.bundle.patch`,
  * else the historical `cordis.patch.yml`. The host requires the declaration and
  * fails loud without it; the launcher is a viewer, so a package that omits it
  * still resolves by filename. */
-function bundlePatchRel(bundleDir: string): string {
-  return declaredBundlePatch(bundleDir) ?? PATCH_FILE_NAME
+function bundlePatchRels(bundleDir: string): string[] {
+  const declared = declaredBundlePatches(bundleDir)
+  return declared.length > 0 ? declared : [PATCH_FILE_NAME]
 }
 
 /** A profile's resolved search roots. Callers that resolve MANY bundles — every
@@ -75,16 +82,32 @@ type SearchRoots = readonly { dir: string }[]
  * dangling candidate is skipped rather than returned, so the result is always
  * readable.
  */
-export function resolveBundlePatch(
+export function resolveBundlePatches(
   ctx: DshContext, bundle: string, profile: string, roots?: SearchRoots,
-): string | undefined {
+): string[] {
   for (const { dir } of roots ?? moduleSearchRoots(ctx, profile)) {
     const bundleDir = join(dir, bundle)
     if (!existsSync(bundleDir)) continue
-    const patchPath = join(bundleDir, bundlePatchRel(bundleDir))
-    if (existsSync(patchPath)) return patchPath
+    const found = bundlePatchRels(bundleDir)
+      .map(rel => join(bundleDir, rel))
+      .filter(path => existsSync(path))
+    if (found.length > 0) return found
   }
-  return undefined
+  return []
+}
+
+/**
+ * The FIRST patch file of a bundle, or undefined when none resolves.
+ *
+ * Callers that read a bundle's rows want {@link resolveBundlePatches}: since
+ * 0.2.0-rc.1 a bundle may declare several patch files, and a bundle's later ones
+ * (the four `presets/*.patch.yml` of `dsh-web-app`) carry whole entry sets that
+ * this single-file view never sees.
+ */
+export function resolveBundlePatch(
+  ctx: DshContext, bundle: string, profile: string, roots?: SearchRoots,
+): string | undefined {
+  return resolveBundlePatches(ctx, bundle, profile, roots)[0]
 }
 
 /** Read the profile's user patch rows (webapp on-disk or `[]`). */
@@ -102,10 +125,12 @@ export function listComboPlugins(ctx: DshContext, profile: string): ComboPlugin[
   const roots = moduleSearchRoots(ctx, profile)
   const rows: ComboPlugin[] = []
   for (const bundle of bundles) {
-    const path = resolveBundlePatch(ctx, bundle, profile, roots)
-    if (path === undefined) { cplog.debug('combo: bundle patch not found', { bundle, profile }); continue }
-    for (const row of parseNamedRows(readFileSync(path, 'utf8'))) {
-      rows.push({ id: row.id, name: row.name ?? '', bundle, disabled: row.disabled })
+    const paths = resolveBundlePatches(ctx, bundle, profile, roots)
+    if (paths.length === 0) { cplog.debug('combo: bundle patch not found', { bundle, profile }); continue }
+    for (const path of paths) {
+      for (const row of parseNamedRows(readFileSync(path, 'utf8'))) {
+        rows.push({ id: row.id, name: row.name ?? '', bundle, disabled: row.disabled })
+      }
     }
   }
   const userDisabled = new Map(
@@ -119,32 +144,59 @@ export function listComboPlugins(ctx: DshContext, profile: string): ComboPlugin[
 }
 
 
-/** Compose the profile's patch-layer stack in application order: each bundle
+/** One patch layer's raw text, in application order. */
+export interface LayerText {
+  source: ProfileLayer['source']
+  bundle?: string
+  /** Absolute path of the layer's patch file. */
+  path: string
+  text: string
+}
+
+/**
+ * Each patch layer's TEXT, in application order: every resolved bundle layer (in
+ * `dsh.profile.bundles` order), then the profile's own layer, then the
+ * machine-level home layer.
+ *
+ * The walk {@link composeProfileLayers} classifies, unclassified. A second walk
+ * would be a second answer to "which layers are there", and a reader that needs
+ * raw text — the preset declaration fold slices a declaration's `plugins:` block
+ * verbatim out of it — must not be able to disagree with the layer-stack view.
+ * @param ctx - the dsh to read.
+ * @param profile - the profile whose stack is composed.
+ * @returns one entry per layer that exists, in the order dsh applies them.
+ */
+export function composeLayerTexts(ctx: DshContext, profile: string): LayerText[] {
+  const layers: LayerText[] = []
+  const { bundles } = readManifest(ctx, profile)
+  const roots = moduleSearchRoots(ctx, profile)
+  for (const bundle of bundles) {
+    for (const patchPath of resolveBundlePatches(ctx, bundle, profile, roots)) {
+      layers.push({ source: 'bundle', bundle, path: patchPath, text: readFileSync(patchPath, 'utf8') })
+    }
+  }
+  const userText = readUserPatch(ctx, profile)
+  if (userText.trim() !== '') {
+    layers.push({ source: 'profile', path: profilePatchPath(ctx, profile), text: userText })
+  }
+  const homePath = homePatchPath(ctx)
+  if (existsSync(homePath)) {
+    layers.push({ source: 'home', path: homePath, text: readFileSync(homePath, 'utf8') })
+  }
+  return layers
+}
+
+/** Compose a profile's patch-layer stack in application order: each bundle
  * layer (in `dsh.profile.bundles` order), then the profile's own layer, then
  * the machine-level home layer. Used to render the layer-stack and trace which
  * source contributed (and possibly overrode) a given row id. */
 export function composeProfileLayers(ctx: DshContext, profile: string): ProfileLayer[] {
-  const layers: ProfileLayer[] = []
-  const { bundles } = readManifest(ctx, profile)
-  const roots = moduleSearchRoots(ctx, profile)
-  for (const bundle of bundles) {
-    const patchPath = resolveBundlePatch(ctx, bundle, profile, roots)
-    if (patchPath === undefined) continue
-    layers.push({
-      source: 'bundle',
-      bundle,
-      rows: parseClassifiedRows(readFileSync(patchPath, 'utf8')),
-    })
-  }
-  const userText = readUserPatch(ctx, profile)
-  if (userText.trim() !== '') {
-    layers.push({ source: 'profile', label: profile, rows: parseClassifiedRows(userText) })
-  }
-  const homePath = homePatchPath(ctx)
-  if (existsSync(homePath)) {
-    layers.push({ source: 'home', rows: parseClassifiedRows(readFileSync(homePath, 'utf8')) })
-  }
-  return layers
+  return composeLayerTexts(ctx, profile).map(layer => ({
+    source: layer.source,
+    ...(layer.bundle === undefined ? {} : { bundle: layer.bundle }),
+    ...(layer.source === 'profile' ? { label: profile } : {}),
+    rows: parseClassifiedRows(layer.text),
+  }))
 }
 
 /**
@@ -161,9 +213,9 @@ export function findInsertConflicts(
   const { bundles } = readManifest(ctx, profile)
   const roots = moduleSearchRoots(ctx, profile)
   for (const bundle of bundles) {
-    const patchPath = resolveBundlePatch(ctx, bundle, profile, roots)
-    if (patchPath === undefined) continue
-    layers.push({ source: 'bundle', bundle, text: readFileSync(patchPath, 'utf8') })
+    for (const patchPath of resolveBundlePatches(ctx, bundle, profile, roots)) {
+      layers.push({ source: 'bundle', bundle, text: readFileSync(patchPath, 'utf8') })
+    }
   }
   const userText = readUserPatch(ctx, profile)
   if (userText.trim() !== '') layers.push({ source: 'profile', label: profile, text: userText })
@@ -187,12 +239,29 @@ export function findInsertConflicts(
     .map(([id, list]) => ({ id, layers: list }))
 }
 
-/** Bundles listed in the manifest whose patch file cannot be resolved — the
+/** Whether every patch file a bundle declares resolves.
+ *
+ * A bundle that is absent entirely, or missing one of its declared patch files,
+ * is skipped whole at boot — the host drops the bundle LAYER, so its rows never
+ * compose. "Resolvable" therefore means all of them, not the first one.
+ */
+function bundlePatchesResolve(
+  ctx: DshContext, bundle: string, profile: string, roots?: SearchRoots,
+): boolean {
+  for (const { dir } of roots ?? moduleSearchRoots(ctx, profile)) {
+    const bundleDir = join(dir, bundle)
+    if (!existsSync(bundleDir)) continue
+    return bundlePatchRels(bundleDir).every(rel => existsSync(join(bundleDir, rel)))
+  }
+  return false
+}
+
+/** Bundles listed in the manifest whose patch files cannot all be resolved — the
  * profile would fail to load them at boot. */
 export function listMissingBundles(ctx: DshContext, profile: string): string[] {
   const { bundles } = readManifest(ctx, profile)
   const roots = moduleSearchRoots(ctx, profile)
-  return bundles.filter(bundle => resolveBundlePatch(ctx, bundle, profile, roots) === undefined)
+  return bundles.filter(bundle => !bundlePatchesResolve(ctx, bundle, profile, roots))
 }
 
 /**
@@ -241,7 +310,7 @@ export function validateComposition(
  */
 function declaresBundle(ctx: DshContext, pkgName: string, profile: string, roots?: SearchRoots): boolean {
   for (const { dir } of roots ?? moduleSearchRoots(ctx, profile)) {
-    if (declaredBundlePatch(join(dir, pkgName)) !== undefined) return true
+    if (declaredBundlePatches(join(dir, pkgName)).length > 0) return true
   }
   return false
 }
@@ -293,10 +362,10 @@ export function defaultConfigText(ctx: DshContext, profile: string, id: string):
   const { bundles } = readManifest(ctx, profile)
   const roots = moduleSearchRoots(ctx, profile)
   for (const bundle of bundles) {
-    const patchPath = resolveBundlePatch(ctx, bundle, profile, roots)
-    if (patchPath === undefined) continue
-    const value = extractKeyValue(readFileSync(patchPath, 'utf8'), id, 'config')
-    if (value !== undefined) return value
+    for (const patchPath of resolveBundlePatches(ctx, bundle, profile, roots)) {
+      const value = extractKeyValue(readFileSync(patchPath, 'utf8'), id, 'config')
+      if (value !== undefined) return value
+    }
   }
   return ''
 }
@@ -314,9 +383,9 @@ export function listMcpServers(ctx: DshContext, profile: string): McpServer[] {
   const { bundles } = readManifest(ctx, profile)
   const roots = moduleSearchRoots(ctx, profile)
   for (const bundle of bundles) {
-    const patchPath = resolveBundlePatch(ctx, bundle, profile, roots)
-    if (patchPath === undefined) continue
-    servers.push(...readMcpServers(readFileSync(patchPath, 'utf8'), 'bundle', bundle))
+    for (const patchPath of resolveBundlePatches(ctx, bundle, profile, roots)) {
+      servers.push(...readMcpServers(readFileSync(patchPath, 'utf8'), 'bundle', bundle))
+    }
   }
   const userText = readUserPatch(ctx, profile)
   if (userText.trim() !== '') servers.push(...readMcpServers(userText, 'profile'))

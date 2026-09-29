@@ -6,11 +6,12 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { contextForEntry } from '../profile/appState.ts'
 import {
-  composeProfileLayers, defaultConfigText, findInsertConflicts, listComboPlugins, listMcpServers, listMissingBundles,
-  listUnclaimedBundles, reconcileBundles, resolveBundlePatch, validateComposition,
+  composeLayerTexts, composeProfileLayers, defaultConfigText, findInsertConflicts, listComboPlugins, listMcpServers,
+  listMissingBundles, listUnclaimedBundles, reconcileBundles, resolveBundlePatch, resolveBundlePatches,
+  validateComposition,
 } from './combo.ts'
 
 let root: string
@@ -399,5 +400,71 @@ describe('on a pnpm-shaped install', () => {
     })
     mkProfile('p', ['@deepseek-ai/dsh-base'], {})
     expect(resolveBundlePatch(flatCtx, '@deepseek-ai/dsh-base', 'p')).toBe(join(dir, 'cordis.patch.yml'))
+  })
+})
+
+// Since 0.2.0-rc.1 a bundle may declare an ordered LIST of patch files, and the
+// shipped `dsh-web-app` does: `cordis.patch.yml` plus four `presets/*.patch.yml`
+// carrying every agent-preset declaration. Reading only the string form dropped
+// all four silently — no error, just an empty preset roster.
+describe('a bundle that declares several patch files', () => {
+  /** A bundle whose manifest declares `files` and whose patch files all exist. */
+  function mkMultiPatch(p: string, bundle: string, files: string[], rows: string[]): void {
+    const dir = join(profileDir(p), 'node_modules', bundle)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ dsh: { bundle: { patch: files } } }))
+    files.forEach((rel, index) => {
+      const path = join(dir, rel)
+      mkdirSync(dirname(path), { recursive: true })
+      writeFileSync(path, rows[index] ?? '')
+    })
+  }
+
+  it('resolves every declared file, in declaration order', () => {
+    mkProfile('p', ['b'], {})
+    mkMultiPatch('p', 'b', ['./cordis.patch.yml', './presets/standard.patch.yml'],
+      ['- id: base\n', '- id: preset-standard\n'])
+    const dir = join(profileDir('p'), 'node_modules', 'b')
+    expect(resolveBundlePatches(ctx(), 'b', 'p')).toEqual([
+      join(dir, 'cordis.patch.yml'),
+      join(dir, 'presets', 'standard.patch.yml'),
+    ])
+    // The single-file view is still the first one, unchanged.
+    expect(resolveBundlePatch(ctx(), 'b', 'p')).toBe(join(dir, 'cordis.patch.yml'))
+  })
+
+  it('lists rows from every file, not just the first', () => {
+    mkProfile('p', ['b'], {})
+    mkMultiPatch('p', 'b', ['./cordis.patch.yml', './presets/standard.patch.yml'],
+      ['- id: base\n', '- id: preset-standard\n'])
+    expect(listComboPlugins(ctx(), 'p').map(r => r.id)).toEqual(['base', 'preset-standard'])
+  })
+
+  it('gives each file its own layer, in application order', () => {
+    mkProfile('p', ['b'], {})
+    mkMultiPatch('p', 'b', ['./cordis.patch.yml', './presets/standard.patch.yml'],
+      ['- id: base\n', '- id: preset-standard\n'])
+    const layers = composeLayerTexts(ctx(), 'p')
+    expect(layers.map(l => [l.source, l.bundle, l.path.endsWith('standard.patch.yml')]))
+      .toEqual([['bundle', 'b', false], ['bundle', 'b', true]])
+    expect(layers[1].text).toBe('- id: preset-standard\n')
+  })
+
+  it('reports the bundle when one of its declared files is missing', () => {
+    mkProfile('p', ['b'], {})
+    mkMultiPatch('p', 'b', ['./cordis.patch.yml', './presets/standard.patch.yml'],
+      ['- id: base\n', '- id: preset-standard\n'])
+    rmSync(join(profileDir('p'), 'node_modules', 'b', 'presets', 'standard.patch.yml'))
+    // dsh drops the whole bundle layer when one of its patch files fails to load.
+    expect(listMissingBundles(ctx(), 'p')).toEqual(['b'])
+  })
+
+  it('treats a declared-but-absent list as no declaration and falls back to the default name', () => {
+    mkProfile('p', ['b'], {})
+    const dir = join(profileDir('p'), 'node_modules', 'b')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ dsh: { bundle: { patch: [] } } }))
+    writeFileSync(join(dir, 'cordis.patch.yml'), '- id: fallback\n')
+    expect(resolveBundlePatches(ctx(), 'b', 'p')).toEqual([join(dir, 'cordis.patch.yml')])
   })
 })
