@@ -35,14 +35,6 @@ function stripEmptyArrayMarker(text: string): string {
   return text.split('\n').filter(line => !isTopLevelEmptyArray(line)).join('\n')
 }
 
-function findIdLine(lines: string[], id: string): number | undefined {
-  for (let i = 0; i < lines.length; i++) {
-    const m = ID_RE.exec(lines[i])
-    if (m !== null && m[2] === id) return i
-  }
-  return undefined
-}
-
 /** Leading-space count of a line (0 for a column-0 line). */
 function indentOf(line: string): number {
   return /^(\s*)/.exec(line)?.[1].length ?? 0
@@ -99,16 +91,140 @@ function unquote(value: string): string {
   return m === null ? value : m[2]
 }
 
-/** Parse every `- id:` row and whether it is disabled. */
-export function parsePatchRows(text: string): PluginRow[] {
-  const lines = text.split('\n')
-  const rows: PluginRow[] = []
-  for (let i = 0; i < lines.length; i++) {
+/** The group plugin: an entry naming it owns an entry list in `config`, so the
+ * walk descends into its children (`applyEntryPatches` inserts into it). */
+const GROUP_PLUGIN = 'cordis:group'
+
+/** One row a patch document carries: its `- id:` line, and whether THIS document
+ * inserts it (rather than patching a row another layer inserted). */
+interface PositionedRow {
+  line: number
+  id: string
+  inserted: boolean
+}
+
+/** Index of the first non-blank, non-comment line at or after `from`. */
+function nextContentLine(lines: string[], from: number): number | undefined {
+  for (let i = from; i < lines.length; i++) {
+    const text = lines[i].trim()
+    if (text === '' || text.startsWith('#')) continue
+    return i
+  }
+  return undefined
+}
+
+/** A key of the patch item or row starting at line `item`: the item's own line
+ * when the key is spelled there (`- insert:`), else its direct child. */
+function ownKey(lines: string[], item: number, key: string): { line: number; value: string } | undefined {
+  const marker = new RegExp(`^(\\s*)-\\s*${key}\\s*:\\s*(.*)$`).exec(lines[item])
+  if (marker !== null) return { line: item, value: marker[2].trim() }
+  return directChild(lines, item, key)
+}
+
+/** The block sequence a key holds: its first item's line and that item's indent.
+ * Undefined for an inline, empty (`key: []`) or non-sequence value. */
+function sequenceOf(
+  lines: string[], key: { line: number; value: string },
+): { start: number; indent: number } | undefined {
+  if (key.value !== '') return undefined
+  const start = nextContentLine(lines, key.line + 1)
+  if (start === undefined) return undefined
+  const indent = indentOf(lines[start])
+  if (indent <= indentOf(lines[key.line])) return undefined
+  return /^\s*- /.test(lines[start]) ? { start, indent } : undefined
+}
+
+/** End (exclusive) of the sequence whose items sit at `indent`, from `start`. A
+ * line at the item indent that is not itself an item closes the list. */
+function sequenceEnd(lines: string[], start: number, indent: number): number {
+  for (let i = start; i < lines.length; i++) {
+    const text = lines[i].trim()
+    if (text === '' || text.startsWith('#')) continue
+    const at = indentOf(lines[i])
+    if (at > indent) continue
+    if (at === indent && /^\s*- /.test(lines[i])) continue
+    return i
+  }
+  return lines.length
+}
+
+/** The entry list a group row owns by its `config` key, when it owns one. */
+function groupConfigSequence(lines: string[], row: number): { start: number; indent: number } | undefined {
+  const name = directChild(lines, row, 'name')?.value
+  const isGroup = directChild(lines, row, 'group')?.value === 'true'
+    || (name !== undefined && unquote(name) === GROUP_PLUGIN)
+  if (!isGroup) return undefined
+  const config = directChild(lines, row, 'config')
+  return config === undefined ? undefined : sequenceOf(lines, config)
+}
+
+/** Collect one sequence's entries, in file order, descending into its groups. */
+function collectEntries(
+  lines: string[], sequence: { start: number; indent: number }, inserted: boolean, rows: PositionedRow[],
+): void {
+  const end = sequenceEnd(lines, sequence.start, sequence.indent)
+  for (let i = sequence.start; i < end; i++) {
     const m = ID_RE.exec(lines[i])
-    if (m === null) continue
-    rows.push({ id: m[2], disabled: directChild(lines, i, 'disabled')?.value === 'true' })
+    if (m === null || indentOf(lines[i]) !== sequence.indent) continue
+    rows.push({ line: i, id: m[2], inserted })
+    const children = groupConfigSequence(lines, i)
+    if (children !== undefined) collectEntries(lines, children, inserted, rows)
+  }
+}
+
+/**
+ * Every row a patch document carries, in file order, each marked with whether the
+ * document INSERTS it. This is the ONE definition of "a row" behind every reader
+ * below — {@link parsePatchRows}, {@link parseNamedRows},
+ * {@link parseClassifiedRows}, {@link collectInsertIds} and {@link findIdLine} —
+ * because two answers to that question disagree in exactly the cases that matter.
+ *
+ * The walk follows the HOST'S patch structure, not the file's indentation, and
+ * the difference is the point. `applyEntryPatches` builds entries from the
+ * top-level patch list and the `insert:` lists it holds, plus the `config` list
+ * of a GROUP entry; every other `config` is the plugin's private data. Since
+ * 0.2.0-rc.1 the shipped `presets/*.patch.yml` files carry a whole plugin roster
+ * inside an `@deepseek-ai/dsh-agent-preset` row, so an indent-blind read invents
+ * ~100 loader entries no layer ever inserts — which then surface as phantom
+ * duplicate-id boot conflicts and phantom plugins in the inventory.
+ *
+ * Top-level items are recognised at the document's own base indent (the first
+ * `- ` line), so a patch file indented as a whole still reads.
+ */
+function positionedRows(lines: string[]): PositionedRow[] {
+  const rows: PositionedRow[] = []
+  let base = -1
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^\s*- /.test(lines[i])) continue
+    if (base < 0) base = indentOf(lines[i])
+    if (indentOf(lines[i]) !== base) continue
+    const m = ID_RE.exec(lines[i])
+    if (m !== null) {
+      rows.push({ line: i, id: m[2], inserted: false })
+      const children = groupConfigSequence(lines, i)
+      if (children !== undefined) collectEntries(lines, children, false, rows)
+    }
+    const insert = ownKey(lines, i, 'insert')
+    if (insert === undefined) continue
+    const sequence = sequenceOf(lines, insert)
+    if (sequence !== undefined) collectEntries(lines, sequence, true, rows)
   }
   return rows
+}
+
+/** The line of the first ROW with this id — an entry, never a row nested in some
+ * plugin's `config`. Editing by id must land on the row the host loads. */
+function findIdLine(lines: string[], id: string): number | undefined {
+  return positionedRows(lines).find(row => row.id === id)?.line
+}
+
+/** Parse every row the layer holds, and whether it is disabled. */
+export function parsePatchRows(text: string): PluginRow[] {
+  const lines = text.split('\n')
+  return positionedRows(lines).map(row => ({
+    id: row.id,
+    disabled: directChild(lines, row.line, 'disabled')?.value === 'true',
+  }))
 }
 
 /** A row with its package name (when the block carries one) and disabled state. */
@@ -142,51 +258,30 @@ export function assertPatchDocValid(next: string): void {
 }
 
 /**
- * Collect the loader-entry ids a patch layer *inserts*: the `id` of every row
- * nested under an `insert:` key (nested `insert:` blocks included). Id-targeted
- * rows (`- id: x` carrying `config`/`disabled`) patch an existing entry and may
- * repeat across layers; only inserts create new entries, so a repeated insert id
- * is exactly the host's hard `duplicate loader entry id` failure.
+ * Collect the loader-entry ids a patch layer *inserts*: the rows of its top-level
+ * `insert:` lists, and of the groups among those.
+ *
+ * `insert` is a PATCH key — `applyEntryPatches` reads it from the top-level patch
+ * list alone — so an `insert:` key written on an entry is not a patch and its
+ * children are not entries. Id-targeted rows patch a row another layer inserted
+ * and may repeat across layers; only inserts create entries, so a repeated insert
+ * id is exactly the host's duplicate-entry failure.
  */
 export function collectInsertIds(text: string): string[] {
-  const lines = text.split('\n')
-  const ids: string[] = []
-  // Indentation of each `insert:` key currently in scope (a stack so a nested
-  // insert block does not hide its siblings).
-  const stack: number[] = []
-  for (const line of lines) {
-    const trimmed = line.trim()
-    if (trimmed === '' || trimmed.startsWith('#')) continue
-    const indent = /^(\s*)/.exec(line)?.[1].length ?? 0
-    while (stack.length > 0 && indent <= stack[stack.length - 1]) stack.pop()
-    const key = /^(\s*)(?:-\s*)?insert\s*:\s*$/.exec(line)
-    if (key !== null) {
-      stack.push(key[1].length)
-      continue
-    }
-    if (stack.length > 0) {
-      const m = ID_RE.exec(line)
-      if (m !== null) ids.push(m[2])
-    }
-  }
-  return ids
+  return positionedRows(text.split('\n')).filter(row => row.inserted).map(row => row.id)
 }
 
 /** Parse rows including each block's `name:` (for bundle-built plugin rows). */
 export function parseNamedRows(text: string): NamedRow[] {
   const lines = text.split('\n')
-  const rows: NamedRow[] = []
-  for (let i = 0; i < lines.length; i++) {
-    const m = ID_RE.exec(lines[i])
-    if (m === null) continue
-    const name = directChild(lines, i, 'name')?.value
-    rows.push({
-      id: m[2],
+  return positionedRows(lines).map(row => {
+    const name = directChild(lines, row.line, 'name')?.value
+    return {
+      id: row.id,
       name: name === undefined ? undefined : unquote(name),
-      disabled: directChild(lines, i, 'disabled')?.value === 'true',
-    })
-  }
-  return rows
+      disabled: directChild(lines, row.line, 'disabled')?.value === 'true',
+    }
+  })
 }
 
 /**
@@ -243,23 +338,19 @@ export function setRowDisabled(text: string, id: string, disabled: boolean): str
   return lines.join('\n')
 }
 
-/** Parse every patch row, classifying each block's shape (name/disabled/config/insert). */
+/** Parse every row, classifying each block's shape (name/disabled/config/insert). */
 export function parseClassifiedRows(text: string): ClassifiedRow[] {
   const lines = text.split('\n')
-  const rows: ClassifiedRow[] = []
-  for (let i = 0; i < lines.length; i++) {
-    const m = ID_RE.exec(lines[i])
-    if (m === null) continue
-    const name = directChild(lines, i, 'name')?.value
-    rows.push({
-      id: m[2],
+  return positionedRows(lines).map(row => {
+    const name = directChild(lines, row.line, 'name')?.value
+    return {
+      id: row.id,
       name: name === undefined ? undefined : unquote(name),
-      disabled: directChild(lines, i, 'disabled')?.value === 'true',
-      hasConfig: directChild(lines, i, 'config') !== undefined,
-      hasInsert: directChild(lines, i, 'insert') !== undefined,
-    })
-  }
-  return rows
+      disabled: directChild(lines, row.line, 'disabled')?.value === 'true',
+      hasConfig: directChild(lines, row.line, 'config') !== undefined,
+      hasInsert: directChild(lines, row.line, 'insert') !== undefined,
+    }
+  })
 }
 
 /** Render the indented `config` key lines for a block's key indent. */

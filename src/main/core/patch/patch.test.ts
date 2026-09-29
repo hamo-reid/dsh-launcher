@@ -54,11 +54,14 @@ describe('parseClassifiedRows', () => {
     ])
   })
 
-  // A preset declaration's `config.plugins` is a list of plugin rows that carry
-  // `disabled:` of their own — the shipped `standard` preset disables several.
-  // Reading the first of those as the declaration's own clause hid the preset
-  // from the roster entirely, so the row's own fields stop at its child indent.
-  it('reads a row\'s OWN fields, never one nested inside its config', () => {
+  // A preset declaration's `config.plugins` is a list of plugin rows, each with
+  // an `id`, a `name` and often a `disabled:` of its own — the shipped `standard`
+  // preset disables several. That roster is the preset's PRIVATE DATA: the host
+  // builds loader entries from the patch's `insert:` lists, never from an entry's
+  // `config`, so reading those ids as rows invents entries no layer inserts.
+  // (It also, at first, hid the preset itself: an indent-blind scan read the
+  // roster's first `disabled: true` as the declaration's own clause.)
+  it('reads a row\'s OWN fields, and never the roster nested inside its config', () => {
     const shipped = [
       '- insert:',
       '    - id: preset-standard',
@@ -87,16 +90,46 @@ describe('parseClassifiedRows', () => {
       hasConfig: true,
       hasInsert: false,
     })
-    // The nested rows are still visible as rows in their own right.
-    expect(parseClassifiedRows(shipped).map(r => r.id)).toEqual([
-      'preset-standard', 'tool-subagent-codex', 'shell', 'inner',
-    ])
-    expect(parsePatchRows(shipped)).toEqual([
-      { id: 'preset-standard', disabled: false },
-      { id: 'tool-subagent-codex', disabled: true },
-      { id: 'shell', disabled: false },
-      { id: 'inner', disabled: true },
-    ])
+    // The declaration is the layer's only row; the roster and the groups inside
+    // it are not this layer's entries.
+    expect(parseClassifiedRows(shipped).map(r => r.id)).toEqual(['preset-standard'])
+    expect(parsePatchRows(shipped)).toEqual([{ id: 'preset-standard', disabled: false }])
+    expect(collectInsertIds(shipped)).toEqual(['preset-standard'])
+  })
+
+  // The one `config` a walk must descend into: a GROUP entry's, which IS a nested
+  // entry list (`applyEntryPatches` inserts into it). Group-ness is declared by
+  // `group: true` or by the group plugin's name.
+  it('descends into a group entry\'s config, which is an entry list of its own', () => {
+    const text = [
+      '- insert:',
+      '    - id: shell',
+      '      name: cordis:group',
+      '      config:',
+      '        - id: child-a',
+      "          name: '@x/a'",
+      '    - id: sibling',
+      "      name: '@x/b'",
+      '- id: host',
+      '  name: cordis:group',
+      '  group: true',
+      '  config:',
+      '    - id: child-b',
+      "      name: '@x/c'",
+      '',
+    ].join('\n')
+    expect(parseNamedRows(text).map(r => r.id)).toEqual(['shell', 'child-a', 'sibling', 'host', 'child-b'])
+    // Inside an insert list everything the layer contributes is inserted, a
+    // group's children included. A top-level `- id: host` row is a PATCH whose
+    // config REPLACES the group's list, so its children are rows but not inserts.
+    expect(collectInsertIds(text)).toEqual(['shell', 'child-a', 'sibling'])
+  })
+
+  // A patch file may be indented as a whole; top-level items are then the first
+  // `- ` line's indent, not column 0.
+  it('finds the top-level items of a wholly indented document', () => {
+    const text = '  - id: a\n    disabled: true\n'
+    expect(parsePatchRows(text)).toEqual([{ id: 'a', disabled: true }])
   })
 })
 
@@ -303,24 +336,61 @@ describe('collectInsertIds', () => {
     expect(collectInsertIds(text)).toEqual(['subagent-model-selection-settings', 'code-runtime'])
   })
 
-  it('collects a nested insert block without losing its siblings', () => {
+  it('reads an id-targeted insert list, and ignores an insert nested in an entry', () => {
     const text = [
-      '- insert:',
-      '    - id: group',
-      "      name: '@x/group'",
-      '      insert:',
-      '        - id: child',
-      "          name: '@x/child'",
+      '- id: shell',
+      '  insert:',
+      '    - id: child',
+      "      name: '@x/child'",
       '    - id: sibling',
       "      name: '@x/sibling'",
+      '- id: other',
+      '  config:',
+      '    insert:',
+      '      - id: not-an-entry',
       '',
     ].join('\n')
-    expect(collectInsertIds(text)).toEqual(['group', 'child', 'sibling'])
+    expect(collectInsertIds(text)).toEqual(['child', 'sibling'])
   })
 
   it('returns [] for an empty template or a patch with no inserts', () => {
     expect(collectInsertIds('[]\n')).toEqual([])
     expect(collectInsertIds('# just a comment\n- id: a\n  disabled: true\n')).toEqual([])
+  })
+})
+
+// The profile patch the launcher itself writes now carries preset declarations,
+// whose `plugins` rosters reuse plugin ids. Editing by id must land on the loader
+// row; an indent-blind search lands on a roster row and rewrites the preset's
+// private data instead.
+describe('editing by id, around a preset declaration', () => {
+  const declaration = [
+    '- insert:',
+    '    - id: local-preset-standard',
+    "      name: '@deepseek-ai/dsh-agent-preset'",
+    '      config:',
+    '        id: standard',
+    '        plugins:',
+    '          - id: tool-bash',
+    "            name: '@deepseek-ai/dsh-tool-bash'",
+    "            disabled: !!js process.platform === 'win32'",
+    '',
+  ].join('\n')
+
+  it('appends a top-level override instead of editing a roster row', () => {
+    expect(setRowDisabled(declaration, 'tool-bash', true)).toBe(
+      `${declaration}- id: tool-bash\n  disabled: true\n`,
+    )
+  })
+
+  it('removes the loader row, not a roster row of the same id', () => {
+    const text = `${declaration}- id: tool-bash\n  disabled: true\n- id: keeper\n`
+    expect(removeRow(text, 'tool-bash')).toBe(`${declaration}- id: keeper\n`)
+  })
+
+  it('reads a row\'s config from the loader row, not from the roster', () => {
+    const text = `${declaration}- id: tool-bash\n  config:\n    timeout: 30\n- id: keeper\n`
+    expect(extractKeyValue(text, 'tool-bash', 'config')).toBe('timeout: 30')
   })
 })
 
