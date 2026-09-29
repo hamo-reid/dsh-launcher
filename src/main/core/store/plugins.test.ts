@@ -188,6 +188,71 @@ describe('local installs', () => {
   })
 })
 
+describe('archive staging shape', () => {
+  /**
+   * Model what pnpm really leaves behind: the package body lives in the virtual
+   * store and the top-level entry is an ABSOLUTE junction to it. Reading it works
+   * while the project is still `.staging`, and dangles the moment the directory is
+   * renamed — which is the whole reason the archived version needs a re-link.
+   * `repairOnInstall` decides whether the re-link puts the body back.
+   */
+  function mockPnpm(name: string, repairOnInstall: boolean, onAdd?: (dir: string) => void): string[][] {
+    const calls: string[][] = []
+    vi.mocked(runPnpm).mockImplementation(async (dir, args) => {
+      calls.push([...args])
+      const body = join(dir, 'node_modules', name)
+      if (args[0] === 'add') {
+        onAdd?.(dir)
+        const real = join(dir, '.pnpm', `${name}@1.0.0`, 'node_modules', name)
+        mkPkg(real, '1.0.0')
+        mkdirSync(join(dir, 'node_modules'), { recursive: true })
+        symlinkSync(real, body, 'junction')
+      } else if (args[0] === 'install' && repairOnInstall) {
+        // pnpm drops the stale junction before rebuilding it.
+        rmSync(body, { force: true })
+        mkPkg(body, '1.0.0')
+      }
+      return { ok: true, text: 'added' }
+    })
+    return calls
+  }
+
+  it('describes the staging project before adding into it', async () => {
+    // The yaml is what keeps pnpm from resolving the package's host-service peers
+    // from the registry and from hiding an aggregate's sub-packages behind .pnpm.
+    // Writing it after the add would be too late — the damage is already in the
+    // tree pnpm just built.
+    const src = join(root, 'src-yaml')
+    mkPkg(src, '1.0.0')
+    let yamlAtAdd: string | undefined
+    const calls = mockPnpm('src-yaml', true, (dir) => {
+      yamlAtAdd = readFileSync(join(dir, 'pnpm-workspace.yaml'), 'utf8')
+    })
+    const r = await addLocalPlugin(store(), src)
+    expect(r.ok).toBe(true)
+    expect(yamlAtAdd).toContain('autoInstallPeers: false')
+    expect(yamlAtAdd).toContain('nodeLinker: hoisted')
+    // …and it survives into the archived version.
+    expect(existsSync(join(store(), 'archive', 'src-yaml', '1.0.0', 'pnpm-workspace.yaml'))).toBe(true)
+    expect(calls.filter(a => a[0] === 'install')).toHaveLength(1)
+  })
+
+  it('escalates to the repair ladder only when the re-link leaves no body', async () => {
+    // A version built a moment ago needs ONE install. The offline/online/force
+    // ladder is a repair path; reaching for it on every new archive is what made
+    // an ordinary download feel slow.
+    const src = join(root, 'src-ladder')
+    mkPkg(src, '1.0.0')
+    const calls = mockPnpm('src-ladder', false)
+    await addLocalPlugin(store(), src)
+    const installs = calls.filter(a => a[0] === 'install')
+    expect(installs).toHaveLength(4)
+    expect(installs[0]).not.toContain('--offline')
+    expect(installs[1]).toContain('--offline')
+    expect(installs[3]).toContain('--force')
+  })
+})
+
 describe('scopes and installed-dir resolution', () => {
   it('listProfileScopes lists profiles owning a manifest, sorted', () => {
     const homeD = join(root, 'home-a')

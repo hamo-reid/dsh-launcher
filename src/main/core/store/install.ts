@@ -31,7 +31,9 @@ function declaresBundlePatch(pkgDir: string): boolean {
   }
 }
 
-/** Write the hoisted pnpm workspace into an archive's own project, unless present. */
+/** Write the hoisted pnpm workspace into a project, unless it already has one.
+ * Applied to the staging project BEFORE the add (that is what makes the archive
+ * come out hoisted) and, by `repairArchiveLinks`, to archives that predate it. */
 function writeHoistedWorkspace(verDir: string): boolean {
   const p = join(verDir, 'pnpm-workspace.yaml')
   if (existsSync(p)) return false
@@ -84,6 +86,19 @@ export async function installSource(storeDir: string, name: string, source: stri
   rmSync(staging, { recursive: true, force: true })
   mkdirSync(staging, { recursive: true })
   initStore(staging) // a minimal project for `pnpm add` to resolve into
+  // The staging project must describe ITSELF before anything is added into it.
+  // Without this yaml pnpm uses its defaults, and both defaults are wrong here:
+  // `autoInstallPeers` would resolve the package's host-service peers
+  // (`@deepseek-ai/dsh-*`, cordis) from the REGISTRY, so the archive would carry a
+  // private copy of the host stack pinned to whatever npm had that day — resolved
+  // from the archive tree instead of from the profile, and stale the moment the
+  // host moves on. And `nodeLinker: isolated` hides an aggregate bundle's
+  // sub-packages behind `.pnpm/`, leaving them invisible until a later re-link.
+  // The yaml also stops a staging project with no workspace of its own from
+  // silently adopting an ANCESTOR pnpm workspace and installing into that.
+  // Writing it here (rather than after the rename) means the archive is already
+  // the right shape when it is first built; the post-rename hoist is gone.
+  writeHoistedWorkspace(staging)
   const result = await runPnpm(staging, ['add', source, '--fetch-retries=3', '--fetch-retry-maxtimeout=60000'], signal, { storeDir })
   // A user cancel: drop the half-downloaded staging dir and surface it as a
   // cancel, not a failure — the download task manager treats it as cancelled.
@@ -104,11 +119,6 @@ export async function installSource(storeDir: string, name: string, source: stri
     rmSync(staging, { recursive: true, force: true })
     return { ok: false, text: `未在 node_modules 中找到 ${name}（包名不匹配，或依赖解析失败）${tail !== '' ? `\n${tail}` : ''}` }
   }
-  // Detect an aggregate bundle HERE, while the staging `node_modules/<name>` link is
-  // still valid. After the rename its absolute link dangles (naming the gone
-  // `.staging`), so inspecting it post-rename would read a broken package and miss
-  // the bundle — leaving an aggregate version isolated (invisible sub-packages).
-  const isAggregate = declaresBundlePatch(join(staging, 'node_modules', name))
   const dest = pluginVersionDir(storeDir, name, version)
   if (existsSync(dest)) {
     rmSync(staging, { recursive: true, force: true })
@@ -120,30 +130,38 @@ export async function installSource(storeDir: string, name: string, source: stri
   } catch (error) {
     return { ok: false, text: `归档失败：${error instanceof Error ? error.message : String(error)}` }
   }
-  // An aggregate bundle version must be hoisted so its sub-packages surface at the
-  // top-level node_modules. Write the workspace before the rewire below so the
-  // `pnpm install` materialises those links against this version's own goods.
-  if (isAggregate) writeHoistedWorkspace(dest)
   // Moving `.staging` → version dir dangles pnpm's absolute top-level links (they
   // name the now-gone `.staging`); let pnpm rewire them to this version's goods.
-  await reinstallVersion(dest, join(dest, 'node_modules', name), storeDir)
+  await relinkVersion(dest, join(dest, 'node_modules', name), storeDir)
   recordPluginSource(storeDir, name, version, sourceKindOf(source), source)
   logger.info(`plugin store add: ${name}@${version} (${source})`)
   return { ok: true, text: `已下载 ${name}@${version}` }
 }
 
-/** Rewire an archived version's top-level node_modules links after the staging
- * dir was moved to its final location. pnpm writes those top-level links as
- * absolute targets naming `.staging`, so the rename invalidates them; a reinstall
- * rebuilds them against this version's own `.pnpm` goods. Needs
- * `confirmModulesPurge=false`: pnpm sees a moved project as needing a full
- * rebuild, and would otherwise wait on an interactive prompt in a non-CI child.
- *
- * When `pkgDir` is given (`node_modules/<name>`), a stale pnpm lock can mark the
- * install "up to date" while a dangling top-level link stays broken — pnpm trusts
- * `.modules.yaml` and never re-checks the junction target. So if the package body
- * is still unreadable after the normal offline/online installs, a `--force` relink
- * rebuilds it. */
+/**
+ * Rewire a version that was JUST archived in place: one `pnpm install`, which is
+ * enough because everything it needs is already in the store this call used. The
+ * body is verified rather than trusted — a stale pnpm lock can mark the install
+ * "up to date" while a dangling top-level link stays broken (pnpm trusts
+ * `.modules.yaml` and never re-checks the junction target). Only a verified
+ * failure escalates, to the repair ladder.
+ */
+async function relinkVersion(verDir: string, pkgDir: string, storeDir: string): Promise<boolean> {
+  const bodyOk = (): boolean => existsSync(join(pkgDir, 'package.json'))
+  const once = await runPnpm(verDir, ['install', '--config.confirmModulesPurge=false'], undefined, { storeDir })
+  if (once.ok && bodyOk()) return true
+  logger.warn(`plugin store: relink left ${verDir} unusable — falling back to the repair ladder`)
+  return reinstallVersion(verDir, pkgDir, storeDir)
+}
+
+/**
+ * The REPAIR ladder: offline, then online, then `--force`. This is for archives
+ * that may predate the current install method or were left broken by an
+ * interrupted download, so it escalates instead of trusting one attempt. It is
+ * deliberately NOT the fresh-add path: a version built a moment ago needs one
+ * install, and paying three — two of them networked — for every new archive is
+ * what made a normal download feel slow.
+ */
 async function reinstallVersion(verDir: string, pkgDir?: string, storeDir?: string): Promise<boolean> {
   const storeOpts = storeDir === undefined ? undefined : { storeDir }
   const bodyOk = (): boolean => pkgDir === undefined || existsSync(join(pkgDir, 'package.json'))
