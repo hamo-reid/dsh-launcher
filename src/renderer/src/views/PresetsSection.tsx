@@ -504,13 +504,20 @@ export default function PresetsSection(): JSX.Element {
                   profile lists ten places and several paths run past 150
                   characters, so the panel scrolls and both the source line and
                   the path stay on ONE line with an ellipsis; the full path is a
-                  hover and a copy away. */}
+                  hover and a copy away. The scroll container carries its own
+                  padding: the scrollbar sits inside, so the content needs a
+                  wider right gutter to clear it. */}
               <Popover
                 trigger="click"
                 placement="bottomRight"
                 title={t('preset.placesTitle')}
                 content={(
-                  <div style={{ width: 460, maxHeight: PLACE_PANEL_MAX_HEIGHT, overflowY: 'auto' }}>
+                  <div style={{
+                    width: 460,
+                    maxHeight: PLACE_PANEL_MAX_HEIGHT,
+                    overflowY: 'auto',
+                    padding: '2px 16px 2px 4px',
+                  }}>
                     <Space direction="vertical" size={10} style={{ width: '100%' }}>
                       {places.map(place => (
                         <div key={place.path} style={{ minWidth: 0 }}>
@@ -532,27 +539,28 @@ export default function PresetsSection(): JSX.Element {
                               SIBLING: putting `overflow: hidden` on the same element as
                               antd's copy button would clip the button too, and antd's own
                               ellipsis-with-copyable path measures in JS to reserve room for
-                              it. One line, one click, one hover for the full path. */}
+                              it. The hover carries the full path; the copy button keeps
+                              antd's own copy/copied tooltip. */}
                           <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
-                            <span
-                              style={{
-                                flex: '1 1 auto',
-                                minWidth: 0,
-                                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-                                fontSize: token.fontSizeSM,
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {place.path}
-                            </span>
                             <Tooltip title={place.path}>
-                              <Typography.Text
-                                copyable={{ text: place.path }}
-                                style={{ flexShrink: 0, fontSize: token.fontSizeSM }}
-                              />
+                              <span
+                                style={{
+                                  flex: '1 1 auto',
+                                  minWidth: 0,
+                                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+                                  fontSize: token.fontSizeSM,
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                {place.path}
+                              </span>
                             </Tooltip>
+                            <Typography.Text
+                              copyable={{ text: place.path }}
+                              style={{ flexShrink: 0, fontSize: token.fontSizeSM }}
+                            />
                           </div>
                         </div>
                       ))}
