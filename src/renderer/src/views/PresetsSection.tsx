@@ -49,10 +49,6 @@ const MINIMAL_PRESET_ID = 'minimal'
  * places, so the panel would otherwise outgrow the viewport on a short screen. */
 const PLACE_PANEL_MAX_HEIGHT = 420
 
-/** A source path past this many characters cannot fit the two-line clamp, so it gets
- * a hover carrying the whole path. Roughly one line each at the panel's width. */
-const PLACE_PATH_CLAMP = 110
-
 /** The locale key naming where one definition comes from. `as const` keeps the
  * values literal, which is what lets `t()` typecheck a looked-up key. */
 const SOURCE_KEY = {
@@ -506,8 +502,9 @@ export default function PresetsSection(): JSX.Element {
               {/* Long absolute paths belong behind a click, not wrapped across
                   the header where they would dominate the page. A 0.2.0-rc.1
                   profile lists ten places and several paths run past 150
-                  characters, so the panel scrolls and each path clamps to two
-                  lines: the full path is one hover (or one copy) away. */}
+                  characters, so the panel scrolls and both the source line and
+                  the path stay on ONE line with an ellipsis; the full path is a
+                  hover and a copy away. */}
               <Popover
                 trigger="click"
                 placement="bottomRight"
@@ -515,48 +512,50 @@ export default function PresetsSection(): JSX.Element {
                 content={(
                   <div style={{ width: 460, maxHeight: PLACE_PANEL_MAX_HEIGHT, overflowY: 'auto' }}>
                     <Space direction="vertical" size={10} style={{ width: '100%' }}>
-                      {places.map(place => {
-                        const pathNode = (
-                          <Typography.Text
-                            code
-                            copyable={{ text: place.path }}
+                      {places.map(place => (
+                        <div key={place.path} style={{ minWidth: 0 }}>
+                          <div
                             style={{
+                              color: token.colorTextSecondary,
                               fontSize: token.fontSizeSM,
-                              display: '-webkit-box',
-                              WebkitBoxOrient: 'vertical',
-                              WebkitLineClamp: 2,
                               overflow: 'hidden',
-                              wordBreak: 'break-all',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
                             }}
                           >
-                            {place.path}
-                          </Typography.Text>
-                        )
-                        return (
-                          <div key={place.path} style={{ minWidth: 0 }}>
-                            <div
+                            {t(SOURCE_KEY[place.source])}
+                            {place.bundle === undefined ? '' : ` · ${place.bundle}`}
+                            {place.writable ? '' : ` · ${t('preset.sourceSystem')}`}
+                            {place.exists ? '' : ` · ${t('preset.placeMissing')}`}
+                          </div>
+                          {/* The path truncates on its own, with the copy control as a
+                              SIBLING: putting `overflow: hidden` on the same element as
+                              antd's copy button would clip the button too, and antd's own
+                              ellipsis-with-copyable path measures in JS to reserve room for
+                              it. One line, one click, one hover for the full path. */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+                            <span
                               style={{
-                                color: token.colorTextSecondary,
+                                flex: '1 1 auto',
+                                minWidth: 0,
+                                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
                                 fontSize: token.fontSizeSM,
                                 overflow: 'hidden',
                                 textOverflow: 'ellipsis',
                                 whiteSpace: 'nowrap',
                               }}
                             >
-                              {t(SOURCE_KEY[place.source])}
-                              {place.bundle === undefined ? '' : ` · ${place.bundle}`}
-                              {place.writable ? '' : ` · ${t('preset.sourceSystem')}`}
-                              {place.exists ? '' : ` · ${t('preset.placeMissing')}`}
-                            </div>
-                            {/* A clamped path is no longer readable on the page, so a
-                                long one gets the whole thing back on hover. The copy
-                                button always carries the full path either way. */}
-                            {place.path.length > PLACE_PATH_CLAMP
-                              ? <Tooltip title={place.path}>{pathNode}</Tooltip>
-                              : pathNode}
+                              {place.path}
+                            </span>
+                            <Tooltip title={place.path}>
+                              <Typography.Text
+                                copyable={{ text: place.path }}
+                                style={{ flexShrink: 0, fontSize: token.fontSizeSM }}
+                              />
+                            </Tooltip>
                           </div>
-                        )
-                      })}
+                        </div>
+                      ))}
                     </Space>
                   </div>
                 )}
