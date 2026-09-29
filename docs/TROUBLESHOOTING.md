@@ -234,6 +234,25 @@ launcher 用 Node 的解析链（从包锚点）逐行解析并报告：
 - profile 的 `node_modules/<pkg>` 缺失但 pnpm 说 "Already up to date"：用 Bundle 层的
   **`重新链接`**（删坏 junction → 重新 `pnpm install`），与 §1 是同一个坑。
 
+### 快照到库（毕业）会得到什么
+`快照到库` 与「接入 → 复制」走同一条路径：`pnpm pack` → 归档 → 按需把 profile 从 `link:` 切到归档。
+
+- **用 `pnpm pack` 而不是直接拷目录**：开发包在 monorepo 里，manifest 用的是 `workspace:*` /
+  `workspace:^` / `catalog:`，从库那边直接加会报 `ERR_PNPM_WORKSPACE_PKG_NOT_FOUND`——那些协议只有
+  那个 monorepo 能解析。`pack` 就是 `npm publish` 的同一套改写，实测：
+  `workspace:* → 3.2.1`、`workspace:^ → ^3.2.1`、`catalog: → ^4.1.0`。
+  它同时遵守包的 `files` 白名单，所以归档里是**发布物**，不是整棵源码树。
+- **前置条件**：源码仓库要装过依赖（`pack` 从已安装的树里解析 workspace 协议）。
+  没装会得到一句明确的「请先 pnpm install」，而不是 pnpm 的原始报错。
+- **peer 不会被打进归档**（这是对的）：`@deepseek-ai/*` 这类宿主服务由 profile 在运行时提供，
+  快照的输出里会列出「由宿主提供、不进归档」的 peer 作为说明。实测同一份带 2 个 peer 的插件：
+  改动前归档里多出 49 个 `@deepseek-ai/*`（从 registry 拉来并钉死），改动后只剩 3 个真依赖。
+- **同版本号会覆盖**：改了代码但没 bump `version` 时，快照会替换已有归档（文案会写明
+  「已替换归档」）。想留历史就自己改版本号。
+- 仍然失败的情况：某个 `workspace:` 依赖**从未发布过**，pack 改写出的版本号在 registry 上不存在
+  → 归档那步 404。这时报错会直接说明「多半是只在 monorepo 内部使用的包：请先发布它，或改成
+  peerDependencies」。
+
 ---
 
 ## 快速索引

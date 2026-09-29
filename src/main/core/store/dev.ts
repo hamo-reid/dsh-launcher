@@ -26,7 +26,7 @@ import { packageOf, resolveModule, type ResolvedModule } from './module-resolve.
 import { bundlePatchPaths, declaredBundlePatches } from './bundle-manifest.ts'
 import { installIntoProfile, installSource } from './install.ts'
 import { latestStoreVersion } from './layout.ts'
-import { packDevPackage } from './pack.ts'
+import { explainArchiveFailure, packDevPackage } from './pack.ts'
 import { profilesDir } from '../profile/home.ts'
 import { runPnpm } from '../dsh/pnpm.ts'
 import { createKeyedCache } from '../shared/keyed-cache.ts'
@@ -571,7 +571,13 @@ export async function snapshotDevPlugin(dev: DevPlugin, ctx: DshContext, opts: S
   }
   const archived = await installSource(opts.storeDir, dev.name, `file:${packed.tgz}`, undefined, { replace: true })
   if (!archived.ok) {
-    return { ok: false, text: `${packed.text}\n${archived.text}`, command: packed.command, cwd: packed.cwd, warnings: checks.warnings }
+    return {
+      ok: false,
+      text: `${packed.text}\n${explainArchiveFailure(archived.text) ?? archived.text}`,
+      command: packed.command,
+      cwd: packed.cwd,
+      ...(checks.warnings.length > 0 ? { warnings: checks.warnings } : {}),
+    }
   }
   const version = latestStoreVersion(opts.storeDir, dev.name)
   const installed: { profile: string; text: string }[] = []

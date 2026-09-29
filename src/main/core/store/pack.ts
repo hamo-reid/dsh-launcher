@@ -31,6 +31,27 @@ import type { DevPlugin, DevRunResult } from '../../../shared/types.ts'
  * dependency is not installed. Recoverable by installing the dev repo. */
 const NEEDS_INSTALL = 'ERR_PNPM_CANNOT_RESOLVE_WORKSPACE_PROTOCOL'
 
+/** pnpm's error when a resolved version is not in the registry at all. */
+const UNPUBLISHED = /ERR_PNPM_(FETCH_404|NO_MATCHING_VERSION)/
+
+/**
+ * Explain the ARCHIVE step's own version of the same problem.
+ *
+ * `pnpm pack` rewrites `workspace:*` into a real version, which is correct — but
+ * if that package only ever existed inside the monorepo, the rewritten version
+ * is not on the registry and `pnpm add file:<tarball>` fails with a bare 404.
+ * pnpm's message names the request, not the remedy, and the user is left
+ * guessing whether to publish, to re-tag, or to give up on the snapshot.
+ * `undefined` means "not this", so the caller's own error text is kept.
+ */
+export function explainArchiveFailure(text: string): string | undefined {
+  if (!UNPUBLISHED.test(text)) return undefined
+  const tail = text.trim().split(/\r?\n/).slice(-4).join(' ')
+  return '打包后的依赖里有 registry 上不存在的版本——多半是只在 monorepo 内部使用、从未发布过的包。'
+    + '快照无法完成：请先发布它，或把它改为 peerDependencies（由宿主在运行时提供）。\n'
+    + tail
+}
+
 /** Where packed tarballs are kept, per package. They must survive: the archive
  * records `file:<tarball>` as its dependency, so its own `pnpm install` re-resolves
  * through them. */
