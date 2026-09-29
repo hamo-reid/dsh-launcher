@@ -127,6 +127,13 @@ export interface PluginUsagePoint {
    * `node_modules` (read from its `package.json`). Absent when the profile has
    * not been installed yet, or the plugin isn't resolved into its node_modules. */
   version?: string
+  /** The profile's raw dependency spec, when it declares one. */
+  spec?: string
+  /** The profile declares or holds a reference that no longer resolves: a
+   * `link:` to a vanished source dir, a `file:` into a deleted archive, or a
+   * dangling entry in its node_modules. A usage point that is broken still has to
+   * be shown — it is the one state that needs a person to do something. */
+  broken?: boolean
 }
 
 /** How an archived plugin version got into the store. `dsh` = shipped with the

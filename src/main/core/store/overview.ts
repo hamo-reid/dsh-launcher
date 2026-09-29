@@ -10,6 +10,7 @@ import {
   type StoreManifest,
 } from './layout.ts'
 import { readPluginSources } from './sources.ts'
+import { readRef } from './refstate.ts'
 import { resolveInstallAnchor } from '../dsh/dsh.ts'
 import { listBundleSubdepNames } from './subdeps.ts'
 import { SHIPPED_BUNDLE_NAMES } from '../../../shared/profile-name.ts'
@@ -216,6 +217,7 @@ export function buildInstalledOverview(dshes: DshScope[], storeDir: string): Ins
       const depSpecs = manifest.dependencies ?? {}
       const deps = Object.keys(depSpecs)
       const pkgNodeModules = join(dir, profile, 'node_modules')
+      const profileDirPath = join(dir, profile)
       // Aggregate bundles pull in sub-packages (their patch `name:` rows) that dsh
       // must resolve from the profile; surface those too, marked `sub-bundle`.
       const bundleRoots = [
@@ -233,8 +235,13 @@ export function buildInstalledOverview(dshes: DshScope[], storeDir: string): Ins
       const scan: string[] = []
       for (const b of bundles) scan.push(b)
       for (const d of deps) {
-        // An installed dependency that declares a bundle counts as in use too.
-        if (existsSync(join(pkgNodeModules, d, 'package.json'))) scan.push(d)
+        // A dep counts when something is installed there, or when a local
+        // (`link:`/`file:`) reference exists that no longer resolves. The second
+        // case is what a deleted archive leaves behind, and it was invisible:
+        // `existsSync` reads a dangling junction as absent, exactly like a
+        // profile that never installed anything.
+        const ref = readRef(d, profileDirPath, depSpecs[d])
+        if (ref.installed || ref.broken) scan.push(d)
       }
       // Sub-packages present locally (installed as transitive deps of an aggregate).
       for (const sub of subNames) {
@@ -259,7 +266,16 @@ export function buildInstalledOverview(dshes: DshScope[], storeDir: string): Ins
         // Resolve the version actually installed into this profile's
         // node_modules — the per-profile truth of "which version is applied".
         const resolved = readVersion(join(pkgNodeModules, name))
-        row.usage.push({ dsh: dsh.name, dshVersion: dsh.version, profile, version: resolved })
+        // Whether this profile still has a working reference. A bundle-layer
+        // entry is scanned whether or not it resolves, so this is the only thing
+        // that separates a healthy profile from one whose archive was deleted.
+        const ref = readRef(name, profileDirPath, depSpecs[name])
+        row.usage.push({
+          dsh: dsh.name, dshVersion: dsh.version, profile,
+          version: resolved,
+          ...(ref.spec !== undefined ? { spec: ref.spec } : {}),
+          ...(ref.broken ? { broken: true } : {}),
+        })
         noteVersion(row, resolved)
       }
     }

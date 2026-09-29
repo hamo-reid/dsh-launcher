@@ -273,8 +273,14 @@ const api = {
       ipcRenderer.invoke('plugins:installToProfile', dshId, profile, pkg, version),
     installOptions: (): Promise<IpcResult<{ id: string; name: string; version?: string; profiles: string[] }[]>> =>
       ipcRenderer.invoke('plugins:installOptions'),
-    remove: (name: string, version?: string): Promise<IpcResult<string>> =>
-      ipcRenderer.invoke('plugins:remove', name, version),
+    remove: (
+      name: string, version?: string, opts?: { detach?: boolean },
+    ): Promise<IpcResult<{ text: string; detached: PluginUsagePoint[] }>> =>
+      ipcRenderer.invoke('plugins:remove', name, version, opts),
+    detach: (
+      name: string, targets?: { dsh: string; profile: string }[],
+    ): Promise<IpcResult<{ detached: PluginUsagePoint[] }>> =>
+      ipcRenderer.invoke('plugins:detach', name, targets),
     uninstall: (name: string): Promise<IpcResult<{ removed: PluginUsagePoint[] }>> =>
       ipcRenderer.invoke('plugins:uninstall', name),
     listCombo: (dshId: string, profile: string): Promise<IpcResult<ComboPlugin[]>> =>

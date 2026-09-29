@@ -6,10 +6,10 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } 
 import { join, resolve } from 'node:path'
 import {
   addLocalPlugin, addPlugin, buildInstalledOverview, findInstalledDir, initStore, installIntoProfile, listPlugins,
-  listProfileScopes, readPluginReadme, removePlugin, removePluginFromProfiles,
+  listProfileScopes, readPluginReadme, removeArchivedVersion, removePlugin, removePluginFromProfiles,
 } from '../../core/store/plugins.ts'
 import { listComboPlugins } from '../../core/store/combo.ts'
-import { dshScopes, pluginDir, profilesRootFor } from '../../core/profile/appState.ts'
+import { dshScopes, pluginDir, profilesRootFor, type DshScope } from '../../core/profile/appState.ts'
 import { inlineRelativeImages } from '../../core/shared/app-util.ts'
 import { fetchPackageVersions, npmSearch } from '../../core/store/npm.ts'
 import { attachPluginSizes } from '../../core/store/overview.ts'
@@ -130,12 +130,35 @@ export function registerStoreIpc(): void {
     }
   })
 
-  handle('plugins:remove', async (_event, name: string, version?: string): Promise<IpcResult<string>> => {
+  // Delete one archived version. REFUSES while a profile still points at it, and
+  // names the profiles — deleting a version and detaching the profiles that
+  // depend on it are two different acts, and only the first used to happen.
+  handle('plugins:remove', async (
+    _event, name: string, version?: string, opts?: { detach?: boolean },
+  ): Promise<IpcResult<{ text: string; detached: PluginUsagePoint[] }>> => {
     try {
       if (pathIdentifierInvalid(name)) return fail(E.nameInvalid)
       if (version !== undefined && versionInvalid(version)) return fail(E.nameInvalid)
-      const result = await removePlugin(pluginDir(), name, version)
-      return result.ok ? { ok: true, value: result.text } : fail(E.storeOperationFailed, { detail: result.text })
+      if (version === undefined) {
+        // Whole-plugin removal detaches every referencing profile by design.
+        const detached = await removePluginFromProfiles(dshScopes(), name)
+        const res = removePlugin(pluginDir(), name)
+        if (!res.ok) return fail(E.storeOperationFailed, { detail: res.text })
+        return { ok: true, value: { text: res.text, detached } }
+      }
+      const res = await removeArchivedVersion(dshScopes(), pluginDir(), name, version, {
+        ...(opts?.detach === true ? { detach: true } : {}),
+      })
+      if (!res.ok) {
+        // A blocked delete is its own outcome, not an operation failure: the user
+        // needs to see WHO holds the version, then choose. It carries its own code
+        // so the renderer can offer "detach those and delete" rather than
+        // showing a dead end.
+        return res.blockedBy !== undefined
+          ? fail(E.storeVersionInUse, { name, version, profiles: res.blockedBy.map(u => `${u.dsh}·${u.profile}`).join('、') })
+          : fail(E.storeOperationFailed, { detail: res.text })
+      }
+      return { ok: true, value: { text: res.text, detached: res.blockedBy ?? [] } }
     } catch (error) {
       return failFromError(error)
     }
@@ -152,6 +175,39 @@ export function registerStoreIpc(): void {
       const res = removePlugin(pluginDir(), name)
       if (!res.ok) return fail(E.storeOperationFailed, { detail: res.text })
       return { ok: true, value: { removed } }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Detach a plugin from profiles WITHOUT touching the library. The one operation
+  // the store page had no way to express: `uninstall` also deletes the archive, and
+  // unregistering a dev plugin deliberately touches no profile at all.
+  // No `targets` = every profile that references it; given = only those.
+  // Targets are addressed by dsh NAME, because a usage point — which is what the
+  // UI hands back — carries the name and nothing else to address with.
+  handle('plugins:detach', async (
+    _event, name: string, targets?: { dsh: string; profile: string }[],
+  ): Promise<IpcResult<{ detached: PluginUsagePoint[] }>> => {
+    try {
+      if (pathIdentifierInvalid(name)) return fail(E.nameInvalid)
+      const scopes = dshScopes()
+      if (targets === undefined) {
+        return { ok: true, value: { detached: await removePluginFromProfiles(scopes, name) } }
+      }
+      const wanted = new Set<string>()
+      const list: DshScope[] = []
+      for (const raw of targets) {
+        if (pathIdentifierInvalid(raw.profile)) return fail(E.nameInvalid)
+        const scope = scopes.find(s => s.name === raw.dsh)
+        if (scope === undefined) return fail(E.dshNotFound, { detail: raw.dsh })
+        if (!list.includes(scope)) list.push(scope)
+        wanted.add(`${scope.name}\u0000${raw.profile}`)
+      }
+      const detached = await removePluginFromProfiles(list, name, {
+        only: (dshName, profile) => wanted.has(`${dshName}\u0000${profile}`),
+      })
+      return { ok: true, value: { detached } }
     } catch (error) {
       return failFromError(error)
     }

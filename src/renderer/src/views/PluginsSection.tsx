@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Menu, Modal, theme, message,
+  Alert, Menu, Modal, Space, Typography, theme, message,
 } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
@@ -10,12 +10,13 @@ import Toolbar from '../components/Toolbar.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
 import { DownloadVersionModal, PluginDetailModal, InstallToProfileModal, UpdatePluginModal, type UpdatePluginTarget } from './PluginsModals.tsx'
 import { toStoreMap } from '../lib/storeMap.ts'
+import { brokenRefs, describeBroken } from '../lib/pluginRefs.ts'
 import MarketSection from './MarketSection.tsx'
 import DevPluginsView from './plugins/DevPluginsView.tsx'
 import PluginsDownloadView from './plugins/PluginsDownloadView.tsx'
 import PluginsInstallView from './plugins/PluginsInstallView.tsx'
 import PluginsOverviewView from './plugins/PluginsOverviewView.tsx'
-import type { InstalledOverviewRow, MarketAnnotations, PluginUpdateInfo } from '../../../shared/types.ts'
+import type { InstalledOverviewRow, MarketAnnotations, PluginUpdateInfo, PluginUsagePoint } from '../../../shared/types.ts'
 
 type PluginView = 'overview' | 'download' | 'install' | 'market' | 'dev'
 
@@ -56,6 +57,11 @@ export default function PluginsSection() {
   const [updatePkg, setUpdatePkg] = useState<UpdatePluginTarget | null>(null)
 
   const [busy, setBusy] = useState(false)
+  /** The usage point a detach is running for, as `${dsh}·${profile}`. */
+  const [detaching, setDetaching] = useState('')
+
+  // Derived, never scanned again: the overview already decided what is broken.
+  const broken = useMemo(() => brokenRefs(overview), [overview])
 
   // "Install into a profile" dialog.
   const [installPkg, setInstallPkg] = useState<string | null>(null)
@@ -137,16 +143,47 @@ export default function PluginsSection() {
   // Remove a SINGLE archived version from the store. Keeps the detail modal open
   // so the user can keep managing the remaining versions — the target is re-synced
   // to the fresh overview (and closed if this was the plugin's last version).
-  const uninstallVersion = async (name: string, version: string): Promise<void> => {
+  //
+  // A version a profile still points at is REFUSED, and the refusal is an offer:
+  // the user is shown who holds it and asked whether to detach those and delete.
+  // Deleting without that would leave a `file:` aimed at a directory that is gone.
+  const uninstallVersion = async (name: string, version: string, detach = false): Promise<void> => {
     setBusy(true)
-    const res = await window.api.plugins.remove(name, version)
+    const res = await window.api.plugins.remove(name, version, detach ? { detach: true } : undefined)
     setBusy(false)
-    if (!res.ok) { void message.error(apiErrorText(res)); return }
-    void message.success(t('plugin.version.uninstalled', { name, version }))
+    if (!res.ok) {
+      if (res.code === 'store.versionInUse') {
+        Modal.confirm({
+          title: t('plugin.version.inUseTitle', { name, version }),
+          content: `${apiErrorText(res)}\n\n${t('plugin.version.inUseDetachAsk')}`,
+          okText: t('plugin.version.inUseDetachOk'),
+          cancelText: t('common.cancel'),
+          okButtonProps: { danger: true },
+          onOk: async () => { await uninstallVersion(name, version, true) },
+        })
+        return
+      }
+      void message.error(apiErrorText(res))
+      return
+    }
+    void message.success(res.value.text)
     const rows = await load()
     const fresh = rows?.find(x => x.name === name)
     setTarget(fresh !== undefined ? fresh : null)
     await refreshStoreNames()
+  }
+
+  // Drop one profile's reference to this plugin, leaving the library alone. The
+  // unit is a usage point, so the dialogs hand one back verbatim.
+  const detach = async (name: string, usage: PluginUsagePoint): Promise<void> => {
+    const key = `${usage.dsh}·${usage.profile}`
+    setDetaching(key)
+    const res = await window.api.plugins.detach(name, [{ dsh: usage.dsh, profile: usage.profile }])
+    setDetaching('')
+    if (!res.ok) { void message.error(apiErrorText(res)); return }
+    void message.success(t('plugin.detachedOne', { name, profile: usage.profile }))
+    const rows = await load()
+    setTarget(rows?.find(x => x.name === name) ?? null)
   }
 
   // Remove a stale store plugin (its dir is missing on disk): confirm, then the
@@ -162,7 +199,7 @@ export default function PluginsSection() {
         const res = await window.api.plugins.remove(name)
         setBusy(false)
         if (!res.ok) void message.error(apiErrorText(res))
-        else { void message.success(t('plugin.uninstalled', { name })); await Promise.all([load(), refreshStoreNames()]) }
+        else { void message.success(res.value.text); await Promise.all([load(), refreshStoreNames()]) }
       },
     })
   }
@@ -227,7 +264,12 @@ export default function PluginsSection() {
     setUpdatePkg({
       name: row.name,
       ...(latest !== undefined ? { latest } : {}),
-      usage: row.usage.map(u => ({ dsh: u.dsh, profile: u.profile, ...(u.version !== undefined ? { version: u.version } : {}) })),
+      usage: row.usage.map(u => ({
+        dsh: u.dsh, profile: u.profile,
+        ...(u.version !== undefined ? { version: u.version } : {}),
+        ...(u.spec !== undefined ? { spec: u.spec } : {}),
+        ...(u.broken === true ? { broken: true } : {}),
+      })),
     })
   }
 
@@ -246,7 +288,32 @@ export default function PluginsSection() {
       }
     >
       {view === 'overview' && (
-        <PluginsOverviewView
+        <>
+          {/* Reported, never auto-fixed: rewriting a profile's manifest on
+              startup is a bigger risk than the dangling reference itself, and the
+              next `pnpm install` there fails loudly anyway. The fix is one click,
+              on the row that owns it. */}
+          {broken.length > 0 && (
+            <Alert
+              type="error"
+              showIcon
+              style={{ marginBottom: token.marginSM }}
+              title={t('plugin.brokenRefsTitle', { count: broken.length })}
+              description={
+                <Space direction="vertical" size={2} style={{ width: '100%' }}>
+                  {describeBroken(broken).map(line => (
+                    <div key={line.name}>
+                      <Typography.Link onClick={() => setTarget(overview.find(r => r.name === line.name) ?? null)}>
+                        {line.name}
+                      </Typography.Link>
+                      <span> · {line.profiles}</span>
+                    </div>
+                  ))}
+                </Space>
+              }
+            />
+          )}
+          <PluginsOverviewView
           overview={overview}
           overviewLoading={overviewLoading}
           sizeMap={sizeMap}
@@ -266,7 +333,8 @@ export default function PluginsSection() {
           onUninstall={name => void uninstall(name)}
           onReveal={name => void revealDir(name)}
           onDeleteStale={deleteStale}
-        />
+          />
+        </>
       )}
       {view === 'market' && <MarketSection />}
 
@@ -300,6 +368,8 @@ export default function PluginsSection() {
       onUpdate={name => { const row = overview.find(x => x.name === name); if (row !== undefined) openUpdate(row) }}
       onUninstall={name => void uninstall(name)}
       onUninstallVersion={(name, version) => void uninstallVersion(name, version)}
+      onDetach={(name, usage) => void detach(name, usage)}
+      detaching={detaching}
       onReveal={name => void revealDir(name)}
       onInstallToProfile={name => { setTarget(null); setInstallPkg(name) }}
       onCleanupVersions={name => void cleanupVersions(name)}

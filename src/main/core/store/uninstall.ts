@@ -4,10 +4,11 @@
  * from every profile that links into it, so the archive can actually be freed.
  */
 import { existsSync, lstatSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import { runPnpm } from '../dsh/pnpm.ts'
 import { logger } from '../shared/logger.ts'
 import { pluginVersionDir, versionsRoot, type ProfileManifestShape } from './layout.ts'
+import { readDeps, readRef } from './refstate.ts'
 import { listBundleSubdepNames } from './subdeps.ts'
 import { profilesRoot, type DshScope } from '../profile/appState.ts'
 import type { PluginUsagePoint } from '../../../shared/types.ts'
@@ -88,13 +89,16 @@ function pruneEmptyScopes(from: string): void {
  * (and keeps the plugin surfacing in the overview), so a "full uninstall" must
  * detach the profiles first. Returns the affected usage points.
  */
-export async function removePluginFromProfiles(dshes: DshScope[], pkg: string): Promise<PluginUsagePoint[]> {
+export async function removePluginFromProfiles(
+  dshes: DshScope[], pkg: string, opts?: { only?: (home: string, profile: string) => boolean },
+): Promise<PluginUsagePoint[]> {
   const affected: PluginUsagePoint[] = []
   for (const dsh of dshes) {
     const dir = profilesRoot(dsh.home)
     if (!existsSync(dir)) continue
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue
+      if (opts?.only !== undefined && !opts.only(dsh.name, entry.name)) continue
       const profileDirPath = join(dir, entry.name)
       const manifestPath = join(profileDirPath, 'package.json')
       if (!existsSync(manifestPath)) continue
@@ -151,8 +155,89 @@ export async function removePluginFromProfiles(dshes: DshScope[], pkg: string): 
   return affected
 }
 
+/** Detach a plugin from the profiles `pick` selects. `removePluginFromProfiles`
+ * with no filter, named separately so a selective detach reads as deliberate at
+ * the call site. The selector takes the dsh NAME, because that is what a usage
+ * point — the thing the caller is filtering — actually carries. */
+export async function detachProfiles(
+  dshes: DshScope[], pkg: string, pick: (dshName: string, profile: string) => boolean,
+): Promise<PluginUsagePoint[]> {
+  return removePluginFromProfiles(dshes, pkg, { only: pick })
+}
+
+/**
+ * Every profile that still points at one specific store path.
+ *
+ * Deleting an archived version used to detach nobody, so a profile switched to
+ * that version kept a `file:` spec aimed at a directory that no longer existed.
+ * The reference is only findable by comparing the DECLARED spec against the path
+ * about to be deleted — the profile side cannot see it by itself, because a
+ * dangling junction reads exactly like a package that was never installed.
+ */
+export function profilesPointingAt(dshes: DshScope[], pkg: string, target: string): PluginUsagePoint[] {
+  const wanted = resolve(target)
+  const found: PluginUsagePoint[] = []
+  for (const dsh of dshes) {
+    const dir = profilesRoot(dsh.home)
+    if (!existsSync(dir)) continue
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const profileDirPath = join(dir, entry.name)
+      const manifestPath = join(profileDirPath, 'package.json')
+      if (!existsSync(manifestPath)) continue
+      const ref = readRef(pkg, profileDirPath, readDeps(manifestPath)[pkg])
+      // A spec names the package BODY (`file:<version>/node_modules/<pkg>`), not the
+      // version dir, so match the dir or anything inside it.
+      if (ref.target !== undefined && (ref.target === wanted || ref.target.startsWith(wanted + sep))) {
+        found.push({ dsh: dsh.name, dshVersion: dsh.version, profile: entry.name, ...(ref.spec !== undefined ? { spec: ref.spec } : {}) })
+      }
+    }
+  }
+  return found
+}
+
+/** A profile's identity, for matching a usage point back to its directory. */
+function usageKey(home: string, profile: string): string {
+  return `${home}\u0000${profile}`
+}
+
+/**
+ * Remove ONE archived version, refusing while any profile still points at it.
+ *
+ * Deleting a version is a library-side act; detaching the profiles that depend on
+ * it is a profile-side one. Doing only the first is how a profile ends up holding
+ * a `file:` aimed at nothing while the UI still reports it as in use. So the
+ * question is asked FIRST, and the answer is either "who" (blocked) or "do both".
+ * `detach: true` is the explicit "do both" — never the default, because removing
+ * a reference from someone else's profile is a decision, not a side effect.
+ */
+export async function removeArchivedVersion(
+  dshes: DshScope[], dir: string, pkg: string, version: string, opts?: { detach?: boolean },
+): Promise<{ ok: boolean; text: string; blockedBy?: PluginUsagePoint[] }> {
+  if (dir === '') return { ok: false, text: '未配置插件保存位置 —— 请在「设置」中指定' }
+  if (version === '.' || version === '..') return { ok: false, text: `非法版本号：${version}` }
+  const target = pluginVersionDir(dir, pkg, version)
+  if (!existsSync(target)) return { ok: false, text: `${pkg}@${version} 未在插件库中` }
+  const referencing = profilesPointingAt(dshes, pkg, target)
+  if (referencing.length > 0 && opts?.detach !== true) {
+    const where = referencing.map(u => `${u.dsh}·${u.profile}`).join('、')
+    return { ok: false, text: `${pkg}@${version} 仍被这些 profile 引用：${where}。先断开引用再删除。`, blockedBy: referencing }
+  }
+  if (referencing.length > 0) {
+    const only = new Set(referencing.map(u => usageKey(u.dsh, u.profile)))
+    await detachProfiles(dshes, pkg, (home, profile) => only.has(usageKey(home, profile)))
+  }
+  const res = removePlugin(dir, pkg, version)
+  return res.ok
+    ? { ok: true, text: `${res.text}（已从 ${referencing.length} 个 profile 断开引用）` }
+    : res
+}
+
 /** Uninstall a plugin from the store. Without `version` the whole plugin (every
- * archived version) is removed; with it, only that one archived version goes. */
+ * archived version) is removed; with it, only that one archived version goes.
+ *
+ * The single-version form has a guard the whole-plugin form does not need — see
+ * `removeArchivedVersion`, which is what a delete should go through. */
 export function removePlugin(dir: string, name: string, version?: string): { ok: boolean; text: string } {
   if (dir === '') return { ok: false, text: '未配置插件保存位置 —— 请在「设置」中指定' }
   // Defense in depth: `.`/`..` pass the (character-class) version validation but

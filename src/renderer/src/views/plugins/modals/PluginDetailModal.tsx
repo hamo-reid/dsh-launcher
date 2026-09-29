@@ -13,7 +13,7 @@ import { fmtBytes } from '../../../lib/format.ts'
 import FieldLabel from '../../../components/FieldLabel.tsx'
 import PluginReadme from '../PluginReadme.tsx'
 import { MODAL } from '../../../theme.ts'
-import type { InstalledOverviewRow, PluginUpdateInfo } from '../../../../../shared/types.ts'
+import type { InstalledOverviewRow, PluginUpdateInfo, PluginUsagePoint } from '../../../../../shared/types.ts'
 
 const SOURCE_COLORS: Record<string, string> = {
   github: 'green',
@@ -42,6 +42,11 @@ interface PluginDetailModalProps {
   onUpdate: (name: string) => void
   onUninstall: (name: string) => void
   onUninstallVersion: (name: string, version: string) => void
+  /** Drop the plugin's reference in ONE profile, leaving the library alone. The
+   * unit of the operation is the usage point, so it is a row action, not a menu. */
+  onDetach: (name: string, usage: PluginUsagePoint) => void
+  /** Whether a detach is running, as `${dsh}·${profile}`. */
+  detaching: string
   onReveal: (name: string) => void
   onInstallToProfile: (name: string) => void
   /** Remove the plugin's unused archived versions (keep newest + in-use). */
@@ -196,14 +201,48 @@ export function PluginDetailModal(p: PluginDetailModalProps): JSX.Element {
                 <FieldLabel>{t('plugin.detail.usageTab')}</FieldLabel>
                 {target !== null && target.usage.length === 0
                   ? <span style={{ color: token.colorTextSecondary }}>{t('plugin.detail.noUsage')}</span>
-                  : (target?.usage ?? []).map((u, i) => (
-                      <div key={i} style={{ padding: '6px 0', fontSize: token.fontSize, lineHeight: 1.6, borderBottom: i < (target?.usage.length ?? 0) - 1 ? `1px solid ${token.colorSplit}` : 0 }}>
-                        <span>DSH「{u.dsh}」</span>
-                        {u.dshVersion !== undefined && <Tag style={{ marginInline: 4 }}>v{u.dshVersion}</Tag>}
-                        <span>· profile「{u.profile}」</span>
-                        {u.version !== undefined && <Tag style={{ marginInline: 4, fontFamily: 'monospace' }}>@{u.version}</Tag>}
-                      </div>
-                    ))}
+                  : (target?.usage ?? []).map((u, i) => {
+                      // The action belongs to the row: its unit IS a (dsh, profile)
+                      // pair, and a menu item would force the user to pick the target
+                      // in a second step. A broken reference gets the same action
+                      // with a different label — it is the only thing that fixes it.
+                      const busy = p.detaching === `${u.dsh}·${u.profile}`
+                      return (
+                        <div
+                          key={i}
+                          style={{
+                            padding: '6px 0', fontSize: token.fontSize, lineHeight: 1.6,
+                            borderBottom: i < (target?.usage.length ?? 0) - 1 ? `1px solid ${token.colorSplit}` : 0,
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                            <span>DSH「{u.dsh}」</span>
+                            {u.dshVersion !== undefined && <Tag style={{ marginInline: 4 }}>v{u.dshVersion}</Tag>}
+                            <span>· profile「{u.profile}」</span>
+                            {u.version !== undefined && <Tag style={{ marginInline: 4, fontFamily: 'monospace' }}>@{u.version}</Tag>}
+                            {u.broken === true && (
+                              <Tooltip title={u.spec ?? t('plugin.detail.usageBrokenNoSpec')}>
+                                <Tag color="error">{t('plugin.detail.usageBroken')}</Tag>
+                              </Tooltip>
+                            )}
+                            <Button
+                              size="small"
+                              danger={u.broken === true}
+                              loading={busy}
+                              style={{ marginInlineStart: 'auto' }}
+                              onClick={() => p.onDetach(target!.name, u)}
+                            >
+                              {t(u.broken === true ? 'plugin.detail.usageCleanRef' : 'plugin.detail.usageDetach')}
+                            </Button>
+                          </div>
+                          {u.spec !== undefined && (
+                            <div style={{ color: token.colorTextTertiary, fontSize: token.fontSizeSM, wordBreak: 'break-all' }}>
+                              {u.spec}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
               </div>
             </Space>
           ),

@@ -8,7 +8,9 @@ export type { DshScope } from '../profile/appState.ts'
 
 export { initStore, installedStoreVersion, latestStoreVersion, pluginVersionDir, storeVersions } from './layout.ts'
 export { needsStoreMigration, migrateStore } from './migration.ts'
-export { deleteTreePhysical, removePlugin, removePluginFromProfiles } from './uninstall.ts'
+export {
+  deleteTreePhysical, detachProfiles, profilesPointingAt, removeArchivedVersion, removePlugin, removePluginFromProfiles,
+} from './uninstall.ts'
 export {
   addLocalPlugin, addPlugin, installIntoProfile, installSource, packageNameFromSource, repairArchiveLinks,
 } from './install.ts'

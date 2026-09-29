@@ -47,6 +47,11 @@ interface DevPluginsApi {
   busy: string
   reload: () => Promise<void>
 
+  /** The plugin being detached from profiles, if any. */
+  detachPkg: string | null
+  detachFrom: (name: string) => void
+  closeDetach: () => void
+
   /** The open report. */
   detail: OpenReport | null
   closeDetail: () => void
@@ -73,6 +78,8 @@ export function useDevPlugins(): DevPluginsApi {
   const { t } = useTranslation()
   const [plugins, setPlugins] = useState<DevPlugin[]>([])
   const [usage, setUsage] = useState<Record<string, PluginUsagePoint[]>>({})
+  /** The package being detached from profiles, if any. */
+  const [detachPkg, setDetachPkg] = useState<string | null>(null)
   const [diags, setDiags] = useState<Record<string, DevDiagnosis>>({})
   // Build scripts per plugin (its own + its workspace root's), for the picker.
   const [buildTargets, setBuildTargets] = useState<Record<string, { options: DevScriptOptions; current?: DevBuildTarget }>>({})
@@ -265,6 +272,7 @@ export function useDevPlugins(): DevPluginsApi {
   return {
     hosts, target, listMeta, profileOptions, retarget,
     plugins, usage, diags, loading, busy, reload: load,
+    detachPkg, detachFrom: setDetachPkg, closeDetach: () => setDetachPkg(null),
     detail, closeDetail: () => setDetail(null), diagnose, buildMenuItems,
     add, install, runBuild, shim, unshim, snapshot, unregister,
     output, closeOutput: () => setOutput(null),

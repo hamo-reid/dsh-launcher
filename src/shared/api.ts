@@ -270,7 +270,17 @@ export interface WindowApi {
     addLocal: () => Promise<IpcResult<string>>
     installOptions: () => Promise<IpcResult<{ id: string; name: string; version?: string; profiles: string[] }[]>>
     installToProfile: (dshId: string, profile: string, pkg: string, version?: string) => Promise<IpcResult<string>>
-    remove: (name: string, version?: string) => Promise<IpcResult<string>>
+    /** Delete an archived version (or the whole plugin when `version` is omitted).
+     * A single version is REFUSED while a profile still points at it — the failure
+     * comes back as `store.versionInUse` carrying the profile list. Re-call with
+     * `detach: true` to remove those references and delete in one step. */
+    remove: (
+      name: string, version?: string, opts?: { detach?: boolean },
+    ) => Promise<IpcResult<{ text: string; detached: PluginUsagePoint[] }>>
+    /** Detach a plugin from profiles WITHOUT touching the library. No `targets` =
+     * every referencing profile; given = only those. This is the one operation the
+     * store page could not express before. */
+    detach: (name: string, targets?: { dsh: string; profile: string }[]) => Promise<IpcResult<{ detached: PluginUsagePoint[] }>>
     /** Cascade full uninstall: detach the plugin from every using profile, then
      * remove the whole plugin (all versions) from the store. Returns the detached
      * usage points. */

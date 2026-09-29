@@ -18,7 +18,7 @@ import { runPnpm } from '../dsh/pnpm.ts'
 import {
   addLocalPlugin, addPlugin, buildInstalledOverview, findInstalledDir, initStore,
   installIntoProfile, installSource, installedStoreVersion, listPlugins, listProfileScopes,
-  migrateStore, needsStoreMigration, readPluginReadme, removePlugin,
+  migrateStore, needsStoreMigration, readPluginReadme, removeArchivedVersion, removePlugin,
   removePluginFromProfiles, storeVersions,
 } from './plugins.ts'
 import * as appStateModule from '../profile/appState.ts'
@@ -349,8 +349,11 @@ describe('buildInstalledOverview', () => {
     expect(bundleA.inStore).toBe(true)
     expect(bundleA.builtin).toBe(false)
     // bundleA is a bundle layer of p1 but is NOT resolved into p1's node_modules
-    // here → its usage version stays undefined (signals "not applied yet").
-    expect(bundleA.usage).toEqual([{ dsh: 'dsh@d', dshVersion: 'd', profile: 'p1', version: undefined }])
+    // here → its usage version stays undefined (signals "not applied yet"). It
+    // carries its declared spec, which is what the tooltip names.
+    expect(bundleA.usage).toEqual([{
+      dsh: 'dsh@d', dshVersion: 'd', profile: 'p1', version: undefined, spec: '^1',
+    }])
     // no origin record → falls back to a generic "store" source.
     expect(bundleA.sources).toEqual(['store'])
 
@@ -390,7 +393,103 @@ describe('buildInstalledOverview', () => {
   })
 })
 
+describe('a reference that points at nothing', () => {
+  it('surfaces as a broken usage point instead of vanishing', () => {
+    // Deleting an archived version left the profile holding a `file:` aimed at a
+    // directory that is gone. `existsSync` reads that exactly like a profile that
+    // never installed anything, so the state was invisible — the overview still
+    // said "in use" and the dev-plugin page still said "used by p1".
+    const homeD = join(root, 'home-broken')
+    const base = join(homeD, 'profiles')
+    const myStore = join(store(), 'out2')
+    mkdirSync(myStore, { recursive: true })
+    writeFileSync(join(myStore, 'package.json'), JSON.stringify({ dependencies: {} }))
+    const gone = join(myStore, 'archive', 'grad', '0.1.0', 'node_modules', 'grad')
+    mkProfile(base, 'p1', {
+      dependencies: { grad: `file:${gone}` },
+      dsh: { profile: { bundles: ['grad'] } },
+    })
+
+    const rows = buildInstalledOverview([scope('b', homeD)], myStore)
+    const grad = rows.find(r => r.name === 'grad')!
+    expect(grad.usage).toHaveLength(1)
+    expect(grad.usage[0]).toMatchObject({ profile: 'p1', broken: true, spec: `file:${gone}` })
+    expect(grad.usage[0].version).toBeUndefined()
+  })
+
+  it('tells a broken local reference apart from a profile that installed nothing', () => {
+    const homeD = join(root, 'home-intact')
+    const base = join(homeD, 'profiles')
+    const myStore = join(store(), 'out3')
+    mkdirSync(myStore, { recursive: true })
+    writeFileSync(join(myStore, 'package.json'), JSON.stringify({ dependencies: {} }))
+    // Declared but never installed, with a plain npm range: nothing dangling.
+    mkProfile(base, 'p1', { dependencies: { plain: '^1.0.0' }, dsh: { profile: { bundles: ['plain'] } } })
+
+    const rows = buildInstalledOverview([scope('c', homeD)], myStore)
+    const plain = rows.find(r => r.name === 'plain')!
+    expect(plain.usage[0].broken).toBeUndefined()
+  })
+})
+
+describe('removeArchivedVersion', () => {
+  /** A store with one archived version, plus a profile pointing at it. */
+  function archiveAndProfile(): { homeD: string; verDir: string } {
+    const homeD = join(root, 'home-guard')
+    const base = join(homeD, 'profiles')
+    const myStore = store()
+    const verDir = join(myStore, 'archive', 'guarded', '1.0.0')
+    seedVersion('guarded', '1.0.0')
+    mkProfile(base, 'p1', { dependencies: { guarded: `file:${join(verDir, 'node_modules', 'guarded')}` } })
+    mkProfile(base, 'p2', { dependencies: { other: '^1' } })
+    return { homeD, verDir }
+  }
+
+  it('refuses while a profile still points at the version, and names it', async () => {
+    const { homeD } = archiveAndProfile()
+    const res = await removeArchivedVersion([scope('g', homeD)], store(), 'guarded', '1.0.0')
+    expect(res.ok).toBe(false)
+    expect(res.text).toContain('p1')
+    expect(res.blockedBy?.map(u => u.profile)).toEqual(['p1'])
+    // Refusing means not touching it.
+    expect(storeVersions(store(), 'guarded')).toEqual(['1.0.0'])
+  })
+
+  it('detaches those profiles and deletes when explicitly asked to', async () => {
+    const { homeD } = archiveAndProfile()
+    const res = await removeArchivedVersion([scope('g', homeD)], store(), 'guarded', '1.0.0', { detach: true })
+    expect(res.ok).toBe(true)
+    expect(storeVersions(store(), 'guarded')).toEqual([])
+    const p1 = JSON.parse(readFileSync(join(homeD, 'profiles', 'p1', 'package.json'), 'utf8'))
+    expect(p1.dependencies?.guarded).toBeUndefined()
+  })
+
+  it('leaves an unreferenced version to a plain delete', async () => {
+    const homeD = join(root, 'home-free')
+    seedVersion('freeplug', '2.0.0')
+    const res = await removeArchivedVersion([scope('g', homeD)], store(), 'freeplug', '2.0.0')
+    expect(res.ok).toBe(true)
+    expect(res.blockedBy).toBeUndefined()
+    expect(storeVersions(store(), 'freeplug')).toEqual([])
+  })
+})
+
 describe('removePluginFromProfiles', () => {
+  it('detaches only the selected profiles when given a filter', async () => {
+    const homeD = join(root, 'home-pick')
+    const base = join(homeD, 'profiles')
+    mkProfile(base, 'p1', { dependencies: { pick: 'link:/x' } })
+    mkProfile(base, 'p2', { dependencies: { pick: 'link:/x' } })
+    mkPkg(join(base, 'p1', 'node_modules', 'pick'), '1.0.0')
+    mkPkg(join(base, 'p2', 'node_modules', 'pick'), '1.0.0')
+
+    const affected = await removePluginFromProfiles([scope('p', homeD)], 'pick', { only: (_d, profile) => profile === 'p1' })
+    expect(affected.map(u => u.profile)).toEqual(['p1'])
+    // p2 keeps its reference: a selective detach must not sweep the rest.
+    const p2 = JSON.parse(readFileSync(join(base, 'p2', 'package.json'), 'utf8'))
+    expect(p2.dependencies?.pick).toBe('link:/x')
+  })
+
   it('detaches a linked plugin from every using profile (link dep + bundle layer)', async () => {
     const homeD = join(root, 'home-cascade')
     const base = join(homeD, 'profiles')

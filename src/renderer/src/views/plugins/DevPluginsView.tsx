@@ -14,11 +14,12 @@ import { parseBuildKey, scopeLabel, statusOf } from '../../lib/devPlugins.ts'
 import { useDevPlugins } from './useDevPlugins.ts'
 import DevDiagnosisModal from './modals/DevDiagnosisModal.tsx'
 import DevLinkModal from './modals/DevLinkModal.tsx'
+import DevDetachModal from './modals/DevDetachModal.tsx'
 import DevOutputModal from './modals/DevOutputModal.tsx'
 import ConfirmMenu, { type MenuAction } from '../../components/ConfirmMenu.tsx'
 import Panel from '../../components/Panel.tsx'
 import SectionHeading from '../../components/SectionHeading.tsx'
-import type { DevPlugin } from '../../../../shared/types.ts'
+import type { DevPlugin, PluginUsagePoint } from '../../../../shared/types.ts'
 
 export default function DevPluginsView(): JSX.Element {
   const { t } = useTranslation()
@@ -26,6 +27,7 @@ export default function DevPluginsView(): JSX.Element {
   const {
     hosts, target, listMeta, profileOptions, retarget,
     plugins, usage, diags, loading, busy, reload,
+    detachPkg, detachFrom, closeDetach,
     detail, closeDetail, diagnose, buildMenuItems,
     add, install, runBuild, shim, unshim, snapshot, unregister,
     output, closeOutput,
@@ -46,18 +48,36 @@ export default function DevPluginsView(): JSX.Element {
   const rowActions = (p: DevPlugin): MenuAction[] => [
     { key: 'reveal', label: t('plugin.dev.reveal') },
     ...(p.workspaceRoot !== undefined ? [{ key: 'reveal-ws', label: t('plugin.dev.revealWorkspace') } as MenuAction] : []),
+    // The mirror of "attach to profile". Unregistering deliberately touches no
+    // profile, so without this there is no way back out of a link at all.
+    { key: 'detach', label: t('plugin.dev.detach') },
     { key: 'snapshot', label: t('plugin.dev.snapshot'), confirmText: t('plugin.dev.snapshotConfirm', { name: p.name }) },
-    { key: 'remove', label: t('plugin.dev.unregister'), danger: true, confirmText: t('plugin.dev.unregisterConfirm', { name: p.name }) },
+    {
+      key: 'remove',
+      label: t('plugin.dev.unregister'),
+      danger: true,
+      // Say what it does NOT do: unregistering leaves every profile reference in
+      // place, and the row right below says where this plugin is still in use.
+      confirmText: linkedProfiles(p.name).length > 0
+        ? t('plugin.dev.unregisterConfirmUsed', { name: p.name, profiles: linkedProfiles(p.name).join(t('common.listSep')) })
+        : t('plugin.dev.unregisterConfirm', { name: p.name }),
+    },
   ]
 
   const onRowAction = (p: DevPlugin, key: string): void => {
     if (key === 'reveal') void window.api.plugins.devReveal(p.name)
     else if (key === 'reveal-ws') void window.api.plugins.devRevealWorkspace(p.name)
+    else if (key === 'detach') detachFrom(p.name)
     else if (key === 'snapshot') void snapshot(p.name)
     else if (key === 'remove') void unregister(p.name)
   }
 
-  const linkedProfiles = (name: string): string[] => (usage[name] ?? []).map(u => u.profile)
+  const usageOf = (name: string): PluginUsagePoint[] => usage[name] ?? []
+  const linkedProfiles = (name: string): string[] => usageOf(name).map(u => u.profile)
+  /** Profiles that still declare the plugin but cannot resolve it — a deleted
+   * archive, or a source dir that is gone. Saying "used by p1" for one of these
+   * is the lie this whole path was built to stop. */
+  const brokenProfiles = (name: string): string[] => usageOf(name).filter(u => u.broken === true).map(u => u.profile)
 
   // The badges below belong to the last run, so the chain they were computed
   // against is shown with them.
@@ -89,6 +109,7 @@ export default function DevPluginsView(): JSX.Element {
               {plugins.map(p => {
                 const st = status(p.name)
                 const used = linkedProfiles(p.name)
+                const broken = brokenProfiles(p.name)
                 return (
                   <div
                     key={p.name}
@@ -102,6 +123,11 @@ export default function DevPluginsView(): JSX.Element {
                           {t(p.bundle ? 'plugin.dev.bundle' : 'plugin.dev.dependency')}
                         </Tag>
                         {st !== null && <Tag color={st.color}>{st.label}</Tag>}
+                        {broken.length > 0 && (
+                          <Tooltip title={t('plugin.dev.brokenUsageHint')}>
+                            <Tag color="error">{t('plugin.dev.brokenUsage', { profiles: broken.join(t('common.listSep')) })}</Tag>
+                          </Tooltip>
+                        )}
                       </div>
                       <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, marginTop: 2, wordBreak: 'break-all' }}>
                         <Tooltip title={p.dir}>{t('plugin.dev.dir')}: {p.dir}</Tooltip>
@@ -145,6 +171,13 @@ export default function DevPluginsView(): JSX.Element {
         onClose={closeDetail}
       />
       <DevLinkModal pkg={linkPkg} onClose={() => setLinkPkg(null)} onLinked={reload} />
+      <DevDetachModal
+        pkg={detachPkg}
+        hosts={hosts}
+        usedIn={detachPkg !== null ? usageOf(detachPkg).map(u => `${u.dsh}·${u.profile}`) : []}
+        onClose={closeDetach}
+        onDetached={reload}
+      />
       <DevOutputModal output={output} onClose={closeOutput} />
     </>
   )
