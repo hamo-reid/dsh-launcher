@@ -58,6 +58,32 @@ describe('listBundleSubdepNames', () => {
     writeFileSync(join(aggr, 'cordis.patch.yml'), 'not: [valid: yaml')
     expect(listBundleSubdepNames(aggr)).toEqual([])
   })
+
+  // `dsh.bundle.patch` may be an ordered LIST, and 0.2.0-rc.1's web-app bundle uses
+  // that form. Handing the list to `path.join` threw a TypeError straight out of
+  // the install / uninstall / installed-overview callers.
+  it('reads every patch file a bundle declares, not only the first', () => {
+    aggr = join(root, 'node_modules', 'aggr-multi')
+    mkdirSync(join(aggr, 'presets'), { recursive: true })
+    writeFileSync(join(aggr, 'package.json'), JSON.stringify({
+      name: 'aggr-multi',
+      dsh: { bundle: { patch: ['./cordis.patch.yml', './presets/standard.patch.yml'] } },
+    }))
+    writeFileSync(join(aggr, 'cordis.patch.yml'), "- insert:\n    - id: row-a\n      name: 'sub-a'\n")
+    writeFileSync(join(aggr, 'presets', 'standard.patch.yml'), "- insert:\n    - id: row-b\n      name: 'sub-b'\n")
+    expect(listBundleSubdepNames(aggr)).toEqual(['sub-a', 'sub-b'])
+  })
+
+  it('keeps the declared files that are present when one is missing', () => {
+    aggr = join(root, 'node_modules', 'aggr-gap')
+    mkdirSync(aggr, { recursive: true })
+    writeFileSync(join(aggr, 'package.json'), JSON.stringify({
+      name: 'aggr-gap',
+      dsh: { bundle: { patch: ['./gone.patch.yml', './cordis.patch.yml'] } },
+    }))
+    writeFileSync(join(aggr, 'cordis.patch.yml'), "- insert:\n    - id: row-a\n      name: 'sub-a'\n")
+    expect(listBundleSubdepNames(aggr)).toEqual(['sub-a'])
+  })
 })
 
 describe('resolveBundleSubdepDir / bundleSubdepLinks', () => {

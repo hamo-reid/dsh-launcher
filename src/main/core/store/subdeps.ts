@@ -17,6 +17,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { parseNamedRows } from '../patch/patch.ts'
+import { bundlePatchPaths } from './bundle-manifest.ts'
 
 /** The bundle's own package name, for excluding self-references from its sub-set. */
 function readBundleName(pkgDir: string): string | undefined {
@@ -28,38 +29,29 @@ function readBundleName(pkgDir: string): string | undefined {
   }
 }
 
-/** The resolved `dsh.bundle.patch` path of an installed bundle's package, or
- * `undefined` when it declares no bundle patch. */
-function bundlePatchPath(pkgDir: string): string | undefined {
-  let manifest: { dsh?: { bundle?: { patch?: string } } }
-  try {
-    manifest = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8'))
-  } catch {
-    return undefined
-  }
-  const patch = manifest.dsh?.bundle?.patch
-  return patch === undefined ? undefined : join(pkgDir, patch)
-}
-
 /** The distinct sub-packages a bundle's patch references (`name:` rows), excluding
- * the bundle itself and entries without a name. Empty for a non-aggregate bundle. */
+ * the bundle itself and entries without a name. Empty for a non-aggregate bundle.
+ *
+ * EVERY file the bundle declares is read: a bundle may split its rows over
+ * several patch files, and one of the later ones can carry sub-packages the first
+ * never mentions. */
 export function listBundleSubdepNames(pkgDir: string): string[] {
-  const patchPath = bundlePatchPath(pkgDir)
-  if (patchPath === undefined || !existsSync(patchPath)) return []
   const self = readBundleName(pkgDir)
   const seen = new Set<string>()
   const out: string[] = []
-  try {
-    for (const row of parseNamedRows(readFileSync(patchPath, 'utf8'))) {
-      if (row.name === undefined || row.name === '') continue
-      if (row.name === self) continue
-      if (seen.has(row.name)) continue
-      seen.add(row.name)
-      out.push(row.name)
+  for (const patchPath of bundlePatchPaths(pkgDir)) {
+    try {
+      for (const row of parseNamedRows(readFileSync(patchPath, 'utf8'))) {
+        if (row.name === undefined || row.name === '') continue
+        if (row.name === self) continue
+        if (seen.has(row.name)) continue
+        seen.add(row.name)
+        out.push(row.name)
+      }
+    } catch {
+      // An unreadable patch should never break the enclosing install/uninstall.
+      continue
     }
-  } catch {
-    // An unreadable patch should never break the enclosing install/uninstall.
-    return []
   }
   return out
 }

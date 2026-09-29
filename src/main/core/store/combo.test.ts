@@ -55,6 +55,18 @@ function mkBundlePkg(p: string, bundle: string): void {
   writeFileSync(join(dir, 'package.json'), JSON.stringify({ dsh: { bundle: { patch: './cordis.patch.yml' } } }))
 }
 
+/** A bundle package declaring SEVERAL patch files (`dsh.bundle.patch` as a list),
+ * the shape 0.2.0-rc.1's web-app bundle uses for its preset declarations. */
+function mkBundleFiles(p: string, bundle: string, declared: string[], files: Record<string, string>): void {
+  const dir = join(profileDir(p), 'node_modules', bundle)
+  for (const [rel, text] of Object.entries(files)) {
+    const at = join(dir, rel)
+    mkdirSync(dirname(at), { recursive: true })
+    writeFileSync(at, text)
+  }
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ dsh: { bundle: { patch: declared } } }))
+}
+
 function mkUserPatch(p: string, text: string): void {
   writeFileSync(join(profileDir(p), 'cordis.patch.yml'), text)
 }
@@ -201,6 +213,39 @@ describe('findInsertConflicts', () => {
     writeFileSync(overlay, '- insert:\n    - id: shared\n      name: pkg\n')
     expect(findInsertConflicts(ctx(), 'p', [overlay])).toEqual([
       { id: 'shared', layers: [{ source: 'profile', label: 'p' }, { source: 'patch', label: 'overlay.yml' }] },
+    ])
+  })
+
+  // The 0.2.0-rc.1 false positive: a bundle declaring an ARRAY of patch files,
+  // four of them agent-preset declarations whose `config.plugins` rosters reuse
+  // the base bundle's plugin ids. Read as inserts, ~30 of them "collided" with
+  // the base layer and the profile was reported unbootable while it booted fine.
+  it('does not read a preset declaration\'s plugin roster as inserted entries', () => {
+    mkProfile('p', ['b1', 'b2'], {})
+    mkBundle('p', 'b1', '- insert:\n    - id: tool-bash\n      name: base\n')
+    mkBundleFiles('p', 'b2', ['./cordis.patch.yml', './presets/standard.patch.yml'], {
+      'cordis.patch.yml': '- insert:\n    - id: agent-preset-registry\n      name: reg\n',
+      'presets/standard.patch.yml': [
+        '- insert:',
+        '    - id: preset-standard',
+        "      name: '@deepseek-ai/dsh-agent-preset'",
+        '      config:',
+        '        id: standard',
+        '        plugins:',
+        '          - id: tool-bash',
+        "            name: '@deepseek-ai/dsh-tool-bash'",
+        '            disabled: true',
+        '          - id: persona',
+        "            name: '@deepseek-ai/dsh-persona'",
+        '',
+      ].join('\n'),
+    })
+    expect(findInsertConflicts(ctx(), 'p')).toEqual([])
+    expect(validateComposition(ctx(), 'p').ok).toBe(true)
+    // The composed plugin list keeps the real rows only: the base layer's
+    // `tool-bash`, the registry mount and the declaration itself.
+    expect(listComboPlugins(ctx(), 'p').map(row => row.id)).toEqual([
+      'tool-bash', 'agent-preset-registry', 'preset-standard',
     ])
   })
 })

@@ -8,8 +8,9 @@ import { basename, join } from 'node:path'
 import { homePatchPath, profileDir, profilePatchPath } from '../profile/home.ts'
 import { readManifest } from '../profile/manifest.ts'
 import { moduleSearchRoots } from './module-resolve.ts'
+import { bundlePatchRels, declaredBundlePatches } from './bundle-manifest.ts'
 import {
-  assertPatchDocValid, collectInsertIds, extractKeyValue, PATCH_FILE_NAME, parseClassifiedRows, parseNamedRows,
+  assertPatchDocValid, collectInsertIds, extractKeyValue, parseClassifiedRows, parseNamedRows,
   parsePatchRows,
 } from '../patch/patch.ts'
 import { diagnoseMcpServers, readMcpServers } from '../mcp/mcp.ts'
@@ -24,39 +25,6 @@ const cplog = child('combo')
 
 /** Re-export the shared composed-plugin shape. */
 export type { ComboPlugin } from '../../../shared/types.ts'
-
-/** The patch filename a bundle package declares via `dsh.bundle.patch`, or
- * `undefined` when it declares none (or its manifest is unreadable). Both bundle
- * judgements read through here: {@link bundlePatchRels} turns the result into
- * filename, {@link declaresBundle} treats "declared at all" as the host's own
- * bundle test. */
-function declaredBundlePatches(pkgDir: string): string[] {
-  try {
-    const manifest = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8')) as {
-      dsh?: { bundle?: { patch?: unknown } }
-    }
-    const declared = manifest.dsh?.bundle?.patch
-    if (typeof declared === 'string' && declared.trim() !== '') return [declared]
-    // dsh accepts one file OR an ordered list, and 0.2.0-rc.1's web-app bundle
-    // uses the list form to carry its four agent-preset declarations as separate
-    // files. Reading only the string form silently dropped every one of them.
-    if (Array.isArray(declared)) {
-      return declared.filter((entry): entry is string => typeof entry === 'string' && entry.trim() !== '')
-    }
-  } catch {
-    // missing/invalid manifest — not a declaration
-  }
-  return []
-}
-
-/** The filename to look for inside a bundle dir: the declared `dsh.bundle.patch`,
- * else the historical `cordis.patch.yml`. The host requires the declaration and
- * fails loud without it; the launcher is a viewer, so a package that omits it
- * still resolves by filename. */
-function bundlePatchRels(bundleDir: string): string[] {
-  const declared = declaredBundlePatches(bundleDir)
-  return declared.length > 0 ? declared : [PATCH_FILE_NAME]
-}
 
 /** A profile's resolved search roots. Callers that resolve MANY bundles — every
  * loop below — should build this once and pass it down: building it walks the

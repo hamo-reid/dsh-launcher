@@ -77,6 +77,8 @@ dsh `0.2.0-rc.1` 删掉了目录 preset，没有兼容读取：`packages/preset/
 
 内置四个（standard/ptc/minimal/cordis）现在是 `@deepseek-ai/dsh-web-app` 组合包的 `presets/<id>.patch.yml`，由 `package.json` 的 `dsh.bundle.patch` 数组排在 `cordis.patch.yml` 之后。**一个组合包可以声明多个 patch 文件**，launcher 按声明顺序全部读取（`core/store/combo.ts` 的 `resolveBundlePatches`）——只读第一个的话，这四个文件一个都看不见。
 
+这个声明全仓只有一处读：`core/store/bundle-manifest.ts`。之前有两个各自复刻的版本，于是数组形式各错一种：组合层读取只认字符串形式（名册全空、不报错），子包扫描把数组交给 `path.join`（TypeError 直接抛出 `install` / `uninstall` / 已装概览的调用方）。
+
 自建的声明写在**当前 profile 的 `cordis.patch.yml`**（也可以写在 home 层，或做成一个组合包装进来；launcher 只写 profile 层，因为 home 层优先级更高、会影响所有 profile）。
 
 ### 3.2 读取：按 loader 行 id 折叠
@@ -100,6 +102,22 @@ dsh `0.2.0-rc.1` 删掉了目录 preset，没有兼容读取：`packages/preset/
 - 一份声明能否改，看它**在哪一层**：bundle 层属于部署，只读；profile / home 层是用户自己的，可改。折叠已经把「谁赢」算出来了，所以赢家天然就是该改的那一层。
 
 ## 4. 组合面与能不能挂载
+
+### 4.1 什么算一行：entry 位置
+
+**只有 patch 结构里的 entry 才算行；行自己的 `config` 是插件私有数据。** `patch.ts` 的 `positionedRows` 是全部读取器（`parsePatchRows` / `parseNamedRows` / `parseClassifiedRows` / `collectInsertIds` / `findIdLine`）唯一的「一行」定义 —— 两套口径正好在要紧的地方分歧，所以只能有一套。它走的是 host `applyEntryPatches` 的结构，不是文件缩进：
+
+- entry 来自顶层补丁条目数组，以及**顶层 `insert:` 列表**（`insert` 是补丁键，`applyEntryPatches` 只从顶层补丁列表读它，写在 entry 上的 `insert:` 不是补丁）；
+- 还有 **group entry 的 `config` 列表** —— group 的 `config` 本身就是子 entry 列表（顶层 `- id: <group>` 带 `insert:` 也是往它里面插）；group 由 `group: true` 或包名 `cordis:group` 认；
+- 其余 `config` 一概不下钻。
+
+这条口径是 0.2.0-rc.1 逼出来的：四个 `presets/*.patch.yml` 各只有**一条**声明行，而 `config.plugins` 里躺着整套插件名册（`standard` 32 行，含嵌套 group）。按缩进读就会把这 100 来个 id 当成该层 insert 进来的 entry，于是它们与 base 层真正的同名 entry 撞车 —— 一个启动正常的 profile 被报出 32 条「重复插入的 entry id」，名册里多出一堆幻影插件，删除确认里的补丁行数也从 2 变成 40。
+
+写侧同理：`findIdLine` 只认 entry 行，所以「按 id 改」永远落在 host 真正加载的那一行上。profile 补丁里带着 preset 声明（launcher 自己复制的就是这种）时，缩进盲的查找会命中名册里的 `tool-bash`，把 preset 的私有数据改掉。
+
+整篇缩进的补丁是合法 YAML，所以顶层条目的缩进取**文档里第一条 `- ` 行**的缩进，而不是硬编码第 0 列。
+
+### 4.2 能不能挂载
 
 行列表每行必须带 `name`，可带 `id`、`disabled`，可以是 `group: true` + `config: [子行]`。launcher 复刻 host 的两趟判断：
 
@@ -155,7 +173,8 @@ dsh `0.2.0-rc.1` 删掉了目录 preset，没有兼容读取：`packages/preset/
 | `src/main/core/presets/rows.ts` | 组合行的形状校验与行分类（复刻 host），两个模型共用 |
 | `src/main/core/presets/rating.ts` | 按 profile 判分（模型无关的 target 入口） |
 | `src/main/core/presets/authoring.ts` | 目录模型：存元数据、复制、回收站删除 |
-| `src/main/core/patch/patch.ts` | 补丁文本的行级读写（含只改 config 标量的 `setConfigScalar`） |
+| `src/main/core/patch/patch.ts` | 补丁文本的行级读写：entry 位置的唯一判定（`positionedRows`）、只改 config 标量的 `setConfigScalar` |
+| `src/main/core/store/bundle-manifest.ts` | `dsh.bundle.patch` 声明的唯一读取处（单文件或数组） |
 | `src/main/core/store/combo.ts` | 组合层读取（一个组合包声明的全部 patch 文件） |
 | `src/main/ipc/presets/presets.ts` | `preset:*` 七个通道 |
 | `src/renderer/src/views/PresetsSection.tsx` | 一级「预设」页 |
@@ -163,5 +182,7 @@ dsh `0.2.0-rc.1` 删掉了目录 preset，没有兼容读取：`packages/preset/
 ## 9. 真机核对
 
 - **目录模型**（`official`，dsh `0.1.5-rc.2`）：内置根解析到 `.pnpm/node_modules/@deepseek-ai/dsh-agent-presets/presets`，名册 standard(1) / ptc(2) / minimal(3) / cordis(4)，两个 profile 全部「可用」，每个 preset 有 4–5 行因 `!!js` 门被跳过、0 行留给运行时。
-- **声明模型**（`official-0.2.0-rc1`，dsh `0.2.0-rc.1`）：`@deepseek-ai/dsh-agent-presets` 已不在安装里（`resolveModule` 返回 MISSING），`@deepseek-ai/dsh-agent-preset` 与 `…-registry` 走 pnpm 提升目录解析成功；`profiles/test/cordis.yml` 里是 `agent-preset-registry` + `preset-standard/ptc/minimal/cordis` 四行，`web-app` 的 `presets/*.patch.yml` 与 tag 逐字节一致。
+- **声明模型**（`official-0.2.0-rc1`，dsh `0.2.0-rc.1`，profile `test`）：`@deepseek-ai/dsh-agent-presets` 已不在安装里（`resolveModule` 返回 MISSING），`@deepseek-ai/dsh-agent-preset` 与 `…-registry` 走 pnpm 提升目录解析成功。组合出 **8 层**：base 94 行、`web-app/cordis.patch.yml` 112 行、四个 `presets/*.patch.yml` **各 1 行**（声明行本身，名册在它的 `config` 里）、`dsh-experimental-agent-team-profile` 7 行、profile 补丁 1 行。`--dump-config` 的 `profiles/test/cordis.yml` 里是 `agent-preset-registry`（`default: standard`）与 `preset-standard/ptc/minimal/cordis` 四行，`web-app` 的 `presets/*.patch.yml` 与 tag 逐字节一致。
+- **上面两条 0.2.0-rc1 隐患都由此暴露**（数组形式 `dsh.bundle.patch` 的连带）：按缩进读行会让那四个文件各报出整套名册（33/34/8/34 行）—— 32 条幻影「重复插入的 entry id」、`validateComposition.ok = false`、名册里多出幻影插件、删除确认里的补丁行数从 2 变 40；`subdeps` 把声明交给 `path.join` 则 TypeError 抛出 `install` / `uninstall` / 已装概览。修后同一台机器：`insert conflicts: 0`、`validateComposition.ok = true`、组合插件 217（base 94 + web 116 + agent-team 7）、名册 standard/ptc/minimal/cordis 全 `ok`；`listBundleSubdepNames(web-app)` 返回 85 个子包，不再抛。
+- **目录模型未受影响**（`official`，dsh `0.1.5-rc.2`，profile `base-web`）：3 层 84/94/1 行，0 冲突，名册与判分与改动前一致。
 - 声明模型的包名解析靠 pnpm 的 `.pnpm/node_modules` 提升目录，所以 launcher 现有的解析链（`moduleSearchRoots` 第一段）直接可用，不需要为它另造一套。
