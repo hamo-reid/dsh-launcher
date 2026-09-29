@@ -5,7 +5,7 @@
  * tree instead of a real dsh install.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -26,8 +26,10 @@ import { openDatabase, saveSettings } from '../settings/settings.ts'
 import { contextForEntry } from '../profile/appState.ts'
 import {
   buildDevPlugin, cachedDiagnosis, defaultDevBuild, devScriptOptions, diagnoseDevPlugin, findWorkspaceRoot, listDevPlugins,
-  preSnapshotChecks, registerDevPlugin, removeDevPlugin, shimDevPeers, unshimDevPeers,
+  preSnapshotChecks, registerDevPlugin, removeDevPlugin, shimDevPeers, snapshotDevPlugin, unshimDevPeers,
 } from './dev.ts'
+import { packDir } from './pack.ts'
+import { storeVersions } from './layout.ts'
 
 let root: string
 const repo = (): string => join(root, 'repo')
@@ -484,5 +486,113 @@ describe('resolution against a pnpm-shaped host', () => {
     expect(diag.meta).toMatchObject({ dshId: 'dsh-1', dshName: 'official', dshVersion: '1.2.3' })
     expect(diag.meta.profile).toBeUndefined()
     expect(Number.isNaN(Date.parse(diag.meta.at))).toBe(false)
+  })
+})
+
+describe('snapshotDevPlugin', () => {
+  const store = (): string => join(root, 'store')
+
+  /** pnpm answers the pack and the archive add; the tarball the add expects. */
+  function packedFlow(dir: string, args: readonly string[]): { ok: boolean; text: string } {
+    if (args[0] === 'pack') {
+      writeFileSync(join(packDir(store(), '@me/dsh-foo'), 'foo-0.1.0.tgz'), '')
+      return { ok: true, text: 'packed' }
+    }
+    if (args[0] === 'add') {
+      // pnpm leaves the body in the virtual store, reachable through an absolute
+      // junction — which the staging→version rename then dangles.
+      const real = join(dir, '.pnpm', 'foo@1.0.0', 'node_modules', 'foo')
+      writePkg(real, { name: '@me/dsh-foo', version: '0.1.0' })
+      mkdirSync(join(dir, 'node_modules', '@me'), { recursive: true })
+      symlinkSync(real, join(dir, 'node_modules', '@me', 'dsh-foo'), 'junction')
+      return { ok: true, text: 'added' }
+    }
+    if (args[0] === 'install') {
+      const body = join(dir, 'node_modules', '@me', 'dsh-foo')
+      rmSync(body, { force: true })
+      writePkg(body, { name: '@me/dsh-foo', version: '0.1.0' })
+      return { ok: true, text: 'installed' }
+    }
+    return { ok: true, text: '' }
+  }
+
+  function mockPackedFlow(): void {
+    vi.mocked(runPnpm).mockImplementation(async (dir, args) => packedFlow(dir, args))
+  }
+
+  it('refuses to archive what the diagnosis would reject, without touching pnpm', async () => {
+    makeMonorepo()
+    rmSync(join(pkgDir(), 'dist'), { recursive: true, force: true })
+    const r = await snapshotDevPlugin(registerDevPlugin(pkgDir()), ctx(), { storeDir: store() })
+    expect(r.ok).toBe(false)
+    expect(r.text).toContain('构建')
+    expect(runPnpm).not.toHaveBeenCalled()
+  })
+
+  it('archives and reports the version, with peers called out as host-provided', async () => {
+    makeMonorepo()
+    mockPackedFlow()
+    const r = await snapshotDevPlugin(registerDevPlugin(pkgDir()), ctx(), { storeDir: store() })
+    expect(r.ok).toBe(true)
+    expect(r.version).toBe('0.1.0')
+    expect(r.replaced).toBeUndefined()
+    expect(r.warnings?.join()).toContain('@deepseek-ai/dsh-base')
+  })
+
+  it('replaces the same version rather than reporting a no-op', async () => {
+    makeMonorepo()
+    mockPackedFlow()
+    const dev = registerDevPlugin(pkgDir())
+    await snapshotDevPlugin(dev, ctx(), { storeDir: store() })
+    const again = await snapshotDevPlugin(dev, ctx(), { storeDir: store(), refresh: true })
+    expect(again.ok).toBe(true)
+    expect(again.replaced).toBe(true)
+    expect(storeVersions(store(), '@me/dsh-foo')).toEqual(['0.1.0'])
+  })
+
+  it('switches a target profile off its link onto the archive in the same run', async () => {
+    makeMonorepo()
+    mockPackedFlow()
+    const profileDir = join(ctx().home, 'profiles', 'main')
+    writePkg(profileDir, { name: 'p', private: true, dependencies: { '@me/dsh-foo': 'link:/somewhere' } })
+    const r = await snapshotDevPlugin(registerDevPlugin(pkgDir()), ctx(), {
+      storeDir: store(), targets: [{ ctx: ctx(), profile: 'main' }],
+    })
+    expect(r.ok).toBe(true)
+    expect(r.installed?.map(i => i.profile)).toEqual(['main'])
+    const manifest = JSON.parse(readFileSync(join(profileDir, 'package.json'), 'utf8')) as {
+      dependencies: Record<string, string>
+    }
+    expect(manifest.dependencies['@me/dsh-foo']).toMatch(/^file:/)
+    expect(manifest.dependencies['@me/dsh-foo']).not.toContain('.staging')
+  })
+
+  it('keeps the archive and says so when the profile switch fails', async () => {
+    makeMonorepo()
+    vi.mocked(runPnpm).mockImplementation(async (dir, args) => {
+      if (args[0] === 'install' && dir.includes(join('profiles', 'gone'))) {
+        return { ok: false, text: 'ERR_PNPM_NO_SUCH_PACKAGE' }
+      }
+      return packedFlow(dir, args)
+    })
+    const r = await snapshotDevPlugin(registerDevPlugin(pkgDir()), ctx(), {
+      storeDir: store(), targets: [{ ctx: ctx(), profile: 'gone' }],
+    })
+    expect(r.ok).toBe(false)
+    expect(r.text).toContain('gone')
+    // The archive is not rolled back — it is correct, and the profile is the part
+    // that failed. Reporting "snapshot failed" alone would send the user to
+    // rebuild something that is already built.
+    expect(r.version).toBe('0.1.0')
+  })
+
+  it('passes an uninstalled dev repo through as needsInstall', async () => {
+    makeMonorepo()
+    vi.mocked(runPnpm).mockResolvedValue({
+      ok: false, text: 'ERR_PNPM_CANNOT_RESOLVE_WORKSPACE_PROTOCOL  dependency not installed',
+    })
+    const r = await snapshotDevPlugin(registerDevPlugin(pkgDir()), ctx(), { storeDir: store() })
+    expect(r.ok).toBe(false)
+    expect(r.needsInstall).toBe(true)
   })
 })
