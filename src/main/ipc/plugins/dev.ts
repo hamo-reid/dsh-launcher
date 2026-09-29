@@ -209,7 +209,10 @@ export function registerDevIpc(): void {
         if (store === '') return fail(E.storeNotConfigured)
         // The same path a bare snapshot takes, plus this one profile — so the
         // archive and the profile can never disagree about which state was kept.
-        const shot = await snapshotDevPlugin(dev, ctx, { storeDir: store, targets: [{ ctx, profile }] })
+        // The profile also judges the pre-snapshot checks: a bundle that layers
+        // over another bundle's rows can only be judged inside the composition
+        // that actually loads it.
+        const shot = await snapshotDevPlugin(dev, ctx, { storeDir: store, profile, targets: [{ ctx, profile }] })
         if (!shot.ok) return fail(E.storeInstallFailed, { detail: shot.text })
         return { ok: true, value: shot.text }
       }
@@ -257,12 +260,19 @@ export function registerDevIpc(): void {
       // The pre-snapshot checks need a chain to resolve against: the first target's
       // when there is one, else the first registered dsh. A snapshot must pass the
       // diagnosis it would be judged by either way.
+      //
+      // That target's PROFILE goes in too, and it is the whole point: id-only patch
+      // rows (config overrides) and rows naming a package the monorepo only reaches
+      // through the profile are unresolvable outside it, so judging without one
+      // reports a working bundle as broken. Several targets can still only be judged
+      // against the first — the one whose verdict the archive is actually held to.
       const first = resolved[0]
       const host = devHostTarget(first !== undefined ? first.dshId : undefined)
       if (host === null) return fail(E.dshNotFound)
       const shot = await snapshotDevPlugin(dev, host.ctx, {
         storeDir: store,
         dsh: { id: host.id, name: host.name, version: host.version },
+        ...(first !== undefined ? { profile: first.profile } : {}),
         ...(resolved.length > 0 ? { targets: resolved } : {}),
       })
       if (!shot.ok) return fail(E.storeInstallFailed, { detail: shot.text })
