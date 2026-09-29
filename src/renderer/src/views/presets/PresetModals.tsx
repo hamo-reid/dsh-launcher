@@ -2,11 +2,11 @@
  * Dialogs for the presets page — split out so the list stays readable.
  *
  * Both edit only what the launcher owns: a locally authored preset's display
- * text, and the id a copy claims. A composition is never offered here: it is
- * the preset, and the row's own actions open its directory for that.
+ * text, and the id a new preset claims. A composition is never offered here: it
+ * is the preset, and the row's own actions open its directory for that.
  */
 import { useEffect, useState } from 'react'
-import { Button, Input, InputNumber, Modal, Select, Space, theme } from 'antd'
+import { Button, Input, InputNumber, Modal, Segmented, Select, Space, theme } from 'antd'
 import { useTranslation } from 'react-i18next'
 import FieldLabel from '../../components/FieldLabel.tsx'
 import { MODAL } from '../../theme.ts'
@@ -87,48 +87,61 @@ export function PresetMetaModal(props: PresetMetaModalProps): JSX.Element {
   )
 }
 
-interface PresetCopyModalProps {
+/** Where a new preset starts from. */
+export type PresetCreateMode = 'minimal' | 'copy'
+
+interface PresetCreateModalProps {
   open: boolean
-  /** The roster, as the copy's sources. */
+  /** The mode the dialog opens on; the minimal one falls back to a copy when
+   * this dsh ships no such preset. */
+  initialMode: PresetCreateMode
+  /** The roster, as the copy mode's sources. */
   presets: PresetRow[]
-  /** The preset the dialog opens on. */
+  /** The built-in minimal preset to start from, or null when this dsh has none. */
+  minimalId: string | null
+  /** The preset the copy mode opens on. */
   defaultFrom: string
   busy: boolean
   onCancel: () => void
-  onSubmit: (fromId: string, toId: string, name: string) => void
+  onSubmit: (mode: PresetCreateMode, fromId: string, toId: string, name: string) => void
 }
 
 /**
- * Create a preset by copying one — the only way to start from a built-in
- * preset, whose directory the launcher never writes to.
+ * Create a preset: from the deployment's minimal preset, or from a copy of any
+ * preset already on the roster. Both are directory copies, so a new preset is
+ * as loadable as the one it starts from — which is the point of offering the
+ * minimal preset, since every preset is otherwise a variation on a big one.
  */
-export function PresetCopyModal(props: PresetCopyModalProps): JSX.Element {
+export function PresetCreateModal(props: PresetCreateModalProps): JSX.Element {
   const { t } = useTranslation()
   const { token } = theme.useToken()
+  const [mode, setMode] = useState<PresetCreateMode>(props.initialMode)
   const [fromId, setFromId] = useState(props.defaultFrom)
   const [toId, setToId] = useState('')
   const [name, setName] = useState('')
 
   // Every opening starts a fresh draft: the dialog is one instance, and a
-  // half-typed id from the previous copy must not be resubmitted.
+  // half-typed id from the previous preset must not be resubmitted.
   useEffect(() => {
     if (!props.open) return
+    setMode(props.initialMode === 'minimal' && props.minimalId === null ? 'copy' : props.initialMode)
     setFromId(props.defaultFrom)
     setToId('')
     setName('')
-  }, [props.open, props.defaultFrom])
+  }, [props.open, props.initialMode, props.defaultFrom, props.minimalId])
 
   const malformed = toId !== '' && !PRESET_ID_RE.test(toId)
   const taken = props.presets.some(preset => preset.id === toId)
   const blocker = malformed
-    ? t('preset.copy.badId')
-    : taken ? t('preset.copy.taken') : null
-  const ready = fromId !== '' && toId !== '' && blocker === null && !props.busy
+    ? t('preset.create.badId')
+    : taken ? t('preset.create.taken') : null
+  const source = mode === 'minimal' ? props.minimalId ?? '' : fromId
+  const ready = source !== '' && toId !== '' && blocker === null && !props.busy
 
   return (
     <Modal
       open={props.open}
-      title={t('preset.copy.title')}
+      title={t('preset.create.title')}
       width={MODAL.narrow}
       onCancel={props.onCancel}
       footer={(
@@ -138,43 +151,62 @@ export function PresetCopyModal(props: PresetCopyModalProps): JSX.Element {
             type="primary"
             disabled={!ready}
             loading={props.busy}
-            onClick={() => props.onSubmit(fromId, toId, name)}
+            onClick={() => props.onSubmit(mode, source, toId, name)}
           >
-            {t('preset.copy.submit')}
+            {t('preset.create.submit')}
           </Button>
         </Space>
       )}
     >
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+        <Segmented
+          block
+          value={mode}
+          onChange={value => setMode(value as PresetCreateMode)}
+          options={[
+            { value: 'minimal', label: t('preset.create.minimal'), disabled: props.minimalId === null },
+            { value: 'copy', label: t('preset.create.copy') },
+          ]}
+        />
+        {mode === 'copy'
+          ? (
+            <div>
+              <FieldLabel required>{t('preset.create.from')}</FieldLabel>
+              <Select
+                value={fromId === '' ? undefined : fromId}
+                style={{ width: '100%' }}
+                placeholder={t('preset.create.fromPlaceholder')}
+                onChange={setFromId}
+                options={props.presets.map(preset => ({
+                  value: preset.id,
+                  label: preset.name === undefined ? preset.id : `${preset.name} (${preset.id})`,
+                }))}
+              />
+            </div>
+          )
+          : (
+            <div style={{ color: token.colorTextTertiary, fontSize: token.fontSizeSM }}>
+              {props.minimalId === null
+                ? t('preset.create.noMinimal')
+                : t('preset.create.minimalHint', { id: props.minimalId })}
+            </div>
+          )}
         <div>
-          <FieldLabel required>{t('preset.copy.from')}</FieldLabel>
-          <Select
-            value={fromId === '' ? undefined : fromId}
-            style={{ width: '100%' }}
-            placeholder={t('preset.copy.fromPlaceholder')}
-            onChange={setFromId}
-            options={props.presets.map(preset => ({
-              value: preset.id,
-              label: preset.name === undefined ? preset.id : `${preset.name} (${preset.id})`,
-            }))}
-          />
-        </div>
-        <div>
-          <FieldLabel required>{t('preset.copy.id')}</FieldLabel>
+          <FieldLabel required>{t('preset.create.id')}</FieldLabel>
           <Input
             value={toId}
             autoFocus
             spellCheck={false}
-            placeholder={t('preset.copy.idPlaceholder')}
+            placeholder={t('preset.create.idPlaceholder')}
             onChange={event => setToId(event.target.value)}
           />
         </div>
         <div>
-          <FieldLabel>{t('preset.copy.name')}</FieldLabel>
+          <FieldLabel>{t('preset.create.name')}</FieldLabel>
           <Input
             value={name}
             spellCheck={false}
-            placeholder={t('preset.copy.namePlaceholder')}
+            placeholder={t('preset.create.namePlaceholder')}
             onChange={event => setName(event.target.value)}
           />
         </div>

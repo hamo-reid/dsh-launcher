@@ -14,21 +14,21 @@
  */
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import {
-  Alert, Button, Dropdown, List, Popconfirm, Popover, Skeleton, Space, Tag, Tooltip, Typography,
-  message, theme,
+  Alert, Button, Dropdown, List, Popover, Skeleton, Space, Tag, Tooltip, Typography, message, theme,
 } from 'antd'
 import {
-  CodeOutlined, DeleteOutlined, DownOutlined, FolderOpenOutlined, InfoCircleOutlined, PlusOutlined,
+  CodeOutlined, DownOutlined, FolderOpenOutlined, InfoCircleOutlined, PlusOutlined,
   ReloadOutlined,
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
 import AppShell from '../components/AppShell.tsx'
+import ConfirmMenu, { type MenuAction } from '../components/ConfirmMenu.tsx'
 import EmptyState from '../components/EmptyState.tsx'
 import NavList from '../components/NavList.tsx'
 import Panel from '../components/Panel.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
-import { PresetCopyModal, PresetMetaModal } from './presets/PresetModals.tsx'
+import { PresetCreateModal, PresetMetaModal, type PresetCreateMode } from './presets/PresetModals.tsx'
 import type {
   DshEntry, PresetGrade, PresetListing, PresetMetaInput, PresetRow,
 } from '../../../shared/types.ts'
@@ -36,6 +36,10 @@ import type {
 /** Beyond this the description is cut short and offered in full on hover, so a
  * verbose preset cannot push the rest of the row out of view. */
 const DESCRIPTION_CLAMP = 78
+
+/** The shipped preset a minimal instance starts from: the deployment's own
+ * smallest composition, and an id the host's own display table knows by name. */
+const MINIMAL_PRESET_ID = 'minimal'
 
 export default function PresetsSection(): JSX.Element {
   const { t } = useTranslation()
@@ -51,8 +55,8 @@ export default function PresetsSection(): JSX.Element {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState('')
   const [editing, setEditing] = useState<PresetRow | null>(null)
-  // The id the copy dialog opens on, or null while it is closed.
-  const [copyFrom, setCopyFrom] = useState<string | null>(null)
+  // The open create dialog and what it opens on, or null while it is closed.
+  const [create, setCreate] = useState<{ mode: PresetCreateMode; from: string } | null>(null)
 
   const refreshDshes = useCallback(async (): Promise<void> => {
     const r = await window.api.dsh.list()
@@ -88,6 +92,25 @@ export default function PresetsSection(): JSX.Element {
   const presets = listing?.presets ?? []
   const profiles = listing?.profiles ?? []
 
+  // The minimal starting point is the SHIPPED one: a user directory that happens
+  // to be named `minimal` is not what "minimal instance" means, and a broken one
+  // would only create another broken copy.
+  const minimalId = presets
+    .find(preset => preset.id === MINIMAL_PRESET_ID && preset.trust === 'system' && preset.broken === undefined)
+    ?.id ?? null
+
+  /** The minimal instance: a fresh preset off the deployment's smallest one. */
+  const createPreset = async (mode: PresetCreateMode, fromId: string, toId: string, name: string): Promise<void> => {
+    if (selectedId === undefined) return
+    setBusy('create')
+    const r = await window.api.preset.copy(selectedId, fromId, toId, name)
+    setBusy('')
+    if (!r.ok) { void message.error(apiErrorText(r)); return }
+    void message.success(t('preset.create.done', { id: toId }))
+    setCreate(null)
+    await load(selectedId)
+  }
+
   const saveMeta = async (meta: PresetMetaInput): Promise<void> => {
     if (selectedId === undefined || editing === null) return
     setBusy('save')
@@ -99,22 +122,13 @@ export default function PresetsSection(): JSX.Element {
     await load(selectedId)
   }
 
-  const copy = async (fromId: string, toId: string, name: string): Promise<void> => {
-    if (selectedId === undefined) return
-    setBusy('copy')
-    const r = await window.api.preset.copy(selectedId, fromId, toId, name)
-    setBusy('')
-    if (!r.ok) { void message.error(apiErrorText(r)); return }
-    void message.success(t('preset.copy.done', { id: toId }))
-    setCopyFrom(null)
-    await load(selectedId)
-  }
-
   const remove = async (preset: PresetRow): Promise<void> => {
     if (selectedId === undefined) return
-    setBusy(`remove:${preset.id}`)
+    // The confirmation dialog is already gone by now, so the spinner on the
+    // refresh button is what says the recycle-bin move is still running.
+    setLoading(true)
     const r = await window.api.preset.remove(selectedId, preset.id)
-    setBusy('')
+    setLoading(false)
     if (!r.ok) { void message.error(apiErrorText(r)); return }
     void message.success(t('preset.deleted', { id: preset.id }))
     await load(selectedId)
@@ -163,8 +177,31 @@ export default function PresetsSection(): JSX.Element {
     )
   }
 
-  /** One row: what the preset says about itself, how it grades, and the four
-   * things the launcher may do to it. */
+  /** What the row's menu offers. A built-in preset keeps only the copy, since
+   * every other entry would write to a directory the deployment owns. */
+  const actionsFor = (preset: PresetRow): MenuAction[] => {
+    const actions: MenuAction[] = []
+    if (preset.editable) actions.push({ key: 'edit', label: t('preset.edit') })
+    actions.push({ key: 'copy', label: t('preset.copy') })
+    if (preset.editable) {
+      actions.push({
+        key: 'delete',
+        label: t('preset.delete'),
+        danger: true,
+        confirmText: t('preset.deleteConfirm', { id: preset.id }),
+      })
+    }
+    return actions
+  }
+
+  const act = (preset: PresetRow, key: string): void => {
+    if (key === 'edit') setEditing(preset)
+    else if (key === 'copy') setCreate({ mode: 'copy', from: preset.id })
+    else void remove(preset)
+  }
+
+  /** One row: what the preset says about itself, how it grades, and the two
+   * controls the launcher offers on it — open it, or act on it. */
   const row = (preset: PresetRow): ReactNode => {
     const description = preset.description ?? t('preset.noDescription')
     const text = (
@@ -190,7 +227,11 @@ export default function PresetsSection(): JSX.Element {
                 {preset.name ?? preset.id}
               </Typography.Text>
               <Typography.Text code type="secondary">{preset.id}</Typography.Text>
-              <Tag>{t(preset.trust === 'user' ? 'preset.sourceUser' : 'preset.sourceSystem')}</Tag>
+              {/* Why a built-in preset offers no edit is worth saying out loud:
+                  its row menu simply has one entry fewer, with no reason. */}
+              <Tooltip title={preset.editable ? undefined : t('preset.readOnlyHint')}>
+                <Tag>{t(preset.trust === 'user' ? 'preset.sourceUser' : 'preset.sourceSystem')}</Tag>
+              </Tooltip>
               <Typography.Text type="secondary">{t('preset.priority', { value: preset.order ?? '—' })}</Typography.Text>
               {preset.broken === undefined
                 ? null
@@ -211,20 +252,8 @@ export default function PresetsSection(): JSX.Element {
             </Space>
           </div>
           <Space size={4} style={{ flexShrink: 0 }}>
-            {preset.editable
-              ? <Button size="small" onClick={() => setEditing(preset)}>{t('preset.edit')}</Button>
-              : (
-                // A disabled button fires no pointer events, so the reason rides
-                // a wrapper that still can.
-                <Tooltip title={t('preset.readOnlyHint')}>
-                  <span style={{ display: 'inline-block' }}>
-                    <Button size="small" disabled style={{ pointerEvents: 'none' }}>{t('preset.edit')}</Button>
-                  </span>
-                </Tooltip>
-              )}
-            <Button size="small" onClick={() => setCopyFrom(preset.id)}>{t('preset.copy')}</Button>
-            {/* One entry point for the two editors, so the row keeps one action
-                of each weight rather than two identical icons. */}
+            {/* One entry point for the two editors: opening a preset is one
+                decision, and the row should not spend two icons on it. */}
             <Dropdown
               trigger={['click']}
               placement="bottomRight"
@@ -241,22 +270,7 @@ export default function PresetsSection(): JSX.Element {
                 <DownOutlined style={{ fontSize: 10 }} />
               </Button>
             </Dropdown>
-            {!preset.editable ? null : (
-              <Popconfirm
-                title={t('preset.deleteConfirm', { id: preset.id })}
-                okText={t('common.delete')}
-                cancelText={t('common.cancel')}
-                onConfirm={() => void remove(preset)}
-              >
-                <Button
-                  size="small"
-                  danger
-                  icon={<DeleteOutlined />}
-                  loading={busy === `remove:${preset.id}`}
-                  aria-label={`${t('preset.delete')}: ${preset.id}`}
-                />
-              </Popconfirm>
-            )}
+            <ConfirmMenu actions={actionsFor(preset)} onAction={key => act(preset, key)} />
           </Space>
         </div>
       </List.Item>
@@ -374,9 +388,9 @@ export default function PresetsSection(): JSX.Element {
                 type="primary"
                 icon={<PlusOutlined />}
                 disabled={presets.length === 0}
-                onClick={() => setCopyFrom(presets[0]?.id ?? null)}
+                onClick={() => setCreate({ mode: 'minimal', from: presets[0]?.id ?? '' })}
               >
-                {t('preset.copy.add')}
+                {t('preset.new')}
               </Button>
             </Space>
           )}
@@ -391,13 +405,15 @@ export default function PresetsSection(): JSX.Element {
         onSubmit={meta => void saveMeta(meta)}
       />
 
-      <PresetCopyModal
-        open={copyFrom !== null}
+      <PresetCreateModal
+        open={create !== null}
+        initialMode={create?.mode ?? 'minimal'}
         presets={presets}
-        defaultFrom={copyFrom ?? ''}
-        busy={busy === 'copy'}
-        onCancel={() => setCopyFrom(null)}
-        onSubmit={(fromId, toId, name) => void copy(fromId, toId, name)}
+        minimalId={minimalId}
+        defaultFrom={create?.from ?? ''}
+        busy={busy === 'create'}
+        onCancel={() => setCreate(null)}
+        onSubmit={(mode, fromId, toId, name) => void createPreset(mode, fromId, toId, name)}
       />
     </AppShell>
   )
