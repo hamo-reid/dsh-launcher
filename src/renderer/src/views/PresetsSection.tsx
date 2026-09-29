@@ -45,6 +45,14 @@ const DESCRIPTION_CLAMP = 78
  * smallest composition, and an id the host's own display table knows by name. */
 const MINIMAL_PRESET_ID = 'minimal'
 
+/** The sources panel scrolls past this many pixels. A 0.2.0-rc.1 profile lists ten
+ * places, so the panel would otherwise outgrow the viewport on a short screen. */
+const PLACE_PANEL_MAX_HEIGHT = 420
+
+/** A source path past this many characters cannot fit the two-line clamp, so it gets
+ * a hover carrying the whole path. Roughly one line each at the panel's width. */
+const PLACE_PATH_CLAMP = 110
+
 /** The locale key naming where one definition comes from. `as const` keeps the
  * values literal, which is what lets `t()` typecheck a looked-up key. */
 const SOURCE_KEY = {
@@ -496,31 +504,61 @@ export default function PresetsSection(): JSX.Element {
                 options={profiles.map(name => ({ value: name, label: name }))}
               />
               {/* Long absolute paths belong behind a click, not wrapped across
-                  the header where they would dominate the page. */}
+                  the header where they would dominate the page. A 0.2.0-rc.1
+                  profile lists ten places and several paths run past 150
+                  characters, so the panel scrolls and each path clamps to two
+                  lines: the full path is one hover (or one copy) away. */}
               <Popover
                 trigger="click"
                 placement="bottomRight"
                 title={t('preset.placesTitle')}
                 content={(
-                  <Space direction="vertical" size={10} style={{ maxWidth: 460 }}>
-                    {places.map(place => (
-                      <div key={place.path}>
-                        <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>
-                          {t(SOURCE_KEY[place.source])}
-                          {place.bundle === undefined ? '' : ` · ${place.bundle}`}
-                          {place.writable ? '' : ` · ${t('preset.sourceSystem')}`}
-                          {place.exists ? '' : ` · ${t('preset.placeMissing')}`}
-                        </div>
-                        <Typography.Text
-                          code
-                          copyable={{ text: place.path }}
-                          style={{ fontSize: token.fontSizeSM, wordBreak: 'break-all' }}
-                        >
-                          {place.path}
-                        </Typography.Text>
-                      </div>
-                    ))}
-                  </Space>
+                  <div style={{ width: 460, maxHeight: PLACE_PANEL_MAX_HEIGHT, overflowY: 'auto' }}>
+                    <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                      {places.map(place => {
+                        const pathNode = (
+                          <Typography.Text
+                            code
+                            copyable={{ text: place.path }}
+                            style={{
+                              fontSize: token.fontSizeSM,
+                              display: '-webkit-box',
+                              WebkitBoxOrient: 'vertical',
+                              WebkitLineClamp: 2,
+                              overflow: 'hidden',
+                              wordBreak: 'break-all',
+                            }}
+                          >
+                            {place.path}
+                          </Typography.Text>
+                        )
+                        return (
+                          <div key={place.path} style={{ minWidth: 0 }}>
+                            <div
+                              style={{
+                                color: token.colorTextSecondary,
+                                fontSize: token.fontSizeSM,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {t(SOURCE_KEY[place.source])}
+                              {place.bundle === undefined ? '' : ` · ${place.bundle}`}
+                              {place.writable ? '' : ` · ${t('preset.sourceSystem')}`}
+                              {place.exists ? '' : ` · ${t('preset.placeMissing')}`}
+                            </div>
+                            {/* A clamped path is no longer readable on the page, so a
+                                long one gets the whole thing back on hover. The copy
+                                button always carries the full path either way. */}
+                            {place.path.length > PLACE_PATH_CLAMP
+                              ? <Tooltip title={place.path}>{pathNode}</Tooltip>
+                              : pathNode}
+                          </div>
+                        )
+                      })}
+                    </Space>
+                  </div>
                 )}
               >
                 <Button size="small" icon={<InfoCircleOutlined />}>{t('preset.location')}</Button>
