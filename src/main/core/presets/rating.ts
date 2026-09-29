@@ -70,28 +70,44 @@ function rowResolves(
   return ok
 }
 
-/** Read one preset's composition, reusing discovery's verdict when it already
- * failed: a second read of a broken file would only race the same answer. */
-function compositionOf(preset: PresetRow): CompositionRead {
-  if (preset.broken !== undefined) return { ok: false, problem: preset.broken }
-  try {
-    return readComposition(readFileSync(preset.compositionPath, 'utf8'))
-  } catch {
-    // Discovery statted this file moments ago; any read failure now is the same
-    // answer as an unloadable one.
-    return { ok: false, problem: 'the composition file cannot be read' }
-  }
+/** One preset to judge, however it was defined. */
+export interface GradeTarget {
+  id: string
+  /** Base a `.`-relative row resolves against: a preset's own directory, or the
+   * directory of the patch file that declared it. */
+  baseDir: string
+  /** The rows, or why they cannot be read. */
+  read: CompositionRead
+}
+
+/** The grade targets a DIRECTORY-model roster yields: each row's composition is
+ * read from its own file, reusing discovery's verdict when it already failed —
+ * a second read of a broken file would only race the same answer. */
+export function directoryGradeTargets(presets: readonly PresetRow[]): GradeTarget[] {
+  return presets.map(preset => {
+    if (preset.broken !== undefined) {
+      return { id: preset.id, baseDir: preset.dir, read: { ok: false, problem: preset.broken } }
+    }
+    try {
+      const read = readComposition(readFileSync(preset.compositionPath, 'utf8'))
+      return { id: preset.id, baseDir: preset.dir, read }
+    } catch {
+      // Discovery statted this file moments ago; any read failure now is the same
+      // answer as an unloadable one.
+      return { id: preset.id, baseDir: preset.dir, read: { ok: false, problem: 'the composition file cannot be read' } }
+    }
+  })
 }
 
 /** One preset's grade under one profile, from its already-read composition. */
 function gradeOne(
   ctx: DshContext,
-  preset: PresetRow,
+  target: GradeTarget,
   profile: string,
-  read: CompositionRead,
   cache: PackageCache,
 ): PresetGrade {
-  const identity = { presetId: preset.id, profile }
+  const identity = { presetId: target.id, profile }
+  const read = target.read
   if (!read.ok) {
     return {
       ...identity, level: 'unusable', checked: 0, skipped: 0, conditional: 0, missing: [], reason: read.problem,
@@ -108,7 +124,7 @@ function gradeOne(
       conditional += 1
       continue
     }
-    if (rowResolves(ctx, profile, preset.dir, row, cache)) continue
+    if (rowResolves(ctx, profile, target.baseDir, row, cache)) continue
     missing.push({ label: row.label, name: row.name })
   }
   return {
@@ -122,7 +138,36 @@ function gradeOne(
 }
 
 /**
- * Grade every preset against every profile of one dsh.
+ * Grade every target against every profile of one dsh.
+ * @param ctx - the dsh whose install chain and profiles are used.
+ * @param targets - the presets to judge, from either preset model.
+ * @param profiles - the profile names to grade against.
+ * @returns one cell per target and profile, in target order.
+ */
+export function gradeTargets(
+  ctx: DshContext,
+  targets: readonly GradeTarget[],
+  profiles: readonly string[],
+): PresetGrade[] {
+  // One cache per profile, shared by every preset: the same packages recur, and
+  // a profile's resolution chain is the expensive part of a probe.
+  const caches = new Map<string, PackageCache>()
+  const cells: PresetGrade[] = []
+  for (const target of targets) {
+    for (const profile of profiles) {
+      let cache = caches.get(profile)
+      if (cache === undefined) {
+        cache = new Map<string, boolean>()
+        caches.set(profile, cache)
+      }
+      cells.push(gradeOne(ctx, target, profile, cache))
+    }
+  }
+  return cells
+}
+
+/**
+ * Grade every preset of a DIRECTORY-model roster against every profile of one dsh.
  * @param ctx - the dsh whose install chain and profiles are used.
  * @param presets - the discovered roster.
  * @param profiles - the profile names to grade against.
@@ -133,20 +178,5 @@ export function gradePresets(
   presets: readonly PresetRow[],
   profiles: readonly string[],
 ): PresetGrade[] {
-  // One cache per profile, shared by every preset: the same packages recur, and
-  // a profile's resolution chain is the expensive part of a probe.
-  const caches = new Map<string, PackageCache>()
-  const cells: PresetGrade[] = []
-  for (const preset of presets) {
-    const read = compositionOf(preset)
-    for (const profile of profiles) {
-      let cache = caches.get(profile)
-      if (cache === undefined) {
-        cache = new Map<string, boolean>()
-        caches.set(profile, cache)
-      }
-      cells.push(gradeOne(ctx, preset, profile, read, cache))
-    }
-  }
-  return cells
+  return gradeTargets(ctx, directoryGradeTargets(presets), profiles)
 }

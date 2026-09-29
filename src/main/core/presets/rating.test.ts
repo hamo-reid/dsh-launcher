@@ -10,7 +10,8 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { contextForEntry } from '../profile/appState.ts'
 import { discoverPresets } from './roots.ts'
-import { gradePresets } from './rating.ts'
+import { gradePresets, gradeTargets } from './rating.ts'
+import { readCompositionValue } from './rows.ts'
 import type { PresetRootInfo, PresetRow } from '../../../shared/types.ts'
 
 let root: string
@@ -145,5 +146,56 @@ describe('gradePresets', () => {
   it('grades nothing when the dsh has no profiles', () => {
     mkPreset('standard', row("'@deepseek-ai/dsh-tool-fs'"))
     expect(gradePresets(ctx(), roster(), [])).toEqual([])
+  })
+})
+
+// The declaration model produces its targets from a patch layer instead of a
+// preset directory, so the base a `.`-relative row resolves against is the
+// declaring FILE's directory and the rows are already parsed.
+describe('gradeTargets', () => {
+  it('judges already-parsed rows against the declaring directory', () => {
+    mkInstall()
+    mkProfile('alpha')
+    const layerDir = join(root, 'bundle', 'presets')
+    mkdirSync(layerDir, { recursive: true })
+    writeFileSync(join(layerDir, 'local.mjs'), 'export default {}\n')
+
+    const grades = gradeTargets(ctx(), [
+      {
+        id: 'declared',
+        baseDir: layerDir,
+        read: readCompositionValue([
+          { id: 'local', name: './local.mjs' },
+          { id: 'pkg', name: '@deepseek-ai/dsh-tool-fs' },
+          { id: 'gone', name: '@acme/absent' },
+        ]),
+      },
+    ], ['alpha'])
+    expect(grades).toEqual([{
+      presetId: 'declared',
+      profile: 'alpha',
+      level: 'incomplete',
+      checked: 3,
+      skipped: 0,
+      conditional: 0,
+      missing: [{ label: 'row "gone"', name: '@acme/absent' }],
+    }])
+  })
+
+  it('reports an unusable target when its rows could not be read at all', () => {
+    mkInstall()
+    mkProfile('alpha')
+    expect(gradeTargets(ctx(), [
+      { id: 'broken', baseDir: root, read: { ok: false, problem: 'the declaration carries no `config` map' } },
+    ], ['alpha'])).toEqual([{
+      presetId: 'broken',
+      profile: 'alpha',
+      level: 'unusable',
+      checked: 0,
+      skipped: 0,
+      conditional: 0,
+      missing: [],
+      reason: 'the declaration carries no `config` map',
+    }])
   })
 })
