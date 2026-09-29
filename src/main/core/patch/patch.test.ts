@@ -21,6 +21,7 @@ import {
   removeInsertRow,
   extractRowBlock,
   extractKeyValue,
+  setConfigScalar,
 } from './patch.ts'
 
 describe('parsePatchRows', () => {
@@ -50,6 +51,51 @@ describe('parseClassifiedRows', () => {
     expect(parseClassifiedRows('- id: a\n  name: pkg-a\n  disabled: true\n  config:\n    k: v\n  insert:\n- id: b\n')).toEqual([
       { id: 'a', name: 'pkg-a', disabled: true, hasConfig: true, hasInsert: true },
       { id: 'b', name: undefined, disabled: false, hasConfig: false, hasInsert: false },
+    ])
+  })
+
+  // A preset declaration's `config.plugins` is a list of plugin rows that carry
+  // `disabled:` of their own — the shipped `standard` preset disables several.
+  // Reading the first of those as the declaration's own clause hid the preset
+  // from the roster entirely, so the row's own fields stop at its child indent.
+  it('reads a row\'s OWN fields, never one nested inside its config', () => {
+    const shipped = [
+      '- insert:',
+      '    - id: preset-standard',
+      "      name: '@deepseek-ai/dsh-agent-preset'",
+      '      config:',
+      '        id: standard',
+      '        order: 1',
+      '        plugins:',
+      '          - id: tool-subagent-codex',
+      "            name: '@deepseek-ai/dsh-tool-subagent'",
+      '            disabled: true',
+      '          - id: shell',
+      '            name: cordis:group',
+      '            group: true',
+      '            config:',
+      '              - id: inner',
+      "                name: '@deepseek-ai/dsh-terminal'",
+      '                disabled: true',
+      '',
+    ].join('\n')
+    const row = parseClassifiedRows(shipped).find(r => r.id === 'preset-standard')
+    expect(row).toEqual({
+      id: 'preset-standard',
+      name: '@deepseek-ai/dsh-agent-preset',
+      disabled: false,
+      hasConfig: true,
+      hasInsert: false,
+    })
+    // The nested rows are still visible as rows in their own right.
+    expect(parseClassifiedRows(shipped).map(r => r.id)).toEqual([
+      'preset-standard', 'tool-subagent-codex', 'shell', 'inner',
+    ])
+    expect(parsePatchRows(shipped)).toEqual([
+      { id: 'preset-standard', disabled: false },
+      { id: 'tool-subagent-codex', disabled: true },
+      { id: 'shell', disabled: false },
+      { id: 'inner', disabled: true },
     ])
   })
 })
@@ -292,5 +338,91 @@ describe('assertPatchDocValid', () => {
 
   it('skips the deep check when cordis !!js tags are present', () => {
     expect(() => assertPatchDocValid('mode: !!js process.env.X\n')).not.toThrow()
+  })
+})
+
+// A declaration row as the launcher writes one into a profile patch, carrying
+// both things a whole-config re-render would destroy: a `!!js` gate and a `|`
+// block scalar. Every scalar edit below must leave this region byte-identical.
+const DECLARATION = [
+  '- insert:',
+  '    - id: local-preset-mine',
+  "      name: '@deepseek-ai/dsh-agent-preset'",
+  '      config:',
+  '        id: mine',
+  '        name: My mode',
+  '        description: A mode.',
+  '        plugins:',
+  '          - id: persona',
+  "            name: '@deepseek-ai/dsh-persona'",
+  '            config:',
+  '              prefix: hello',
+  '          - id: gate',
+  "            name: '@deepseek-ai/dsh-agent-instructions'",
+  "            disabled: !!js process.platform === 'win32'",
+  '          - id: shell',
+  '            name: cordis:group',
+  '            group: true',
+  '            config:',
+  '              - id: pty',
+  "                name: '@deepseek-ai/dsh-terminal'",
+  '                config:',
+  '                  description: |-',
+  '                    line one',
+  '                    line two',
+  '',
+].join('\n')
+
+/** The `plugins:` region of {@link DECLARATION}, verbatim. */
+const PLUGINS_REGION = DECLARATION.slice(DECLARATION.indexOf('        plugins:')).trimEnd()
+
+describe('setConfigScalar', () => {
+  it('replaces one scalar and leaves the plugins block byte-identical', () => {
+    const next = setConfigScalar(DECLARATION, 'local-preset-mine', 'name', 'Renamed')
+    expect(next).toContain('        name: Renamed')
+    expect(next).not.toContain('        name: My mode')
+    expect(next).toContain(PLUGINS_REGION)
+    // Exactly one line changed.
+    expect(next.split('\n').length).toBe(DECLARATION.split('\n').length)
+  })
+
+  it('inserts a new scalar right after `id:` and preserves the rest', () => {
+    const next = setConfigScalar(DECLARATION, 'local-preset-mine', 'order', 5)
+    expect(next).toContain('        id: mine\n        order: 5\n        name: My mode')
+    expect(next).toContain("            disabled: !!js process.platform === 'win32'")
+    expect(next).toContain('                    line two')
+  })
+
+  it('removes the key when the value is empty rather than writing it null', () => {
+    const dropped = setConfigScalar(DECLARATION, 'local-preset-mine', 'description', undefined)
+    expect(dropped).not.toContain('description: A mode.')
+    expect(dropped).toContain(PLUGINS_REGION)
+    expect(setConfigScalar(DECLARATION, 'local-preset-mine', 'name', '   ')).not.toContain('name: My mode')
+  })
+
+  it('is idempotent for the same value', () => {
+    const once = setConfigScalar(DECLARATION, 'local-preset-mine', 'description', 'A mode.')
+    expect(setConfigScalar(once, 'local-preset-mine', 'description', 'A mode.')).toBe(once)
+  })
+
+  it('quotes a value YAML would otherwise misread, and blocks a multi-line one', () => {
+    const colon = setConfigScalar(DECLARATION, 'local-preset-mine', 'description', 'uses: colons')
+    expect(colon).toContain("description: 'uses: colons'")
+    const multi = setConfigScalar(DECLARATION, 'local-preset-mine', 'description', 'one\ntwo')
+    expect(multi).toContain('        description: |-\n          one\n          two')
+  })
+
+  it('throws when the row is absent or its config is spelled inline', () => {
+    expect(() => setConfigScalar(DECLARATION, 'nope', 'name', 'x')).toThrow(/not found/)
+    expect(() => setConfigScalar('- id: a\n  config: { id: a }\n', 'a', 'name', 'x')).toThrow(/block-form/)
+    expect(() => setConfigScalar('- id: a\n  name: pkg\n', 'a', 'name', 'x')).toThrow(/block-form/)
+  })
+
+  it('never lets an empty description be re-added as a null key', () => {
+    const cleared = setConfigScalar(DECLARATION, 'local-preset-mine', 'description', '')
+    // The plugins region has its own, deeper `description:` — only the config's
+    // own (its immediate children) must be gone.
+    expect(cleared).not.toContain('\n        description:')
+    expect(cleared).toContain(PLUGINS_REGION)
   })
 })

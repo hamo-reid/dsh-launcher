@@ -4,7 +4,7 @@
  * reported as missing modules.
  */
 import { describe, expect, it } from 'vitest'
-import { classifyRowSpecifier, readComposition } from './rows.ts'
+import { classifyRowSpecifier, readComposition, readCompositionValue } from './rows.ts'
 
 /** One composition text from lines (keeps the YAML readable in the test). */
 const yml = (...lines: string[]): string => lines.join('\n')
@@ -118,6 +118,39 @@ describe('readComposition', () => {
     ))).toEqual({
       ok: false,
       problem: 'group row 1 must hold a list of plugin rows',
+    })
+  })
+})
+
+describe('readCompositionValue', () => {
+  it('judges an already-parsed list exactly as the text reader does', () => {
+    const lines = [
+      '- id: persona',
+      "  name: '@deepseek-ai/dsh-persona'",
+      '- id: gate',
+      "  name: '@deepseek-ai/dsh-tool-bash'",
+      "  disabled: !!js process.platform === 'win32'",
+    ]
+    const rows = [
+      { id: 'persona', name: '@deepseek-ai/dsh-persona' },
+      { id: 'gate', name: '@deepseek-ai/dsh-tool-bash', disabled: 'gated' },
+    ]
+    const read = readCompositionValue(rows)
+    expect(read.ok).toBe(true)
+    expect(read).toEqual(readComposition(yml(...lines)))
+    // The `!!js` value survives as a non-empty string, which is what the row
+    // reader treats as "the loader decides" rather than "not disabled".
+    expect(read.ok && read.rows[1].skipped).toBe(true)
+  })
+
+  it('reports the same shape problems, including nested groups', () => {
+    expect(readCompositionValue({ not: 'a list' })).toEqual({
+      ok: false,
+      problem: 'the composition must be a top-level list of plugin rows',
+    })
+    expect(readCompositionValue([{ id: 'g', name: 'cordis:group', group: true, config: [{}] }])).toEqual({
+      ok: false,
+      problem: 'row 1 row 1 names no plugin (a "name" string is required)',
     })
   })
 })

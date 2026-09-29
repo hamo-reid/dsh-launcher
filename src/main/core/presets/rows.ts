@@ -131,7 +131,22 @@ function collect(rows: readonly unknown[], at: string, out: CompositionRow[]): v
 }
 
 /**
- * Read one composition's rows.
+ * Judge an ALREADY-PARSED composition value: the row list a declaration's
+ * `config.plugins` and a whole `agent.cordis.yml` are judged by the same code,
+ * so the two preset models cannot disagree about what a row means.
+ * @param parsed - the parsed document, already carrying `!!js` as its sentinel.
+ * @returns the rows, or the reason the value cannot mount.
+ */
+export function readCompositionValue(parsed: unknown): CompositionRead {
+  const problem = shapeProblem(parsed)
+  if (problem !== undefined) return { ok: false, problem }
+  const rows: CompositionRow[] = []
+  collect(parsed as readonly unknown[], '', rows)
+  return { ok: true, rows }
+}
+
+/**
+ * Read one composition's rows from its text.
  *
  * Parsed with the launcher's shared tolerant schema (`CONFIG_SCHEMA`, the one
  * carrying `!!js`), so a composition the loader accepts is never reported as
@@ -149,9 +164,5 @@ export function readComposition(text: string): CompositionRead {
     // reason is displayed on a list row, not in a terminal.
     return { ok: false, problem: `the composition is not valid YAML: ${full.replace(/\n[\s\S]*$/, '')}` }
   }
-  const problem = shapeProblem(parsed)
-  if (problem !== undefined) return { ok: false, problem }
-  const rows: CompositionRow[] = []
-  collect(parsed as readonly unknown[], '', rows)
-  return { ok: true, rows }
+  return readCompositionValue(parsed)
 }

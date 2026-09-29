@@ -7,7 +7,7 @@
  */
 
 import type { ClassifiedRow, PluginRow, RowCreateInput } from '../../../shared/types.ts'
-import { loadStructureOnly, type StructureParse } from './yaml.ts'
+import { dumpYaml, loadStructureOnly, type StructureParse } from './yaml.ts'
 
 /** The patch layer's filename. The same in the home and profile layers, and the
  * name a bundle's `dsh.bundle.patch` falls back to when it declares none.
@@ -67,6 +67,38 @@ function blockEnd(lines: string[], start: number): number {
   return lines.length
 }
 
+/**
+ * One DIRECT child key of a row: `{ line, value }`, or undefined.
+ *
+ * "Direct" is load-bearing, not tidiness. A row's `config` is an arbitrary
+ * subtree, and a preset declaration's `config.plugins` is a list of plugin rows
+ * carrying `disabled:` of their own — the shipped `standard` preset disables
+ * several that way. An indent-blind scan reads the first of those as the
+ * declaration's own `disabled: true` and hides the preset from the roster
+ * entirely, so a row's own fields are read at its child indent and nowhere
+ * deeper.
+ */
+function directChild(lines: string[], idIndex: number, key: string): { line: number; value: string } | undefined {
+  const childIndent = indentOf(lines[idIndex]) + 2
+  const head = new RegExp(`^${key}\\s*:\\s*(.*)$`)
+  for (let i = idIndex + 1; i < lines.length; i++) {
+    const line = lines[i]
+    if (line.trim() === '' || line.trim().startsWith('#')) continue
+    const indent = indentOf(line)
+    if (indent <= indentOf(lines[idIndex])) break
+    if (indent !== childIndent) continue
+    const m = head.exec(line.slice(childIndent))
+    if (m !== null) return { line: i, value: m[1].trim() }
+  }
+  return undefined
+}
+
+/** Strip one pair of surrounding YAML quotes, leaving everything else as written. */
+function unquote(value: string): string {
+  const m = /^(['"])([\s\S]*)\1$/.exec(value)
+  return m === null ? value : m[2]
+}
+
 /** Parse every `- id:` row and whether it is disabled. */
 export function parsePatchRows(text: string): PluginRow[] {
   const lines = text.split('\n')
@@ -74,16 +106,7 @@ export function parsePatchRows(text: string): PluginRow[] {
   for (let i = 0; i < lines.length; i++) {
     const m = ID_RE.exec(lines[i])
     if (m === null) continue
-    const end = blockEnd(lines, i)
-    let disabled = false
-    for (let j = i + 1; j < end; j++) {
-      const d = /\bdisabled:\s*(true|false)/.exec(lines[j])
-      if (d !== null) {
-        disabled = d[1] === 'true'
-        break
-      }
-    }
-    rows.push({ id: m[2], disabled })
+    rows.push({ id: m[2], disabled: directChild(lines, i, 'disabled')?.value === 'true' })
   }
   return rows
 }
@@ -156,16 +179,12 @@ export function parseNamedRows(text: string): NamedRow[] {
   for (let i = 0; i < lines.length; i++) {
     const m = ID_RE.exec(lines[i])
     if (m === null) continue
-    const end = blockEnd(lines, i)
-    let name: string | undefined
-    let disabled = false
-    for (let j = i + 1; j < end; j++) {
-      const n = /\bname:\s*['"]?([^'"]+)['"]?\s*$/.exec(lines[j])
-      if (n !== null) name = n[1]
-      const d = /\bdisabled:\s*(true|false)/.exec(lines[j])
-      if (d !== null) disabled = d[1] === 'true'
-    }
-    rows.push({ id: m[2], name, disabled })
+    const name = directChild(lines, i, 'name')?.value
+    rows.push({
+      id: m[2],
+      name: name === undefined ? undefined : unquote(name),
+      disabled: directChild(lines, i, 'disabled')?.value === 'true',
+    })
   }
   return rows
 }
@@ -231,20 +250,14 @@ export function parseClassifiedRows(text: string): ClassifiedRow[] {
   for (let i = 0; i < lines.length; i++) {
     const m = ID_RE.exec(lines[i])
     if (m === null) continue
-    const end = blockEnd(lines, i)
-    let name: string | undefined
-    let disabled = false
-    let hasConfig = false
-    let hasInsert = false
-    for (let j = i + 1; j < end; j++) {
-      const line = lines[j]
-      const n = /\bname:\s*['"]?([^'"]+)['"]?\s*$/.exec(line)
-      if (n !== null) name = n[1]
-      if (/\bdisabled:\s*true/.test(line)) disabled = true
-      if (/^\s*config\s*:/.test(line)) hasConfig = true
-      if (/^\s*insert\s*:/.test(line)) hasInsert = true
-    }
-    rows.push({ id: m[2], name, disabled, hasConfig, hasInsert })
+    const name = directChild(lines, i, 'name')?.value
+    rows.push({
+      id: m[2],
+      name: name === undefined ? undefined : unquote(name),
+      disabled: directChild(lines, i, 'disabled')?.value === 'true',
+      hasConfig: directChild(lines, i, 'config') !== undefined,
+      hasInsert: directChild(lines, i, 'insert') !== undefined,
+    })
   }
   return rows
 }
@@ -476,4 +489,87 @@ export function extractKeyValue(text: string, id: string, key: string): string |
     return collected.join('\n')
   }
   return undefined
+}
+
+/**
+ * The `config:` key line of a row block and the indent its children sit at.
+ *
+ * `undefined` when the row carries no `config` key or spells it inline
+ * (`config: {...}`), which is no line a scalar edit could touch.
+ */
+function configKeyLine(lines: string[], idIndex: number): { line: number; childIndent: string } | undefined {
+  const end = blockEnd(lines, idIndex)
+  for (let j = idIndex + 1; j < end; j++) {
+    const m = /^(\s*)config\s*:\s*(.*)$/.exec(lines[j])
+    if (m === null) continue
+    if (m[2].trim() !== '') return undefined
+    return { line: j, childIndent: `${m[1]}  ` }
+  }
+  return undefined
+}
+
+/**
+ * Set (or clear) one scalar key INSIDE a row's `config` block, touching nothing
+ * else in the block.
+ *
+ * This exists because a declaration's `config` carries more than scalars: a
+ * preset's `plugins` list may hold `!!js` gates and `|` block scalars, and
+ * re-rendering the whole `config` (what {@link setRowConfig} does) would destroy
+ * both — `!!js` survives js-yaml only as a private sentinel that must never be
+ * dumped. Editing the one line leaves every other byte of the block alone.
+ *
+ * A `value` of `undefined` (or a whitespace-only string) REMOVES the key rather
+ * than writing it empty: the host's schemas declare these fields optional, and
+ * `name:` with no value is `null`, which is not a string.
+ * @param text - the patch document.
+ * @param id - the row's loader id.
+ * @param key - the scalar key to set (`name`, `description`, `order`, …).
+ * @param value - the value, or `undefined`/`''` to drop the key.
+ * @returns the new patch text.
+ */
+export function setConfigScalar(
+  text: string, id: string, key: string, value: string | number | undefined,
+): string {
+  const lines = text.split('\n')
+  const idIndex = findIdLine(lines, id)
+  if (idIndex === undefined) throw new Error(`row "${id}" not found`)
+  const config = configKeyLine(lines, idIndex)
+  if (config === undefined) throw new Error(`row "${id}" has no block-form config to edit`)
+  const end = blockEnd(lines, idIndex)
+  const head = new RegExp(`^${config.childIndent}${key}\\s*:`)
+  let at = -1
+  for (let j = config.line + 1; j < end; j++) {
+    const line = lines[j]
+    if (line.trim() === '' || line.trim().startsWith('#')) continue
+    if (indentOf(line) <= indentOf(lines[config.line])) break
+    if (head.test(line)) {
+      at = j
+      break
+    }
+  }
+  if (value === undefined || (typeof value === 'string' && value.trim() === '')) {
+    if (at >= 0) lines.splice(at, 1)
+    return lines.join('\n')
+  }
+  // Rendered through the shared dumper, so a value carrying `:`, `#`, a newline
+  // or a leading space is quoted/blocked the way YAML requires instead of
+  // silently changing meaning.
+  const rendered = dumpYaml({ [key]: value }).trimEnd().split('\n')
+    .map(line => `${config.childIndent}${line}`)
+  if (at >= 0) {
+    lines.splice(at, 1, ...rendered)
+    return lines.join('\n')
+  }
+  // A new key sits right after `id:` when the config carries one — the order a
+  // preset declaration reads in — else at the top of the block.
+  let insertAt = config.line + 1
+  const idChild = new RegExp(`^${config.childIndent}id\\s*:`)
+  for (let j = config.line + 1; j < end; j++) {
+    if (idChild.test(lines[j])) {
+      insertAt = j + 1
+      break
+    }
+  }
+  lines.splice(insertAt, 0, ...rendered)
+  return lines.join('\n')
 }
