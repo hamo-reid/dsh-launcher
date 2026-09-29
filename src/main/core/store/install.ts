@@ -67,8 +67,16 @@ export async function addPlugin(dir: string, source: string, name?: string): Pro
 }
 
 /** Shared download path: build the source into a staging project, read the real
- * version, then hoist the whole project to `archive/<name>/<version>/`. */
-export async function installSource(storeDir: string, name: string, source: string, signal?: AbortSignal): Promise<PnpmResult> {
+ * version, then hoist the whole project to `archive/<name>/<version>/`.
+ *
+ * `replace` decides what an already-archived version means. Left false (the
+ * default), re-adding a version that is already present is a no-op — the right
+ * answer for a re-download. Set true by a dev snapshot, where the source tree
+ * moved on but its `version` did not, and keeping the older archive would report
+ * success while storing the previous state. */
+export async function installSource(
+  storeDir: string, name: string, source: string, signal?: AbortSignal, opts?: { replace?: boolean },
+): Promise<PnpmResult> {
   if (name.trim() === '') return { ok: false, text: '未能确定插件包名' }
   // The name becomes an `archive/<name>/` path segment; refuse anything that
   // could escape the store tree (`..`, `\`, drive/absolute, `//`). Deliberately
@@ -120,9 +128,40 @@ export async function installSource(storeDir: string, name: string, source: stri
     return { ok: false, text: `未在 node_modules 中找到 ${name}（包名不匹配，或依赖解析失败）${tail !== '' ? `\n${tail}` : ''}` }
   }
   const dest = pluginVersionDir(storeDir, name, version)
-  if (existsSync(dest)) {
+  if (existsSync(dest) && opts?.replace !== true) {
     rmSync(staging, { recursive: true, force: true })
     return { ok: true, text: `已在该版本（${name}@${version}）` }
+  }
+  if (existsSync(dest)) {
+    // A replaced version is only set aside once the new one is BUILT: the staging
+    // project above is the replacement, so an archive is never absent because a
+    // rebuild failed. Until this point the old version was still serving profiles.
+    // The stash lives OUTSIDE `archive/` because `storeVersions` enumerates every
+    // dir under `archive/<name>/` that holds a package body — a sibling would be
+    // read as a version of its own. It is one flat leaf, removed on success, so
+    // nothing accumulates.
+    const stash = join(storeDir, '.trash', `${name.replace(/[\\/]/g, '+')}@${version}`)
+    mkdirSync(dirname(stash), { recursive: true })
+    rmSync(stash, { recursive: true, force: true })
+    try {
+      renameSync(dest, stash)
+    } catch (error) {
+      rmSync(staging, { recursive: true, force: true })
+      return { ok: false, text: `无法替换已有版本：${error instanceof Error ? error.message : String(error)}` }
+    }
+    mkdirSync(dirname(dest), { recursive: true })
+    try {
+      renameSync(staging, dest)
+    } catch (error) {
+      // Put the previous archive back rather than leaving a hole in the store.
+      renameSync(stash, dest)
+      return { ok: false, text: `归档失败：${error instanceof Error ? error.message : String(error)}` }
+    }
+    rmSync(stash, { recursive: true, force: true })
+    await relinkVersion(dest, join(dest, 'node_modules', name), storeDir)
+    recordPluginSource(storeDir, name, version, sourceKindOf(source), source)
+    logger.info(`plugin store replaced: ${name}@${version} (${source})`)
+    return { ok: true, text: `已替换归档 ${name}@${version}` }
   }
   mkdirSync(dirname(dest), { recursive: true })
   try {

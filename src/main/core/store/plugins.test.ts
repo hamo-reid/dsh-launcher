@@ -4,7 +4,7 @@
  * profile install-into. `runPnpm` is mocked so network/FS side effects stay out.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import AdmZip from 'adm-zip'
@@ -250,6 +250,35 @@ describe('archive staging shape', () => {
     expect(installs[0]).not.toContain('--offline')
     expect(installs[1]).toContain('--offline')
     expect(installs[3]).toContain('--force')
+  })
+  it('keeps an already-archived version unless a replace is asked for', async () => {
+    // Re-downloading must stay idempotent — but a dev snapshot, whose source moved
+    // on without its version number, must not silently keep the older archive.
+    const src = join(root, 'src-dup')
+    mkPkg(src, '1.0.0')
+    const calls = mockPnpm('src-dup', true)
+    expect((await addLocalPlugin(store(), src)).text).toContain('已下载')
+    const again = await addLocalPlugin(store(), src)
+    expect(again.text).toContain('已在该版本')
+    expect(calls.filter(a => a[0] === 'add')).toHaveLength(2)
+    // The second add never made it into the store.
+    expect(calls.filter(a => a[0] === 'install')).toHaveLength(1)
+  })
+
+  it('replaces a version in place when asked, leaving no extra version behind', async () => {
+    const src = join(root, 'src-rep')
+    mkPkg(src, '1.0.0')
+    mockPnpm('src-rep', true)
+    await installSource(store(), 'src-rep', `file:${src}`)
+    writeFileSync(join(src, 'marker.txt'), 'second')
+    const replaced = await installSource(store(), 'src-rep', `file:${src}`, undefined, { replace: true })
+    expect(replaced.ok).toBe(true)
+    expect(replaced.text).toContain('已替换归档')
+    expect(storeVersions(store(), 'src-rep')).toEqual(['1.0.0'])
+    // The stash lives outside archive/ — storeVersions would read a sibling dir
+    // holding a package body as a version of its own — and leaves nothing behind.
+    const trash = join(store(), '.trash')
+    expect(existsSync(trash) ? readdirSync(trash) : []).toEqual([])
   })
 })
 
