@@ -101,6 +101,29 @@ dsh `0.2.0-rc.1` 删掉了目录 preset，没有兼容读取：`packages/preset/
 - 写入前三道护栏：`config.id` 已被任何层占用、`local-preset-<id>` 行 id 已被占用、id 不合法 —— 都拒绝。
 - 一份声明能否改，看它**在哪一层**：bundle 层属于部署，只读；profile / home 层是用户自己的，可改。折叠已经把「谁赢」算出来了，所以赢家天然就是该改的那一层。
 
+### 3.4 官方四个 preset 没有名称也没有描述
+
+声明模型下官方那四条 `presets/*.patch.yml`，`config` 里**只有 `id` 和 `order`** —— `name` 和 `description` 都没写：
+
+```yaml
+- insert:
+    - id: preset-standard
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: standard          # ← 没有 name，没有 description
+        order: 1
+        plugins: [...]
+```
+
+这不是读不出来，是**数据里没有**。两处对照：
+
+- 目录模型（0.1.5-rc.2）的 `preset.yml` 里描述是有的，例如 `standard`：「功能完整的编码 Agent，支持文件编辑、Shell、文件与网页检索、Skills、计划、目标、子代理和工作流。」同一套读代码在那一版读得出来。
+- 宿主的 schema **支持**这两个字段：`dsh-agent-preset-registry` 的 `PresetDefinition` 是 `{ id, name?, description?, order?, plugins }`，官方只是没填。
+
+所以 0.2.0-rc.1 的四张内置卡显示：标题退回 id（`name ?? id`），简介是占位文案「（没有描述）」。**这是数据属性，不是缺陷**，launcher 不替它编文案（内置文案会随官方措辞变更而陈旧，且没有维护者）。
+
+用户想要一个有描述的 preset，唯一正路是**复制一份再改**：复制对话框只收 id 和 name，复制出的行落在 profile 层、**可编辑**，随后「编辑描述」写进那一份的 `config.description`。复制品不带源描述，因为源本来就没有（`index.ts` 的复制路径是 `source.description ?? {}`）。迁移旧目录同理：`preset.yml` 里的描述会带进新声明（`legacy.ts` 的 `migrationInput`）。
+
 ## 4. 组合面与能不能挂载
 
 ### 4.1 什么算一行：entry 位置
@@ -195,5 +218,6 @@ dsh `0.2.0-rc.1` 删掉了目录 preset，没有兼容读取：`packages/preset/
 - **目录模型**（`official`，dsh `0.1.5-rc.2`）：内置根解析到 `.pnpm/node_modules/@deepseek-ai/dsh-agent-presets/presets`，名册 standard(1) / ptc(2) / minimal(3) / cordis(4)，两个 profile 全部「可用」，每个 preset 有 4–5 行因 `!!js` 门被跳过、0 行留给运行时。
 - **声明模型**（`official-0.2.0-rc1`，dsh `0.2.0-rc.1`，profile `test`）：`@deepseek-ai/dsh-agent-presets` 已不在安装里（`resolveModule` 返回 MISSING），`@deepseek-ai/dsh-agent-preset` 与 `…-registry` 走 pnpm 提升目录解析成功。层叠栈 **4 层**：base（94 行 / 1 文件）、`web-app`（116 行 / **5 个文件**：`cordis.patch.yml` 112 行 + `presets/{standard,ptc,minimal,cordis}.patch.yml` 各 1 行，即声明行本身，名册在它的 `config` 里）、`dsh-experimental-agent-team-profile`（7 行 / 1 文件）、profile 补丁（1 行 / 1 文件）；按文件展开是 8 层。`--dump-config` 的 `profiles/test/cordis.yml` 里是 `agent-preset-registry`（`default: standard`）与 `preset-standard/ptc/minimal/cordis` 四行，`web-app` 的 `presets/*.patch.yml` 与 tag 逐字节一致。
 - **上面两条 0.2.0-rc1 隐患都由此暴露**（数组形式 `dsh.bundle.patch` 的连带）：按缩进读行会让那四个文件各报出整套名册（33/34/8/34 行）—— 32 条幻影「重复插入的 entry id」、`validateComposition.ok = false`、名册里多出幻影插件、删除确认里的补丁行数从 2 变 40；`subdeps` 把声明交给 `path.join` 则 TypeError 抛出 `install` / `uninstall` / 已装概览。修后同一台机器：`insert conflicts: 0`、`validateComposition.ok = true`、组合插件 217（base 94 + web 116 + agent-team 7）、名册 standard/ptc/minimal/cordis 全 `ok`；`listBundleSubdepNames(web-app)` 返回 85 个子包，不再抛。
+- **描述的对照**（同一台机器，同一套读代码）：声明模型下四个内置 `name` 与 `description` **都**是 `undefined`（见 §3.4）；目录模型下四条都读得出来，例如 `minimal` 的「仅提供持久 shell 的单工具编码 Agent。」。这条对照是「数据缺失、不是读坏」的直接证据。
 - **目录模型未受影响**（`official`，dsh `0.1.5-rc.2`，profile `base-web`）：3 层 84/94/1 行，每层 1 个文件，0 冲突，名册与判分与改动前一致。
 - 声明模型的包名解析靠 pnpm 的 `.pnpm/node_modules` 提升目录，所以 launcher 现有的解析链（`moduleSearchRoots` 第一段）直接可用，不需要为它另造一套。
