@@ -31,6 +31,15 @@ export interface ClassifiedRow {
   hasInsert: boolean
 }
 
+/** One patch file inside a composed layer. A bundle may declare several. */
+export interface ProfileLayerFile {
+  /** The file's path inside its bundle, present only when that bundle declares
+   * MORE than one patch file — a single-file layer needs no qualifier, and
+   * leaving it off keeps its label and keys exactly as they were. */
+  file?: string
+  rows: ClassifiedRow[]
+}
+
 /** A layer within the composed profile stack (application order). */
 export interface ProfileLayer {
   /** Where this layer comes from. */
@@ -39,7 +48,20 @@ export interface ProfileLayer {
   bundle?: string
   /** Profile name when `source === 'profile'`. */
   label?: string
-  rows: ClassifiedRow[]
+  /**
+   * The layer's patch files, in application order: one per declared file for a
+   * bundle, exactly one for the profile's own and for the home layer.
+   *
+   * The unit is the BUNDLE, not the file, for two reasons. It is dsh's own unit
+   * — `profile.layers` is one entry per bundle package carrying a `patchPaths`
+   * list, and only the row-provenance comments of `--dump-config` go finer. And
+   * the bundle is what a person can act on: enable, disable and remove all
+   * happen on `dsh.profile.bundles`. Once 0.2.0-rc.1's web-app bundle declared
+   * five patch files, a file-per-layer list showed one bundle as five layers
+   * with the same name — five cards nobody could tell apart or act on
+   * separately.
+   */
+  files: ProfileLayerFile[]
 }
 
 /** One layer of a profile's composed stack, for insert-conflict reporting. */
@@ -49,6 +71,10 @@ export interface InsertConflictLayer {
   bundle?: string
   /** Profile name (`source === 'profile'`) or overlay filename (`source === 'patch'`). */
   label?: string
+  /** The bundle-relative patch file that inserted the id. Set when its bundle
+   * declares several files, which is exactly when the bundle name alone cannot
+   * say which file to fix. */
+  file?: string
 }
 
 /** A loader entry id inserted by more than one layer of a profile's composed

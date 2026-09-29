@@ -10,7 +10,7 @@ import {
 import type { DragEndEvent } from '@dnd-kit/core'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
-import { issueCount, lastSeenByRow, layerLabel, type LayerLabel } from '../lib/profileLayers.ts'
+import { issueCount, lastSeenByRow, layerLabel, layerRowCount, type LayerLabel } from '../lib/profileLayers.ts'
 import { RenameProfileModal, TransferPatchModal } from './profile-detail/ProfileDialogs.tsx'
 import LayerRows from './profile-detail/LayerRows.tsx'
 import RawEditor from './profile-detail/RawEditor.tsx'
@@ -439,7 +439,7 @@ const loadSeq = useRef(0)
     { key: 'deps', icon: <ApartmentOutlined />, label: t('profile.workspace.deps'), meta: dependencies.length || null },
     { key: 'bundles', icon: <AppstoreOutlined />, label: t('profile.workspace.bundles'), meta: bundles.length || null },
     { key: 'mcp', icon: <ApiOutlined />, label: t('profile.workspace.mcp'), meta: mcpCount === null || mcpCount === 0 ? null : mcpCount },
-    { key: 'patch', icon: <CodeOutlined />, label: t('profile.workspace.patch'), meta: (profileLayer?.rows.length ?? 0) || null },
+    { key: 'patch', icon: <CodeOutlined />, label: t('profile.workspace.patch'), meta: (profileLayer === undefined ? 0 : layerRowCount(profileLayer)) || null },
     { key: 'home', icon: <HomeOutlined />, label: t('profile.workspace.home'), meta: null },
     {
       key: 'diagnostics',
@@ -658,7 +658,7 @@ const loadSeq = useRef(0)
             validation={validation}
             validating={validating}
             bundleCount={bundles.length}
-            patchRowCount={profileLayer?.rows.length ?? 0}
+            patchRowCount={profileLayer === undefined ? 0 : layerRowCount(profileLayer)}
             depCount={dependencies.length}
             onValidate={revalidate}
             onReveal={() => void revealProfile()}

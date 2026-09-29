@@ -7,7 +7,7 @@
  * index key would remount every card on a bundle reorder.
  */
 import ActionCard from '../../components/ActionCard.tsx'
-import { layerLabel } from '../../lib/profileLayers.ts'
+import { layerLabel, layerRowCount } from '../../lib/profileLayers.ts'
 import { useTranslation } from 'react-i18next'
 import type { ProfileLayer } from '../../../../shared/types.ts'
 
@@ -20,7 +20,8 @@ interface Props {
 export default function PatchSection({ layers, onOpenLayer }: Props): JSX.Element {
   const { t } = useTranslation()
 
-  /** The layer identity, as the card list and dnd both need it. */
+  /** The layer identity, as the card list and dnd both need it. One layer per
+   * bundle, so the bundle name IS unique — the reason it is not the file. */
   const keyOf = (layer: ProfileLayer): string =>
     layer.source === 'bundle' ? `bundle:${layer.bundle}` : layer.source === 'profile' ? `profile:${layer.label}` : 'home'
 
@@ -28,13 +29,21 @@ export default function PatchSection({ layers, onOpenLayer }: Props): JSX.Elemen
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {(layers ?? []).map((layer, i) => {
         const label = layerLabel(layer)
+        const rows = layerRowCount(layer)
+        // A bundle composing several patch files says so: the count is the one
+        // thing the bundle name cannot tell you, and the files themselves are
+        // listed inside the layer.
+        const many = layer.files.length > 1
+        const meta = layer.source === 'profile'
+          ? t('profile.detail.layerMetaEditable', { count: rows })
+          : many
+            ? t('profile.detail.layerMetaFiles', { count: rows, files: layer.files.length })
+            : t('profile.detail.layerMeta', { count: rows })
         return (
           <ActionCard
             key={keyOf(layer)}
             title={`${i + 1}. ${t(label.key, label.options)}`}
-            meta={layer.source === 'profile'
-              ? t('profile.detail.layerMetaEditable', { count: layer.rows.length })
-              : t('profile.detail.layerMeta', { count: layer.rows.length })}
+            meta={meta}
             onClick={() => onOpenLayer(i)}
             hoverable
           />

@@ -170,9 +170,12 @@ function launchShellWindow(exe: string, argv: string[], env: NodeJS.ProcessEnv, 
   return spawn('cmd.exe', ['/c', 'start', '', '/wait', 'powershell.exe', '-NoExit', '-ExecutionPolicy', 'Bypass', '-File', scriptPath], { windowsHide: false, env, cwd })
 }
 
-/** Human-readable label for one conflict layer, e.g. `bundle:@deepseek-ai/dsh-web-app`. */
+/** Human-readable label for one conflict layer, e.g. `bundle:@deepseek-ai/dsh-web-app`.
+ * A bundle that composes several patch files also names the file — that is the one
+ * thing that has to change, and the bundle name alone does not say which. */
 function insertLayerLabel(layer: InsertConflictLayer): string {
-  if (layer.source === 'bundle') return `bundle:${layer.bundle ?? '?'}`
+  const at = layer.file === undefined ? '' : `/${layer.file}`
+  if (layer.source === 'bundle') return `bundle:${layer.bundle ?? '?'}${at}`
   if (layer.source === 'profile') return `profile:${layer.label ?? '?'}`
   if (layer.source === 'home') return 'home'
   return `patch:${layer.label ?? '?'}`

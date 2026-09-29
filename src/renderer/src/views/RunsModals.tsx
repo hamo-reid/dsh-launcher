@@ -5,6 +5,7 @@ import { Alert, Modal, Space, theme } from 'antd'
 import type { CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 import { MODAL } from '../theme.ts'
+import { layerLabel } from '../lib/profileLayers.ts'
 import type { InsertConflictLayer } from '../../../shared/types.ts'
 import type { RunConflictInfo, RunFailInfo } from './useRuns.tsx'
 
@@ -57,13 +58,10 @@ export function RunConflictModal(p: RunConflictModalProps): JSX.Element {
   const { token } = theme.useToken()
   const conflicts = p.info?.conflicts ?? []
 
-  const layerLabel = (layer: InsertConflictLayer): string => {
-    if (layer.source === 'bundle') return t('profile.layer.bundle', { name: layer.bundle ?? '' })
-    if (layer.source === 'profile') return t('profile.layer.profile', { name: layer.label ?? '' })
-    if (layer.source === 'home') return t('profile.layer.home')
-    return t('profile.detail.patchLayer', { name: layer.label ?? '' })
-  }
-  const layerKey = (layer: InsertConflictLayer): string => `${layer.source}:${layer.bundle ?? layer.label ?? ''}`
+  // The layer's identity for dedup: a bundle that composes several patch files is
+  // only distinguished from itself by the file, so the file is part of the key.
+  const layerKey = (layer: InsertConflictLayer): string =>
+    `${layer.source}:${layer.bundle ?? layer.label ?? ''}:${layer.file ?? ''}`
 
   // Distinct layers involved in any conflict, then the distinct colliding ids.
   const layers = [...new Map(conflicts.flatMap(c => c.layers).map(l => [layerKey(l), l])).values()]
@@ -97,7 +95,10 @@ export function RunConflictModal(p: RunConflictModalProps): JSX.Element {
         <div>
           <div style={{ marginBottom: 6, fontWeight: 600 }}>{t('run.insertConflictBundles', { count: layers.length })}</div>
           <div style={listBox}>
-            {layers.map(layer => <div key={layerKey(layer)} style={mono}>{layerLabel(layer)}</div>)}
+            {layers.map((layer) => {
+              const label = layerLabel(layer)
+              return <div key={layerKey(layer)} style={mono}>{t(label.key, label.options)}</div>
+            })}
           </div>
         </div>
         <div>

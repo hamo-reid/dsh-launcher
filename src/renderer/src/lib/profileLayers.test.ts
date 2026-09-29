@@ -1,22 +1,37 @@
 /**
  * Layer labelling and issue counting for the profile workspace.
  *
- * `lastSeenByRow`'s order is the subtle one: it decides which layer a row appears
- * to come from, and getting the walk backwards would silently relabel every row in
- * the patch list.
+ * `lastSeenByRow`'s order is the subtle one: it decides which layer — and, for a
+ * bundle composing several patch files, which FILE — a row appears to come from,
+ * and getting the walk backwards would silently relabel every row in the patch list.
  */
 import { describe, expect, it } from 'vitest'
-import { issueCount, lastSeenByRow, layerLabel } from './profileLayers.ts'
+import { fileLabel, issueCount, lastSeenByRow, layerLabel, layerRowCount } from './profileLayers.ts'
 import type { ClassifiedRow, InsertConflict, ProfileLayer, ProfileValidation } from '../../../shared/types.ts'
 
 const row = (id: string): ClassifiedRow => ({ id, disabled: false, hasConfig: false, hasInsert: false })
 const layer = (source: ProfileLayer['source'], ids: string[], extra: Partial<ProfileLayer> = {}): ProfileLayer =>
-  ({ source, rows: ids.map(row), ...extra })
+  ({ source, files: [{ rows: ids.map(row) }], ...extra })
+/** A bundle layer whose files each carry their own qualifier and rows. */
+const multiLayer = (bundle: string, files: [string, string[]][]): ProfileLayer =>
+  ({ source: 'bundle', bundle, files: files.map(([file, ids]) => ({ file, rows: ids.map(row) })) })
 
 describe('layerLabel', () => {
   it('names a bundle layer by its package', () => {
     expect(layerLabel({ source: 'bundle', bundle: '@deepseek-ai/dsh-base' }))
       .toEqual({ key: 'profile.layer.bundle', options: { name: '@deepseek-ai/dsh-base' } })
+  })
+
+  // A bundle composing several patch files is only distinguishable by the file, so
+  // the qualifier is part of its identity — labels are compared as TEXT.
+  it('qualifies a bundle layer by its file when its bundle declares several', () => {
+    expect(layerLabel({ source: 'bundle', bundle: 'web', file: 'presets/standard.patch.yml' }))
+      .toEqual({ key: 'profile.layer.bundleFile', options: { name: 'web', file: 'presets/standard.patch.yml' } })
+  })
+
+  it('ignores an empty file qualifier rather than labelling with one', () => {
+    expect(layerLabel({ source: 'bundle', bundle: 'web', file: '' }))
+      .toEqual({ key: 'profile.layer.bundle', options: { name: 'web' } })
   })
 
   it('names a profile layer by its label', () => {
@@ -35,6 +50,26 @@ describe('layerLabel', () => {
 
   it('substitutes an empty name rather than leaving the param undefined', () => {
     expect(layerLabel({ source: 'bundle' })).toEqual({ key: 'profile.layer.bundle', options: { name: '' } })
+  })
+})
+
+describe('fileLabel / layerRowCount', () => {
+  it('labels a file with its layer\'s identity, so one file changes nothing', () => {
+    const one = layer('bundle', ['a'], { bundle: 'base' })
+    expect(fileLabel(one, one.files[0])).toEqual({ key: 'profile.layer.bundle', options: { name: 'base' } })
+  })
+
+  it('labels each file of a multi-file bundle distinctly', () => {
+    const many = multiLayer('web', [['cordis.patch.yml', ['a']], ['presets/standard.patch.yml', ['b']]])
+    expect(many.files.map(f => fileLabel(many, f))).toEqual([
+      { key: 'profile.layer.bundleFile', options: { name: 'web', file: 'cordis.patch.yml' } },
+      { key: 'profile.layer.bundleFile', options: { name: 'web', file: 'presets/standard.patch.yml' } },
+    ])
+  })
+
+  it('counts rows across every file of a layer', () => {
+    expect(layerRowCount(multiLayer('web', [['a.yml', ['x', 'y']], ['b.yml', ['z']]]))).toBe(3)
+    expect(layerRowCount(layer('home', []))).toBe(0)
   })
 })
 
@@ -57,6 +92,18 @@ describe('lastSeenByRow', () => {
       layer('home', ['other']),
     ])
     expect(seen.get('only-bundle')).toEqual({ key: 'profile.layer.bundle', options: { name: 'base' } })
+  })
+
+  // Within one layer the later file wins, exactly as it does across layers: dsh
+  // applies the files in declared order. The row is attributed to that file, which
+  // is what the override tag has to name.
+  it('attributes a row to the later of two files of one bundle', () => {
+    const seen = lastSeenByRow([
+      layer('home', ['web']),
+      multiLayer('web', [['cordis.patch.yml', ['web', 'shell']], ['presets/standard.patch.yml', ['web']]]),
+    ])
+    expect(seen.get('web')).toEqual({ key: 'profile.layer.bundleFile', options: { name: 'web', file: 'presets/standard.patch.yml' } })
+    expect(seen.get('shell')).toEqual({ key: 'profile.layer.bundleFile', options: { name: 'web', file: 'cordis.patch.yml' } })
   })
 
   it('is empty for no layers', () => {

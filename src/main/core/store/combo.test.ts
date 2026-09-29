@@ -55,6 +55,18 @@ function mkBundlePkg(p: string, bundle: string): void {
   writeFileSync(join(dir, 'package.json'), JSON.stringify({ dsh: { bundle: { patch: './cordis.patch.yml' } } }))
 }
 
+/** A bundle whose manifest declares `files` and whose patch files all exist. */
+function mkMultiPatch(p: string, bundle: string, files: string[], rows: string[]): void {
+  const dir = join(profileDir(p), 'node_modules', bundle)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ dsh: { bundle: { patch: files } } }))
+  files.forEach((rel, index) => {
+    const path = join(dir, rel)
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, rows[index] ?? '')
+  })
+}
+
 /** A bundle package declaring SEVERAL patch files (`dsh.bundle.patch` as a list),
  * the shape 0.2.0-rc.1's web-app bundle uses for its preset declarations. */
 function mkBundleFiles(p: string, bundle: string, declared: string[], files: Record<string, string>): void {
@@ -132,13 +144,41 @@ describe('composeProfileLayers', () => {
     expect(layers.map(l => l.source)).toEqual(['bundle', 'profile', 'home'])
     expect(layers[0].bundle).toBe('b1')
     expect(layers[1].label).toBe('p')
-    expect(layers[2].rows[0].id).toBe('homeRow')
+    expect(layers[2].files[0].rows[0].id).toBe('homeRow')
+    // A single-file layer carries no file qualifier.
+    expect(layers[0].files).toEqual([{ rows: [{ id: 'bundleRow', name: undefined, disabled: false, hasConfig: false, hasInsert: false }] }])
   })
 
   it('omits the profile layer when its patch is blank', () => {
     mkProfile('p', [], {})
     mkUserPatch('p', '   ')
     expect(composeProfileLayers(ctx(), 'p').map(l => l.source)).toEqual([])
+  })
+
+  // The host's own layer unit is the bundle package (its `profile.layers` holds
+  // one entry per package with a `patchPaths` list), and a bundle is the only
+  // thing a person can enable, disable or remove. Listing one declared file as
+  // one layer showed 0.2.0-rc1's web-app bundle as five cards with the same name.
+  it('groups a bundle\'s several patch files into one layer, qualified by file', () => {
+    mkProfile('p', ['b1', 'b2'], {})
+    mkBundle('p', 'b1', '- id: base\n')
+    mkMultiPatch('p', 'b2', ['./cordis.patch.yml', './presets/standard.patch.yml'],
+      ['- id: shell\n', '- id: preset-standard\n'])
+
+    const layers = composeProfileLayers(ctx(), 'p')
+    expect(layers.map(l => l.bundle)).toEqual(['b1', 'b2'])
+    expect(layers[0].files.map(f => f.file)).toEqual([undefined])
+    expect(layers[1].files.map(f => f.file)).toEqual(['cordis.patch.yml', 'presets/standard.patch.yml'])
+    expect(layers[1].files.map(f => f.rows.map(r => r.id))).toEqual([['shell'], ['preset-standard']])
+  })
+
+  // Two entries of `dsh.profile.bundles` are two layers to the host, so merging
+  // them would under-report the stack.
+  it('keeps a bundle listed twice as two layers', () => {
+    mkProfile('p', ['b1', 'b1'], {})
+    mkMultiPatch('p', 'b1', ['./cordis.patch.yml', './presets/standard.patch.yml'],
+      ['- id: shell\n', '- id: preset-standard\n'])
+    expect(composeProfileLayers(ctx(), 'p').map(l => l.files.length)).toEqual([2, 2])
   })
 })
 
@@ -453,18 +493,6 @@ describe('on a pnpm-shaped install', () => {
 // carrying every agent-preset declaration. Reading only the string form dropped
 // all four silently — no error, just an empty preset roster.
 describe('a bundle that declares several patch files', () => {
-  /** A bundle whose manifest declares `files` and whose patch files all exist. */
-  function mkMultiPatch(p: string, bundle: string, files: string[], rows: string[]): void {
-    const dir = join(profileDir(p), 'node_modules', bundle)
-    mkdirSync(dir, { recursive: true })
-    writeFileSync(join(dir, 'package.json'), JSON.stringify({ dsh: { bundle: { patch: files } } }))
-    files.forEach((rel, index) => {
-      const path = join(dir, rel)
-      mkdirSync(dirname(path), { recursive: true })
-      writeFileSync(path, rows[index] ?? '')
-    })
-  }
-
   it('resolves every declared file, in declaration order', () => {
     mkProfile('p', ['b'], {})
     mkMultiPatch('p', 'b', ['./cordis.patch.yml', './presets/standard.patch.yml'],
@@ -485,14 +513,17 @@ describe('a bundle that declares several patch files', () => {
     expect(listComboPlugins(ctx(), 'p').map(r => r.id)).toEqual(['base', 'preset-standard'])
   })
 
-  it('gives each file its own layer, in application order', () => {
+  it('keeps a declared file list as the files of ONE layer, in application order', () => {
     mkProfile('p', ['b'], {})
     mkMultiPatch('p', 'b', ['./cordis.patch.yml', './presets/standard.patch.yml'],
       ['- id: base\n', '- id: preset-standard\n'])
     const layers = composeLayerTexts(ctx(), 'p')
-    expect(layers.map(l => [l.source, l.bundle, l.path.endsWith('standard.patch.yml')]))
-      .toEqual([['bundle', 'b', false], ['bundle', 'b', true]])
-    expect(layers[1].text).toBe('- id: preset-standard\n')
+    expect(layers).toHaveLength(1)
+    expect(layers[0].bundle).toBe('b')
+    expect(layers[0].files.map(f => [f.file, f.text])).toEqual([
+      ['cordis.patch.yml', '- id: base\n'],
+      ['presets/standard.patch.yml', '- id: preset-standard\n'],
+    ])
   })
 
   it('reports the bundle when one of its declared files is missing', () => {

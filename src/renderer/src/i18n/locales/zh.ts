@@ -653,6 +653,7 @@ const zh = {
     'trash.clear': '清空',
 
     'profile.layer.bundle': 'bundle · {{name}}',
+    'profile.layer.bundleFile': 'bundle · {{name}} · {{file}}',
     'profile.layer.profile': 'profile · {{name}}',
     'profile.layer.home': 'home · 机器级',
     'profile.detail.overview': '概览',
@@ -718,6 +719,7 @@ const zh = {
     'profile.detail.nDepsMeta': '{{count}} 项依赖',
     'profile.detail.stack': '层叠栈',
     'profile.detail.layerMeta': '{{count}} 行',
+    'profile.detail.layerMetaFiles': '{{count}} 行 · {{files}} 个 patch 文件',
     'profile.detail.patchLayer': '覆盖层 {{name}}',
     'profile.detail.insertConflictTitle': '检测到重复插入的 entry id',
     'profile.detail.insertConflictDesc': '以下 loader entry id 被多个层重复 insert，宿主启动时会以「duplicate loader entry id」失败。请移除其中一个冲突的 bundle/层。',

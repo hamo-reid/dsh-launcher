@@ -27,21 +27,22 @@ import type { DshContext } from '../profile/appState.ts'
  * A profile's patch layers, in application order, with the base each layer's
  * `.`-relative row resolves against.
  *
- * The base is the patch file's own directory: dsh extends a declaration's
- * context with the DECLARING row's base URL, so a `./tools/x.mjs` inside a
- * declaration resolves next to the file that declared it.
+ * One entry per patch FILE, flattened out of the composed layers: the base is the
+ * patch file's own directory, because dsh extends a declaration's context with the
+ * DECLARING row's base URL, so a `./tools/x.mjs` inside a declaration resolves next
+ * to the file that declared it.
  * @param ctx - the dsh to read.
  * @param profile - the profile whose stack is read.
  * @returns one layer per patch file, in the order dsh applies them.
  */
 export function profileLayers(ctx: DshContext, profile: string): ComposedLayer[] {
-  return composeLayerTexts(ctx, profile).map(layer => ({
+  return composeLayerTexts(ctx, profile).flatMap(layer => layer.files.map(file => ({
     kind: layer.source,
-    text: layer.text,
-    path: layer.path,
-    baseDir: dirname(layer.path),
+    text: file.text,
+    path: file.path,
+    baseDir: dirname(file.path),
     ...(layer.bundle === undefined ? {} : { bundle: layer.bundle }),
-  }))
+  })))
 }
 
 /**

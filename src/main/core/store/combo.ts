@@ -32,11 +32,28 @@ export type { ComboPlugin } from '../../../shared/types.ts'
  * the difference between one walk and N. */
 type SearchRoots = readonly { dir: string }[]
 
+/** A bundle's patch file, resolved on disk, with the path it is declared at
+ * inside the bundle package. */
+export interface BundlePatchFile {
+  /** Absolute path of the file. */
+  path: string
+  /** The bundle-relative path (`cordis.patch.yml`, `presets/standard.patch.yml`),
+   * which is what a layer label shows and what a person edits. */
+  file: string
+}
+
+/** A declared path without its `./` lead, so a label reads
+ * `presets/standard.patch.yml` rather than `./presets/standard.patch.yml`. */
+function bundleRelFile(rel: string): string {
+  return rel.replace(/^\.\//, '')
+}
+
 /**
- * Locate a bundle package's patch file: its declared `dsh.bundle.patch` (else the
- * `cordis.patch.yml` default), under the nearest directory `moduleSearchRoots`
- * offers. The host requires the declaration and fails loud without it; the
- * launcher is a viewer, so a package that omits it still resolves by filename.
+ * Locate every patch file a bundle composes: its declared `dsh.bundle.patch`
+ * entries (else the `cordis.patch.yml` default), under the nearest directory
+ * `moduleSearchRoots` offers, in declared order. The host requires the
+ * declaration and fails loud without it; the launcher is a viewer, so a package
+ * that omits it still resolves by filename.
  *
  * The candidate LIST is the point. On a pnpm install the anchor's
  * `node_modules/@deepseek-ai/` holds only `dsh`, and every other bundle the
@@ -50,18 +67,25 @@ type SearchRoots = readonly { dir: string }[]
  * dangling candidate is skipped rather than returned, so the result is always
  * readable.
  */
-export function resolveBundlePatches(
+export function resolveBundlePatchFiles(
   ctx: DshContext, bundle: string, profile: string, roots?: SearchRoots,
-): string[] {
+): BundlePatchFile[] {
   for (const { dir } of roots ?? moduleSearchRoots(ctx, profile)) {
     const bundleDir = join(dir, bundle)
     if (!existsSync(bundleDir)) continue
     const found = bundlePatchRels(bundleDir)
-      .map(rel => join(bundleDir, rel))
-      .filter(path => existsSync(path))
+      .filter(rel => existsSync(join(bundleDir, rel)))
+      .map(rel => ({ path: join(bundleDir, rel), file: bundleRelFile(rel) }))
     if (found.length > 0) return found
   }
   return []
+}
+
+/** The absolute paths of a bundle's patch files, in application order. */
+export function resolveBundlePatches(
+  ctx: DshContext, bundle: string, profile: string, roots?: SearchRoots,
+): string[] {
+  return resolveBundlePatchFiles(ctx, bundle, profile, roots).map(found => found.path)
 }
 
 /**
@@ -112,24 +136,46 @@ export function listComboPlugins(ctx: DshContext, profile: string): ComboPlugin[
 }
 
 
-/** One patch layer's raw text, in application order. */
-export interface LayerText {
-  source: ProfileLayer['source']
-  bundle?: string
-  /** Absolute path of the layer's patch file. */
+/** One patch file's raw text, in application order within its layer. */
+export interface LayerFileText {
+  /** The file's path inside its bundle, set when that bundle declares MORE than
+   * one patch file — the qualifier a layer label needs, and only then: one file
+   * needs no qualifier, and leaving it off keeps every label and React key of a
+   * single-file bundle exactly as it was. */
+  file?: string
+  /** Absolute path of the file. */
   path: string
   text: string
 }
 
+/** One composed layer's raw text: the bytes every reader needs, before any of
+ * them classifies them. */
+export interface LayerText {
+  source: ProfileLayer['source']
+  /** Bundle package name (`source === 'bundle'`). */
+  bundle?: string
+  /** Profile name (`source === 'profile'`). */
+  label?: string
+  /** The layer's patch files, in the order dsh applies them. A bundle may declare
+   * several; the profile's own and the home layer always hold exactly one. */
+  files: LayerFileText[]
+}
+
 /**
- * Each patch layer's TEXT, in application order: every resolved bundle layer (in
- * `dsh.profile.bundles` order), then the profile's own layer, then the
- * machine-level home layer.
+ * Each composed layer's TEXT, in application order: one layer per entry of
+ * `dsh.profile.bundles`, then the profile's own layer, then the machine-level home
+ * layer.
  *
- * The walk {@link composeProfileLayers} classifies, unclassified. A second walk
- * would be a second answer to "which layers are there", and a reader that needs
- * raw text — the preset declaration fold slices a declaration's `plugins:` block
- * verbatim out of it — must not be able to disagree with the layer-stack view.
+ * A bundle's several patch files are the FILES of one layer, never layers of their
+ * own: the host's unit is the bundle package (`profile.layers` holds one entry per
+ * package with a `patchPaths` list), and a bundle is what a person can enable,
+ * disable or remove. A package listed twice in `dsh.profile.bundles` is two layers
+ * and stays two, because the host does apply it twice.
+ *
+ * This is the ONE walk that answers "which layers are there". {@link
+ * composeProfileLayers} classifies what it returns rather than walking again, and a
+ * reader that needs raw text — the preset declaration fold slices a declaration's
+ * `plugins:` block verbatim out of it — cannot disagree with the layer-stack view.
  * @param ctx - the dsh to read.
  * @param profile - the profile whose stack is composed.
  * @returns one entry per layer that exists, in the order dsh applies them.
@@ -139,31 +185,60 @@ export function composeLayerTexts(ctx: DshContext, profile: string): LayerText[]
   const { bundles } = readManifest(ctx, profile)
   const roots = moduleSearchRoots(ctx, profile)
   for (const bundle of bundles) {
-    for (const patchPath of resolveBundlePatches(ctx, bundle, profile, roots)) {
-      layers.push({ source: 'bundle', bundle, path: patchPath, text: readFileSync(patchPath, 'utf8') })
-    }
+    const found = resolveBundlePatchFiles(ctx, bundle, profile, roots)
+    if (found.length === 0) { cplog.debug('combo: bundle patch not found', { bundle, profile }); continue }
+    const many = found.length > 1
+    layers.push({
+      source: 'bundle',
+      bundle,
+      files: found.map(file => ({
+        ...(many ? { file: file.file } : {}),
+        path: file.path,
+        text: readFileSync(file.path, 'utf8'),
+      })),
+    })
   }
   const userText = readUserPatch(ctx, profile)
   if (userText.trim() !== '') {
-    layers.push({ source: 'profile', path: profilePatchPath(ctx, profile), text: userText })
+    layers.push({
+      source: 'profile',
+      label: profile,
+      files: [{ path: profilePatchPath(ctx, profile), text: userText }],
+    })
   }
   const homePath = homePatchPath(ctx)
   if (existsSync(homePath)) {
-    layers.push({ source: 'home', path: homePath, text: readFileSync(homePath, 'utf8') })
+    layers.push({ source: 'home', files: [{ path: homePath, text: readFileSync(homePath, 'utf8') }] })
   }
   return layers
 }
 
-/** Compose a profile's patch-layer stack in application order: each bundle
- * layer (in `dsh.profile.bundles` order), then the profile's own layer, then
- * the machine-level home layer. Used to render the layer-stack and trace which
- * source contributed (and possibly overrode) a given row id. */
+/** The conflict-report identity of one patch file: its layer's identity plus the
+ * file qualifier, which is what tells two files of one bundle apart. */
+function conflictLayerOf(layer: LayerText, file: LayerFileText): InsertConflictLayer {
+  return {
+    source: layer.source,
+    ...(layer.bundle === undefined ? {} : { bundle: layer.bundle }),
+    ...(layer.label === undefined ? {} : { label: layer.label }),
+    ...(file.file === undefined ? {} : { file: file.file }),
+  }
+}
+
+/**
+ * Compose a profile's patch-layer stack in application order. Used to render the
+ * layer-stack and trace which source contributed (and possibly overrode) a given
+ * row id. The walk itself is {@link composeLayerTexts}; this only classifies its
+ * rows.
+ */
 export function composeProfileLayers(ctx: DshContext, profile: string): ProfileLayer[] {
   return composeLayerTexts(ctx, profile).map(layer => ({
     source: layer.source,
     ...(layer.bundle === undefined ? {} : { bundle: layer.bundle }),
-    ...(layer.source === 'profile' ? { label: profile } : {}),
-    rows: parseClassifiedRows(layer.text),
+    ...(layer.label === undefined ? {} : { label: layer.label }),
+    files: layer.files.map(file => ({
+      ...(file.file === undefined ? {} : { file: file.file }),
+      rows: parseClassifiedRows(file.text),
+    })),
   }))
 }
 
@@ -173,32 +248,25 @@ export function composeProfileLayers(ctx: DshContext, profile: string): ProfileL
  * inserts in that order and hard-fails on a repeated id, so any entry here means
  * the profile cannot boot. A viewer-side pre-flight: it turns the host's
  * "duplicate loader entry id" stack trace into a named layer pair.
+ *
+ * File granularity is kept here, unlike the layer list: a conflict names the file
+ * that has to change, and two files of one bundle can collide with each other.
  */
 export function findInsertConflicts(
   ctx: DshContext, profile: string, extraPatches: readonly string[] = [],
 ): InsertConflict[] {
-  const layers: { source: InsertConflictLayer['source']; label?: string; bundle?: string; text: string }[] = []
-  const { bundles } = readManifest(ctx, profile)
-  const roots = moduleSearchRoots(ctx, profile)
-  for (const bundle of bundles) {
-    for (const patchPath of resolveBundlePatches(ctx, bundle, profile, roots)) {
-      layers.push({ source: 'bundle', bundle, text: readFileSync(patchPath, 'utf8') })
-    }
-  }
-  const userText = readUserPatch(ctx, profile)
-  if (userText.trim() !== '') layers.push({ source: 'profile', label: profile, text: userText })
-  const homePath = homePatchPath(ctx)
-  if (existsSync(homePath)) layers.push({ source: 'home', text: readFileSync(homePath, 'utf8') })
+  const layers: { layer: InsertConflictLayer; text: string }[] = composeLayerTexts(ctx, profile)
+    .flatMap(text => text.files.map(file => ({ layer: conflictLayerOf(text, file), text: file.text })))
   for (const file of extraPatches) {
     if (!existsSync(file)) continue
-    layers.push({ source: 'patch', label: basename(file), text: readFileSync(file, 'utf8') })
+    layers.push({ layer: { source: 'patch', label: basename(file) }, text: readFileSync(file, 'utf8') })
   }
 
   const byId = new Map<string, InsertConflictLayer[]>()
-  for (const layer of layers) {
-    for (const id of collectInsertIds(layer.text)) {
+  for (const { layer, text } of layers) {
+    for (const id of collectInsertIds(text)) {
       const list = byId.get(id) ?? []
-      list.push({ source: layer.source, bundle: layer.bundle, label: layer.label })
+      list.push(layer)
       byId.set(id, list)
     }
   }

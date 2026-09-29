@@ -655,6 +655,7 @@ const en: typeof zh = {
     'trash.clear': 'Empty',
 
     'profile.layer.bundle': 'bundle · {{name}}',
+    'profile.layer.bundleFile': 'bundle · {{name}} · {{file}}',
     'profile.layer.profile': 'profile · {{name}}',
     'profile.layer.home': 'home · machine-wide',
     'profile.detail.overview': 'Overview',
@@ -720,6 +721,7 @@ const en: typeof zh = {
     'profile.detail.nDepsMeta': '{{count}} deps',
     'profile.detail.stack': 'Layer stack',
     'profile.detail.layerMeta': '{{count}} row(s)',
+    'profile.detail.layerMetaFiles': '{{count}} row(s) · {{files}} patch files',
     'profile.detail.patchLayer': 'Overlay {{name}}',
     'profile.detail.insertConflictTitle': 'Duplicate inserted entry id detected',
     'profile.detail.insertConflictDesc': 'These loader entry ids are inserted by more than one layer, so the host fails to boot with "duplicate loader entry id". Remove one of the conflicting bundles/layers.',
