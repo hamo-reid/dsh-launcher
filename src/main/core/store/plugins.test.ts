@@ -430,6 +430,30 @@ describe('a reference that points at nothing', () => {
     const plain = rows.find(r => r.name === 'plain')!
     expect(plain.usage[0].broken).toBeUndefined()
   })
+
+  it('sees a dangling node_modules junction, which existsSync cannot', () => {
+    // The other way a reference breaks: the manifest is clean but pnpm left a
+    // link whose target is gone. `existsSync` reads it as absent, so the package
+    // would drop out of the usage list entirely and the row would claim the
+    // profile does not use it — while the junction still pins whatever it aimed at.
+    const homeD = join(root, 'home-dangling')
+    const base = join(homeD, 'profiles')
+    const myStore = join(store(), 'out4')
+    mkdirSync(myStore, { recursive: true })
+    writeFileSync(join(myStore, 'package.json'), JSON.stringify({ dependencies: {} }))
+    mkProfile(base, 'p1', { dependencies: { dangling: '^1.0.0' } })
+    const gone = join(root, 'a-version-that-was-upgraded-away')
+    try {
+      symlinkSync(gone, join(base, 'p1', 'node_modules', 'dangling'), 'junction')
+    } catch {
+      return // a filesystem that refuses junctions: nothing to assert here
+    }
+
+    const rows = buildInstalledOverview([scope('d', homeD)], myStore)
+    const dangling = rows.find(r => r.name === 'dangling')!
+    expect(dangling.usage).toHaveLength(1)
+    expect(dangling.usage[0].broken).toBe(true)
+  })
 })
 
 describe('removeArchivedVersion', () => {

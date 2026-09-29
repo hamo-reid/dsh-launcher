@@ -82,11 +82,6 @@ export function readRef(pkg: string, profileDir: string, spec: string | undefine
   }
 }
 
-/** A package name that can be embedded in a `.trash` / `.pack` path segment. */
-export function pathSegment(name: string): string {
-  return name.replace(/[\\/]/g, '+')
-}
-
 /** Read a manifest's dependencies, tolerating an absent or unreadable file. */
 export function readDeps(manifestPath: string): Record<string, string> {
   try {
