@@ -23,8 +23,8 @@ import type {
 /** One selectable compare host: an installed dsh plus its profiles. */
 export interface HostOption { id: string; name: string; version?: string; profiles: string[] }
 
-/** A run result shown in the output modal (build / install). */
-export interface RunOutput { name: string; ok: boolean; text: string; command: string; cwd: string }
+/** A run result shown in the output modal (build / install / snapshot). */
+export interface RunOutput { name: string; ok: boolean; text: string; command: string; cwd: string; notes?: string[] }
 
 /** The report an open dialog is showing. Its `meta` carries the chain it was
  * computed for, so a cached verdict never reads as a fresh one elsewhere. */
@@ -177,7 +177,6 @@ export function useDevPlugins(): DevPluginsApi {
     if (r.value.ok) void message.success(t('plugin.dev.actionDone', { name }))
     setOutput({ name, ok: r.value.ok, text: r.value.text, command: r.value.command, cwd: r.value.cwd })
   }
-
   /** Run the remembered/default build target, or one picked from the menu. */
   const runBuild = async (name: string, at?: DevBuildTarget): Promise<void> => {
     if (at === undefined && buildTargets[name]?.current === undefined) {
@@ -220,12 +219,32 @@ export function useDevPlugins(): DevPluginsApi {
     await load()
   }
 
-  const snapshot = async (name: string): Promise<void> => {
+  /**
+   * Archive the dev package into the store. `targets` additionally switches those
+   * profiles off their `link:` onto the archive, so graduating is one action.
+   */
+  const snapshot = async (name: string, targets?: { dshId: string; profile: string }[]): Promise<void> => {
     setBusy(`snap:${name}`)
-    const r = await window.api.plugins.devSnapshot(name)
+    const r = await window.api.plugins.devSnapshot(name, targets)
     setBusy('')
     if (!r.ok) { void message.error(apiErrorText(r)); return }
-    void message.success(t('plugin.dev.snapshotDone', { name }))
+    const shot = r.value
+    // An uninstalled dev repo is the one failure with a one-command fix, so it
+    // gets its own message rather than a wall of pnpm output.
+    if (shot.needsInstall === true) {
+      void message.warning(t('plugin.dev.snapshotNeedsInstall', { name }))
+    } else {
+      void message.success(t('plugin.dev.snapshotDone', { name }))
+    }
+    setOutput({
+      name,
+      ok: shot.ok,
+      text: shot.text,
+      command: shot.command,
+      cwd: shot.cwd,
+      ...(shot.warnings !== undefined ? { notes: shot.warnings } : {}),
+    })
+    await load()
   }
 
   const unregister = async (name: string): Promise<void> => {

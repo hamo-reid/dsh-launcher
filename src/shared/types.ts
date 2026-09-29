@@ -398,6 +398,8 @@ export interface DevPatchRow {
   from?: string
   /** Where a PROFILE-scoped resolution found it, when that differs from `dir`. */
   profileDir?: string
+  /** The patch file the row came from. A bundle may declare several. */
+  file: string
 }
 
 /** One peer the dev package needs, with its resolution result. */
@@ -438,7 +440,10 @@ export interface DevDiagnosis {
   /** The package's `exports`/`main` target is missing → needs a build. */
   entryMissing: boolean
   entry?: string
+  /** The first declared patch file (the bundle's identity for caching). */
   patch?: string
+  /** Every declared patch file, when the bundle declares more than one. */
+  patches?: string[]
   /** Patch rows (the modules dsh actually loads), each resolved or not. */
   patchRows: DevPatchRow[]
   missingPatchRows: string[]
@@ -461,6 +466,20 @@ export interface DevRunResult {
   text: string
   command: string
   cwd: string
+}
+
+/** Result of archiving a dev package into the store ("graduating" it). */
+export interface DevSnapshotResult extends DevRunResult {
+  /** The archived version, once it landed. */
+  version?: string
+  /** An archive of the same version was replaced rather than kept. */
+  replaced?: boolean
+  /** Profiles switched from a `link:` to the archived copy. */
+  installed?: { profile: string; text: string }[]
+  /** The dev repo's own dependencies must be installed before it can be packed. */
+  needsInstall?: boolean
+  /** Non-blocking notes (e.g. peers the host provides and the archive omits). */
+  warnings?: string[]
 }
 
 /** What `profile:load` returns for one profile. */

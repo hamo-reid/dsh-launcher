@@ -26,7 +26,7 @@ import { openDatabase, saveSettings } from '../settings/settings.ts'
 import { contextForEntry } from '../profile/appState.ts'
 import {
   buildDevPlugin, cachedDiagnosis, defaultDevBuild, devScriptOptions, diagnoseDevPlugin, findWorkspaceRoot, listDevPlugins,
-  registerDevPlugin, removeDevPlugin, shimDevPeers, unshimDevPeers,
+  preSnapshotChecks, registerDevPlugin, removeDevPlugin, shimDevPeers, unshimDevPeers,
 } from './dev.ts'
 
 let root: string
@@ -117,6 +117,58 @@ describe('diagnoseDevPlugin', () => {
     expect(diagnoseDevPlugin(registerDevPlugin(pkgDir()), ctx()).entryMissing).toBe(true)
   })
 
+  it('judges every patch file of an array-form declaration', () => {
+    // 0.2.0-rc.1's own dsh-web-app declares FIVE patch files as a list. Reading
+    // only the first would judge one file of five and report the package healthy
+    // — the same class of bug the store's array-form reader had.
+    makeMonorepo()
+    writePkg(pkgDir(), {
+      name: '@me/dsh-foo',
+      version: '0.1.0',
+      exports: { '.': './dist/index.js' },
+      dsh: { bundle: { patch: ['cordis.patch.yml', 'presets/standard.patch.yml'] } },
+    }, { 'dist/index.js': 'export {}\n' })
+    writeFileSync(join(pkgDir(), 'cordis.patch.yml'), '- id: graph\n  name: "@me/dsh-graph"\n')
+    mkdirSync(join(pkgDir(), 'presets'), { recursive: true })
+    writeFileSync(join(pkgDir(), 'presets', 'standard.patch.yml'), '- id: preset\n  name: "@me/dsh-gone"\n')
+    writePkg(join(pkgDir(), 'node_modules', '@me', 'dsh-graph'), { name: '@me/dsh-graph', version: '0.1.0' })
+
+    const dev = registerDevPlugin(pkgDir())
+    expect(dev.bundle).toBe(true)
+    const diag = diagnoseDevPlugin(dev, ctx())
+    expect(diag.patches).toEqual([
+      join(pkgDir(), 'cordis.patch.yml'),
+      join(pkgDir(), 'presets', 'standard.patch.yml'),
+    ])
+    expect(diag.patchRows.map(r => [r.id, r.file])).toEqual([
+      ['graph', join(pkgDir(), 'cordis.patch.yml')],
+      ['preset', join(pkgDir(), 'presets', 'standard.patch.yml')],
+    ])
+    // The row from the SECOND file is what proves it was read.
+    expect(diag.missingPatchRows).toEqual(['@me/dsh-gone'])
+  })
+
+  it('re-diagnoses when a later patch file of a list changes', () => {
+    makeMonorepo()
+    writePkg(pkgDir(), {
+      name: '@me/dsh-foo', version: '0.1.0', exports: { '.': './dist/index.js' },
+      dsh: { bundle: { patch: ['cordis.patch.yml', 'presets/standard.patch.yml'] } },
+    }, { 'dist/index.js': 'export {}\n' })
+    writeFileSync(join(pkgDir(), 'cordis.patch.yml'), '- id: graph\n  name: "@me/dsh-graph"\n')
+    mkdirSync(join(pkgDir(), 'presets'), { recursive: true })
+    const second = join(pkgDir(), 'presets', 'standard.patch.yml')
+    writeFileSync(second, '- id: preset\n  name: "@me/dsh-graph"\n')
+    writePkg(join(pkgDir(), 'node_modules', '@me', 'dsh-graph'), { name: '@me/dsh-graph', version: '0.1.0' })
+
+    const dev = registerDevPlugin(pkgDir())
+    expect(cachedDiagnosis(dev, ctx()).missingPatchRows).toEqual([])
+    // Only the SECOND file changes; a cache keyed on the first would miss this.
+    const later = new Date(Date.now() + 10_000)
+    writeFileSync(second, '- id: preset\n  name: "@me/dsh-vanished"\n')
+    utimesSync(second, later, later)
+    expect(cachedDiagnosis(dev, ctx()).missingPatchRows).toEqual(['@me/dsh-vanished'])
+  })
+
   it('resolves the patch rows dsh loads, reporting the missing ones', () => {
     makeMonorepo()
     writeFileSync(join(pkgDir(), 'cordis.patch.yml'), [
@@ -130,12 +182,13 @@ describe('diagnoseDevPlugin', () => {
     writePkg(join(pkgDir(), 'node_modules', '@me', 'dsh-graph'), { name: '@me/dsh-graph', version: '0.1.0' })
 
     const diag = diagnoseDevPlugin(registerDevPlugin(pkgDir()), ctx())
+    const patch = join(pkgDir(), 'cordis.patch.yml')
     expect(diag.patchRows).toEqual([
       {
-        id: 'graph', name: '@me/dsh-graph', nameFrom: 'row',
+        id: 'graph', name: '@me/dsh-graph', nameFrom: 'row', file: patch,
         dir: join(pkgDir(), 'node_modules', '@me', 'dsh-graph'), root: 'monorepo', state: 'ok',
       },
-      { id: 'gone', name: '@me/dsh-gone', nameFrom: 'row' },
+      { id: 'gone', name: '@me/dsh-gone', nameFrom: 'row', file: patch },
     ])
     expect(diag.missingPatchRows).toEqual(['@me/dsh-gone'])
   })
@@ -151,6 +204,7 @@ describe('diagnoseDevPlugin', () => {
       id: 'web',
       name: '@deepseek-ai/dsh-web-app',
       nameFrom: 'row',
+      file: join(pkgDir(), 'cordis.patch.yml'),
       dir: join(anchor(), 'node_modules', '@deepseek-ai', 'dsh-web-app'),
       root: 'host',
       state: 'ok',
@@ -182,6 +236,32 @@ describe('diagnoseDevPlugin', () => {
       root: 'monorepo',
       state: 'ok',
     }])
+  })
+})
+
+describe('preSnapshotChecks', () => {
+  it('blocks on an unbuilt package instead of archiving a shell', () => {
+    makeMonorepo()
+    rmSync(join(pkgDir(), 'dist'), { recursive: true, force: true })
+    const checks = preSnapshotChecks(registerDevPlugin(pkgDir()), ctx())
+    expect(checks.blockers).toHaveLength(1)
+    expect(checks.blockers[0]).toContain('构建')
+  })
+
+  it('blocks on a patch row nothing can load', () => {
+    makeMonorepo()
+    writeFileSync(join(pkgDir(), 'cordis.patch.yml'), '- id: gone\n  name: "@me/dsh-gone"\n')
+    const checks = preSnapshotChecks(registerDevPlugin(pkgDir()), ctx())
+    expect(checks.blockers.join()).toContain('@me/dsh-gone')
+  })
+
+  it('warns about peers WITHOUT blocking — the host supplies them by design', () => {
+    // The behaviour the whole snapshot path was rebuilt around: the archive must
+    // NOT carry its own copy of the host services.
+    makeMonorepo()
+    const checks = preSnapshotChecks(registerDevPlugin(pkgDir()), ctx())
+    expect(checks.blockers).toEqual([])
+    expect(checks.warnings.join()).toContain('@deepseek-ai/dsh-base')
   })
 })
 
@@ -324,7 +404,9 @@ describe('resolution against a pnpm-shaped host', () => {
     makeMonorepo()
     writeFileSync(join(pkgDir(), 'cordis.patch.yml'), '- id: nobody-knows-me\n  disabled: true\n')
     const diag = diagnoseDevPlugin(registerDevPlugin(pkgDir()), ctx())
-    expect(diag.patchRows[0]).toEqual({ id: 'nobody-knows-me', name: '', nameFrom: 'row' })
+    expect(diag.patchRows[0]).toEqual({
+      id: 'nobody-knows-me', name: '', nameFrom: 'row', file: join(pkgDir(), 'cordis.patch.yml'),
+    })
     expect(diag.unknownIds).toEqual(['nobody-knows-me'])
     expect(diag.missingPatchRows).toEqual([])
   })

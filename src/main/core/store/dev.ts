@@ -23,12 +23,17 @@ import { loadSettings, updateSettings } from '../settings/settings.ts'
 import { parseNamedRows } from '../patch/patch.ts'
 import { bindingFor, forgetModuleIndex, moduleIndexFor } from './module-index.ts'
 import { packageOf, resolveModule, type ResolvedModule } from './module-resolve.ts'
+import { bundlePatchPaths, declaredBundlePatches } from './bundle-manifest.ts'
+import { installIntoProfile, installSource } from './install.ts'
+import { latestStoreVersion } from './layout.ts'
+import { packDevPackage } from './pack.ts'
+import { profilesDir } from '../profile/home.ts'
 import { runPnpm } from '../dsh/pnpm.ts'
 import { createKeyedCache } from '../shared/keyed-cache.ts'
 import { logger } from '../shared/logger.ts'
 import type { DshContext } from '../profile/appState.ts'
 import type {
-  DevBuildTarget, DevDiagnosis, DevPatchRow, DevPeer, DevPlugin, DevRunResult, DevScriptOptions,
+  DevBuildTarget, DevDiagnosis, DevPatchRow, DevPeer, DevPlugin, DevRunResult, DevScriptOptions, DevSnapshotResult,
 } from '../../../shared/types.ts'
 
 
@@ -41,7 +46,6 @@ interface DevManifest {
   exports?: unknown
   dependencies?: Record<string, string>
   peerDependencies?: Record<string, string>
-  dsh?: { bundle?: { patch?: string } }
 }
 
 /** Bare specifiers imported by built code: `from 'x'`, `import 'x'`,
@@ -151,7 +155,7 @@ export function registerDevPlugin(dir: string): DevPlugin {
     dir: target,
     ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
     ...(typeof m.version === 'string' && m.version !== '' ? { version: m.version } : {}),
-    bundle: typeof m.dsh?.bundle?.patch === 'string' && m.dsh.bundle.patch.trim() !== '',
+    bundle: declaredBundlePatches(target).length > 0,
     addedAt: new Date().toISOString(),
   }
   updateSettings((draft) => {
@@ -190,10 +194,12 @@ interface DiagnoseOptions {
   dsh?: { id: string; name: string; version: string }
 }
 
-/** The dev bundle's patch file (its `dsh.bundle.patch`), when the manifest has one. */
-function devPatchFile(m: DevManifest, dir: string): string | undefined {
-  const rel = m.dsh?.bundle?.patch
-  return typeof rel === 'string' && rel.trim() !== '' ? join(dir, rel) : undefined
+/** The dev bundle's patch files (its `dsh.bundle.patch`), when it declares any. A
+ * declaration may be one path or an ordered LIST — 0.2.0-rc.1's own
+ * `@deepseek-ai/dsh-web-app` ships five — and reading only the first would judge
+ * one file out of five and report the package as healthy. */
+function devPatchFiles(dir: string): string[] {
+  return bundlePatchPaths(dir)
 }
 
 /**
@@ -213,22 +219,31 @@ export function diagnoseDevPlugin(dev: DevPlugin, ctx: DshContext, opts: Diagnos
   const entry = rel !== undefined ? resolve(dev.dir, rel) : undefined
   const entryMissing = entry !== undefined ? !existsSync(entry) : !existsSync(join(dev.dir, 'index.js'))
 
-  // The patch rows are the modules dsh loads — the real resolution surface.
-  const patch = devPatchFile(m, dev.dir)
-  const rawRows = patch !== undefined && existsSync(patch)
-    ? (() => { try { return parseNamedRows(readFileSync(patch, 'utf8')) } catch { return [] } })()
-    : []
+  // The patch rows are the modules dsh loads — the real resolution surface. A
+  // bundle may declare several patch files; each is judged, and every row says
+  // which file it came from.
+  const patches = devPatchFiles(dev.dir)
+  const namedRows = patches.flatMap((file) => {
+    try {
+      return parseNamedRows(readFileSync(file, 'utf8')).map(row => ({ ...row, file }))
+    } catch {
+      return []
+    }
+  })
+  // The index is keyed on the FIRST patch file: that is the identity of the
+  // dev bundle's declaration for cache purposes (see `module-index.ts`).
+  const patch = patches[0]
   const index = moduleIndexFor(
-    ctx, opts.profile, { source: m.name ?? dev.name, rows: rawRows }, patch, opts.refresh === true,
+    ctx, opts.profile, { source: m.name ?? dev.name, rows: namedRows }, patch, opts.refresh === true,
   )
 
-  const patchRows: DevPatchRow[] = rawRows.map((row) => {
+  const patchRows: DevPatchRow[] = namedRows.map((row) => {
     // A row names its package, or addresses one an earlier layer inserted by id.
     const own = (row.name ?? '').trim()
     const binding = own === '' ? bindingFor(index, row.id) : undefined
     const name = own !== '' ? own : binding?.name ?? ''
     const from = binding === undefined ? undefined : binding.source
-    if (name === '') return { id: row.id, name: '', nameFrom: 'row' as const }
+    if (name === '') return { id: row.id, name: '', nameFrom: 'row' as const, file: row.file }
     const hit = resolveDevRef(dev, ctx, name, opts.profile)
     // What the chosen PROFILE alone would resolve (no dev tree): the verdict a
     // snapshot/copy install of this plugin inside that profile would get.
@@ -238,6 +253,7 @@ export function diagnoseDevPlugin(dev: DevPlugin, ctx: DshContext, opts: Diagnos
       id: row.id,
       name,
       nameFrom: own !== '' ? ('row' as const) : ('index' as const),
+      file: row.file,
       ...(pkg !== name ? { pkg } : {}),
       ...(hit !== undefined ? { dir: hit.dir, root: hit.root, state: hit.state, ...(hit.link !== undefined ? { link: hit.link } : {}) } : {}),
       ...(from !== undefined ? { from } : {}),
@@ -273,6 +289,7 @@ export function diagnoseDevPlugin(dev: DevPlugin, ctx: DshContext, opts: Diagnos
     entryMissing,
     ...(entry !== undefined ? { entry } : {}),
     ...(patch !== undefined ? { patch } : {}),
+    ...(patches.length > 1 ? { patches } : {}),
     patchRows,
     missingPatchRows,
     peers,
@@ -308,11 +325,13 @@ function stamp(path: string | undefined): string {
   }
 }
 
-/** Everything a diagnosis result depends on that a file mtime cannot express. */
-function diagKey(dev: DevPlugin, ctx: DshContext, opts: DiagnoseOptions, patch: string | undefined): string {
+/** Everything a diagnosis result depends on that a file mtime cannot express.
+ * Every declared patch file is stamped: a bundle that ships five is judged on all
+ * five, so editing the fourth must invalidate the report too. */
+function diagKey(dev: DevPlugin, ctx: DshContext, opts: DiagnoseOptions, patches: string[]): string {
   return [
     ctx.execPath, ctx.home, ctx.version, opts.profile ?? '', opts.dsh?.id ?? '',
-    dev.dir, (dev.shims ?? []).join(','), stamp(patch),
+    dev.dir, (dev.shims ?? []).join(','), ...patches.map(stamp),
   ].join('\u0000')
 }
 
@@ -320,9 +339,7 @@ function diagKey(dev: DevPlugin, ctx: DshContext, opts: DiagnoseOptions, patch: 
  * `refresh` asks). The report's `meta.at` is the time it was COMPUTED, so a
  * served-from-cache verdict still shows its real age. */
 export function cachedDiagnosis(dev: DevPlugin, ctx: DshContext, opts: DiagnoseOptions = {}): DevDiagnosis {
-  let m: DevManifest = {}
-  try { m = readManifest(dev.dir) } catch { /* unreadable manifest → empty */ }
-  const key = diagKey(dev, ctx, opts, devPatchFile(m, dev.dir))
+  const key = diagKey(dev, ctx, opts, devPatchFiles(dev.dir))
   return diagCache.get(key, () => diagnoseDevPlugin(dev, ctx, opts), { refresh: opts.refresh === true })
 }
 
@@ -468,4 +485,123 @@ export async function installDevDeps(dev: DevPlugin): Promise<DevRunResult> {
   const result = await runPnpm(cwd, args, undefined, { skipStoreDir: true })
   logger.info(`dev plugin install: ${dev.name} → ${result.ok ? 'ok' : 'failed'}`)
   return { ok: result.ok, text: result.text, command: result.command ?? `pnpm ${args.join(' ')}`, cwd }
+}
+
+// ── snapshot (graduate a dev package into the store) ─────────────────────────
+
+/** What a snapshot would do, decided before it does anything: `blockers` stop it
+ * because the archive would be broken or misleading, `warnings` are things the
+ * user should know that are not wrong.
+ *
+ * A missing peer is deliberately NOT a blocker and never will be: host-service
+ * peers are supplied by the profile at run time, and the whole point of the
+ * snapshot is that the archive does NOT carry its own copy of them. */
+export interface SnapshotChecks {
+  blockers: string[]
+  warnings: string[]
+}
+
+/** Judge the dev package against the target the snapshot would be judged against
+ * anyway, so a snapshot cannot produce an archive the diagnosis would reject. */
+export function preSnapshotChecks(dev: DevPlugin, ctx: DshContext, opts: DiagnoseOptions = {}): SnapshotChecks {
+  const diag = cachedDiagnosis(dev, ctx, { ...opts, refresh: opts.refresh === true })
+  const blockers: string[] = []
+  const warnings: string[] = []
+  if (diag.entryMissing) {
+    blockers.push('插件尚未构建（找不到入口文件）。请先执行构建脚本再快照。')
+  }
+  if (diag.unknownIds.length > 0) {
+    blockers.push(`补丁中有 ${diag.unknownIds.length} 个 entry id 在该组合中找不到对应插件：${diag.unknownIds.join('、')}`)
+  }
+  if (diag.missingPatchRows.length > 0) {
+    blockers.push(`补丁引用的以下包无法解析：${diag.missingPatchRows.join('、')}`)
+  }
+  if (diag.missingPeers.length > 0) {
+    warnings.push(`以下 peer 由宿主/profile 提供，不会打包进归档：${diag.missingPeers.join('、')}`)
+  }
+  if (diag.peers.length === 0 && diag.patchRows.length > 0) {
+    warnings.push('未发现任何 peer 依赖；若该插件需要 dsh 运行时服务，请确认它们已在 peerDependencies 中声明。')
+  }
+  return { blockers, warnings }
+}
+
+/** A profile a snapshot should also switch over, so graduating is one step. Each
+ * target carries its own context: profiles live under a dsh install, and one
+ * snapshot may retire a dev link in several of them. */
+export interface SnapshotTarget { ctx: DshContext; profile: string }
+
+/** Options for one snapshot run. */
+export interface SnapshotOptions extends DiagnoseOptions {
+  /** The plugin store to archive into. */
+  storeDir: string
+  /** Profiles to switch from `link:` to the archive in the same run. */
+  targets?: readonly SnapshotTarget[]
+}
+
+/**
+ * Graduate a dev package into the store: pack it, archive the tarball, and
+ * optionally point profiles at the archive.
+ *
+ * The archive REPLACES the version already stored under the same number. That is
+ * the point — a developer iterating on one version number expects the archive to
+ * track the source, and the alternative (keeping the old copy) reports success
+ * while storing the previous state.
+ */
+export async function snapshotDevPlugin(dev: DevPlugin, ctx: DshContext, opts: SnapshotOptions): Promise<DevSnapshotResult> {
+  const checks = preSnapshotChecks(dev, ctx, opts)
+  if (checks.blockers.length > 0) {
+    return {
+      ok: false,
+      text: checks.blockers.join('\n'),
+      command: '',
+      cwd: dev.dir,
+      warnings: checks.warnings,
+    }
+  }
+  const packed = await packDevPackage(dev, opts.storeDir)
+  if (!packed.ok) {
+    return {
+      ok: false,
+      text: packed.text,
+      command: packed.command,
+      cwd: packed.cwd,
+      ...(packed.needsInstall === true ? { needsInstall: true } : {}),
+      ...(checks.warnings.length > 0 ? { warnings: checks.warnings } : {}),
+    }
+  }
+  const archived = await installSource(opts.storeDir, dev.name, `file:${packed.tgz}`, undefined, { replace: true })
+  if (!archived.ok) {
+    return { ok: false, text: `${packed.text}\n${archived.text}`, command: packed.command, cwd: packed.cwd, warnings: checks.warnings }
+  }
+  const version = latestStoreVersion(opts.storeDir, dev.name)
+  const installed: { profile: string; text: string }[] = []
+  for (const target of opts.targets ?? []) {
+    const linked = await installIntoProfile(
+      profilesDir(target.ctx), target.profile, dev.name, opts.storeDir,
+      ...(version !== undefined ? [{ version }] : []),
+    )
+    if (linked.ok) installed.push({ profile: target.profile, text: linked.text })
+    else return {
+      ok: false,
+      text: `已归档 ${dev.name}@${version ?? '?'}，但切换 profile「${target.profile}」失败：${linked.text}`,
+      command: packed.command,
+      cwd: packed.cwd,
+      ...(version !== undefined ? { version } : {}),
+      installed,
+      warnings: checks.warnings,
+    }
+  }
+  const replaced = archived.text.startsWith('已替换归档')
+  logger.info(`dev snapshot: ${dev.name} → ${version ?? '?'}${replaced ? ' (replaced)' : ''}`)
+  forgetDevDiagnosis()
+  return {
+    ok: true,
+    text: [packed.text, archived.text, ...installed.map(i => `${i.profile}: ${i.text}`)].join('\n'),
+    command: packed.command,
+    cwd: packed.cwd,
+    ...(version !== undefined ? { version } : {}),
+    ...(replaced ? { replaced: true } : {}),
+    ...(installed.length > 0 ? { installed } : {}),
+    ...(checks.warnings.length > 0 ? { warnings: checks.warnings } : {}),
+  }
 }

@@ -3,7 +3,7 @@
  * be copied and re-run outside the launcher — the point of the dialog is that the
  * command is reproducible by hand.
  */
-import { Button, Input, Modal, Space, Typography, theme } from 'antd'
+import { Alert, Button, Input, Modal, Space, Typography, theme } from 'antd'
 import { useTranslation } from 'react-i18next'
 import FieldLabel from '../../../components/FieldLabel.tsx'
 import { MODAL } from '../../../theme.ts'
@@ -28,6 +28,10 @@ export default function DevOutputModal({ output, onClose }: Props): JSX.Element 
       width={MODAL.wide}
     >
       <Space orientation="vertical" size="small" style={{ width: '100%' }}>
+        {/* Notes the run succeeded WITH — what it deliberately left out. */}
+        {output !== null && output.notes !== undefined && output.notes.length > 0 && (
+          <Alert type="info" showIcon title={t('plugin.dev.runNotes')} description={output.notes.join('\n')} />
+        )}
         <div>
           <FieldLabel>{t('plugin.dev.runCwd')}</FieldLabel>
           <div style={{ fontFamily: 'monospace', fontSize: token.fontSizeSM, wordBreak: 'break-all' }}>{output?.cwd ?? ''}</div>

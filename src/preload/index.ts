@@ -20,6 +20,7 @@ import type {
   DevLinkMode,
   DevPlugin,
   DevRunResult,
+  DevSnapshotResult,
   DevScriptOptions,
   DownloadSessionInfo,
   GithubAuthState,
@@ -322,8 +323,8 @@ const api = {
       ipcRenderer.invoke('plugins:devLinkToProfile', dshId, profile, name, mode),
     devRepairLink: (dshId: string, profile: string, name: string, opts?: { inSource?: boolean }): Promise<IpcResult<string>> =>
       ipcRenderer.invoke('plugins:devRepairLink', dshId, profile, name, opts),
-    devSnapshot: (name: string): Promise<IpcResult<string>> =>
-      ipcRenderer.invoke('plugins:devSnapshot', name),
+    devSnapshot: (name: string, targets?: { dshId: string; profile: string }[]): Promise<IpcResult<DevSnapshotResult>> =>
+      ipcRenderer.invoke('plugins:devSnapshot', name, targets),
     devReveal: (name: string): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('plugins:devReveal', name),
     devRevealWorkspace: (name: string): Promise<IpcResult<boolean>> =>

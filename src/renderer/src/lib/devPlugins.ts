@@ -8,7 +8,7 @@
  * this module inside the vitest include.
  */
 import { fmtDateTime } from './format.ts'
-import type { DevBuildScope, DevDiagnosis, DevDiagnosisMeta, DevResolveRoot, DevResolveState } from '../../../shared/types.ts'
+import type { DevBuildScope, DevDiagnosis, DevDiagnosisMeta, DevPatchRow, DevResolveRoot, DevResolveState } from '../../../shared/types.ts'
 
 // ── the remembered compare target ───────────────────────────────────────────
 
@@ -97,8 +97,43 @@ export function resolveDescriptor(
   return { kind: 'resolved', root: hit.root ?? 'monorepo', peer }
 }
 
-// ── what a report was computed against ──────────────────────────────────────
+// ── the patch rows a bundle declares ────────────────────────────────────────
 
+/** Patch rows under the file they came from. */
+export interface PatchRowGroup { file: string; label: string; rows: DevPatchRow[] }
+
+/** The last path segment, for a heading that must not wrap into a full path. */
+function tail(path: string): string {
+  const at = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  return at === -1 ? path : path.slice(at + 1)
+}
+
+/**
+ * Group patch rows by their patch file, keeping the files in declared order.
+ *
+ * A bundle may declare several patch files — 0.2.0-rc.1's own `dsh-web-app`
+ * ships five — and the rows of each are judged separately, so the report has to
+ * say which file a row came from. A single-file bundle stays ONE group with no
+ * file, which keeps the common case rendering exactly as it did before.
+ */
+export function groupPatchRows(rows: readonly DevPatchRow[], many: boolean): PatchRowGroup[] {
+  if (!many) return rows.length === 0 ? [] : [{ file: '', label: '', rows: [...rows] }]
+  const groups: PatchRowGroup[] = []
+  const byFile = new Map<string, DevPatchRow[]>()
+  for (const row of rows) {
+    const bucket = byFile.get(row.file)
+    if (bucket === undefined) {
+      const fresh: DevPatchRow[] = [row]
+      byFile.set(row.file, fresh)
+      groups.push({ file: row.file, label: tail(row.file), rows: fresh })
+    } else {
+      bucket.push(row)
+    }
+  }
+  return groups
+}
+
+// ── what a report was computed against ──────────────────────────────────────
 /** The chain a verdict belongs to, as an i18n key plus its params. A verdict is
  * not readable without the chain it was computed for, so the two travel together
  * everywhere one is shown. */

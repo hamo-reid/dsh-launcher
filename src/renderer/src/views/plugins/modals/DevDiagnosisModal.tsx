@@ -14,7 +14,7 @@
 import { Alert, Button, Dropdown, Select, Space, Tag, Tooltip, theme } from 'antd'
 import type { MenuProps } from 'antd'
 import { useTranslation } from 'react-i18next'
-import { hostLabel, parseBuildKey, resolveDescriptor, scopeLabel, type DevTarget } from '../../../lib/devPlugins.ts'
+import { groupPatchRows, hostLabel, parseBuildKey, resolveDescriptor, scopeLabel, type DevTarget } from '../../../lib/devPlugins.ts'
 import FieldLabel from '../../../components/FieldLabel.tsx'
 import ScrollModal from '../../../components/ScrollModal.tsx'
 import { MODAL } from '../../../theme.ts'
@@ -139,22 +139,38 @@ export default function DevDiagnosisModal({
             <FieldLabel>{t('plugin.dev.diagPatchRows')}</FieldLabel>
             {report.diag.patchRows.length === 0
               ? <span style={{ color: token.colorTextSecondary }}>{t('plugin.dev.diagNoPatch')}</span>
-              : report.diag.patchRows.map(r => (
-                <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0', flexWrap: 'wrap' }}>
-                  <Tag style={{ fontFamily: 'monospace' }}>{r.id}</Tag>
-                  <span style={{ fontFamily: 'monospace', fontSize: token.fontSizeSM }}>{r.name === '' ? '-' : r.name}</span>
-                  {r.nameFrom === 'index' && r.from !== undefined && (
-                    <Tooltip title={t('plugin.dev.diagInferredHint')}>
-                      <Tag color="blue">{t('plugin.dev.diagInferred', { source: r.from })}</Tag>
+              : groupPatchRows(report.diag.patchRows, (report.diag.patches?.length ?? 0) > 1).map(group => (
+                <div key={group.file || 'rows'}>
+                  {/* A bundle may declare several patch files (0.2.0-rc.1's own
+                      dsh-web-app ships five); only then is the file a heading. */}
+                  {group.label !== '' && (
+                    <Tooltip title={group.file}>
+                      <div style={{ color: token.colorTextTertiary, fontSize: token.fontSizeSM, margin: '6px 0 2px', fontFamily: 'monospace', width: 'fit-content' }}>
+                        {group.label}
+                      </div>
                     </Tooltip>
                   )}
-                  {r.pkg !== undefined && <Tag>{t('plugin.dev.diagSubpath')}</Tag>}
-                  {r.name === '' ? null : resolveTag(r)}
-                  {r.profileDir !== undefined && (
-                    <Tooltip title={r.profileDir}>
-                      <Tag color="cyan">{t('plugin.dev.diagInProfile')}</Tag>
-                    </Tooltip>
-                  )}
+                  {group.rows.map(r => (
+                    <div
+                      key={`${group.file}:${r.id}`}
+                      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0', flexWrap: 'wrap' }}
+                    >
+                      <Tag style={{ fontFamily: 'monospace' }}>{r.id}</Tag>
+                      <span style={{ fontFamily: 'monospace', fontSize: token.fontSizeSM }}>{r.name === '' ? '-' : r.name}</span>
+                      {r.nameFrom === 'index' && r.from !== undefined && (
+                        <Tooltip title={t('plugin.dev.diagInferredHint')}>
+                          <Tag color="blue">{t('plugin.dev.diagInferred', { source: r.from })}</Tag>
+                        </Tooltip>
+                      )}
+                      {r.pkg !== undefined && <Tag>{t('plugin.dev.diagSubpath')}</Tag>}
+                      {r.name === '' ? null : resolveTag(r)}
+                      {r.profileDir !== undefined && (
+                        <Tooltip title={r.profileDir}>
+                          <Tag color="cyan">{t('plugin.dev.diagInProfile')}</Tag>
+                        </Tooltip>
+                      )}
+                    </div>
+                  ))}
                 </div>
               ))}
           </div>

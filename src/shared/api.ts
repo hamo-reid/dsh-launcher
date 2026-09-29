@@ -23,6 +23,7 @@ import type {
   DevLinkMode,
   DevPlugin,
   DevRunResult,
+  DevSnapshotResult,
   DevScriptOptions,
   DownloadSessionInfo,
   GithubAuthState,
@@ -318,8 +319,9 @@ export interface WindowApi {
     /** Attach to a profile: `link` (live) or `copy` (snapshot then install). */
     devLinkToProfile: (dshId: string, profile: string, name: string, mode: DevLinkMode) => Promise<IpcResult<string>>
     devRepairLink: (dshId: string, profile: string, name: string, opts?: { inSource?: boolean }) => Promise<IpcResult<string>>
-    /** Archive the current source state into the store (graduate). */
-    devSnapshot: (name: string) => Promise<IpcResult<string>>
+    /** Archive the current source state into the store (graduate). `targets`
+     *  additionally switches those profiles from their `link:` to the archive. */
+    devSnapshot: (name: string, targets?: { dshId: string; profile: string }[]) => Promise<IpcResult<DevSnapshotResult>>
     devReveal: (name: string) => Promise<IpcResult<boolean>>
     devRevealWorkspace: (name: string) => Promise<IpcResult<boolean>>
   }

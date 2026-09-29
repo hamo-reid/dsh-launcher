@@ -7,10 +7,10 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
-  buildMenuItems, hostLabel, parseBuildKey, readSavedTarget, resolveDescriptor, sameTarget,
+  buildMenuItems, groupPatchRows, hostLabel, parseBuildKey, readSavedTarget, resolveDescriptor, sameTarget,
   saveTarget, scopeLabel, statusOf,
 } from './devPlugins.ts'
-import type { DevDiagnosis, DevDiagnosisMeta } from '../../../shared/types.ts'
+import type { DevDiagnosis, DevDiagnosisMeta, DevPatchRow } from '../../../shared/types.ts'
 
 const diagnosis = (over: Partial<DevDiagnosis> = {}): DevDiagnosis =>
   ({ entryMissing: false, missingPatchRows: [], missingPeers: [], ...over }) as DevDiagnosis
@@ -123,6 +123,33 @@ describe('scopeLabel', () => {
 
   it('renders an unusable timestamp as empty rather than "Invalid Date"', () => {
     expect(scopeLabel(meta({ at: 'nonsense' }), hosts)?.params.time).toBe('')
+  })
+})
+
+describe('groupPatchRows', () => {
+  const row = (id: string, file: string): DevPatchRow => ({ id, name: '', nameFrom: 'row', file })
+
+  it('leaves a single-file bundle as one unnamed group, rendering as it always did', () => {
+    const rows = [row('a', 'p/cordis.patch.yml'), row('b', 'p/cordis.patch.yml')]
+    expect(groupPatchRows(rows, false)).toEqual([{ file: '', label: '', rows }])
+  })
+
+  it('splits a multi-file bundle by patch file, keeping row order, with a short label', () => {
+    const rows = [
+      row('a', 'p/cordis.patch.yml'),
+      row('p', 'p/presets/standard.patch.yml'),
+      row('b', 'p/cordis.patch.yml'),
+    ]
+    const groups = groupPatchRows(rows, true)
+    expect(groups.map(g => g.label)).toEqual(['cordis.patch.yml', 'standard.patch.yml'])
+    expect(groups.map(g => g.rows.map(r => r.id))).toEqual([['a', 'b'], ['p']])
+    // The full path stays available for a tooltip; only the heading is shortened.
+    expect(groups[0].file).toBe('p/cordis.patch.yml')
+  })
+
+  it('is empty for no rows', () => {
+    expect(groupPatchRows([], false)).toEqual([])
+    expect(groupPatchRows([], true)).toEqual([])
   })
 })
 

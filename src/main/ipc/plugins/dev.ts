@@ -3,15 +3,16 @@
 
 import { dialog, shell } from 'electron'
 import { resolve } from 'node:path'
-import { addLocalPlugin, buildInstalledOverview, installIntoProfile, storeVersions } from '../../core/store/plugins.ts'
+import { buildInstalledOverview } from '../../core/store/plugins.ts'
 import { linkDevToProfile, repairDevLink } from '../../core/profile/profile.ts'
 import {
   buildDevPlugin, cachedDiagnosis, defaultDevBuild, devScriptOptions, forgetDevDiagnosis, installDevDeps,
-  listDevPlugins, registerDevPlugin, removeDevPlugin, shimDevPeers, unshimDevPeers,
+  listDevPlugins, registerDevPlugin, removeDevPlugin, shimDevPeers, snapshotDevPlugin, unshimDevPeers,
+  type SnapshotTarget,
 } from '../../core/store/dev.ts'
 import { listProfiles } from '../../core/profile/home.ts'
 import {
-  contextForEntry, dshEntryById, dshScopes, pluginDir, profilesRootFor, type DshContext,
+  contextForEntry, dshEntryById, dshScopes, pluginDir, type DshContext,
 } from '../../core/profile/appState.ts'
 import { isProfileRunning } from '../dsh/run.ts'
 import { fail, failFromError, E } from '../../core/shared/errors.ts'
@@ -19,8 +20,8 @@ import { pathIdentifierInvalid } from '../validate.ts'
 import { ctxOf } from '../ctxOf.ts'
 import { handle } from '../handle.ts'
 import type {
-  DevBuildTarget, DevDiagnoseOptions, DevDiagnosis, DevLinkMode, DevPlugin, DevRunResult, DevScriptOptions, IpcResult,
-  PluginUsagePoint,
+  DevBuildTarget, DevDiagnoseOptions, DevDiagnosis, DevLinkMode, DevPlugin, DevRunResult, DevScriptOptions,
+  DevSnapshotResult, IpcResult, PluginUsagePoint,
 } from '../../../shared/types.ts'
 
 /** A context for a dsh-agnostic operation (dev-plugin diagnosis/peers), together
@@ -194,7 +195,7 @@ export function registerDevIpc(): void {
   })
 
   // Attach a dev plugin to a profile: `link` (live, edits picked up) or `copy`
-  // (snapshot into the store, then real-install a fixed version).
+  // (graduate: archive the current source state, then real-install it).
   handle('plugins:devLinkToProfile', async (_event, dshId: string, profile: string, name: string, mode: DevLinkMode): Promise<IpcResult<string>> => {
     try {
       const ctx = ctxOf(dshId)
@@ -206,13 +207,11 @@ export function registerDevIpc(): void {
       if (mode === 'copy') {
         const store = pluginDir()
         if (store === '') return fail(E.storeNotConfigured)
-        const snap = await addLocalPlugin(store, dev.dir)
-        if (!snap.ok) return fail(E.storeInstallFailed, { detail: snap.text })
-        const version = storeVersions(store, name).at(-1)
-        const linked = await installIntoProfile(profilesRootFor(ctx), profile, name, store, version !== undefined ? { version } : {})
-        if (!linked.ok) return fail(E.storeOperationFailed, { detail: linked.text })
-        forgetDevDiagnosis()
-        return { ok: true, value: linked.text }
+        // The same path a bare snapshot takes, plus this one profile — so the
+        // archive and the profile can never disagree about which state was kept.
+        const shot = await snapshotDevPlugin(dev, ctx, { storeDir: store, targets: [{ ctx, profile }] })
+        if (!shot.ok) return fail(E.storeInstallFailed, { detail: shot.text })
+        return { ok: true, value: shot.text }
       }
       const result = await linkDevToProfile(ctx, profile, name, dev.dir)
       if (!result.ok) return fail(E.storeOperationFailed, { detail: result.text })
@@ -238,16 +237,36 @@ export function registerDevIpc(): void {
     }
   })
 
-  // Graduate: archive the current source state into the store as a version, so
-  // it can be pinned/version-managed like a normal plugin.
-  handle('plugins:devSnapshot', async (_event, name: string): Promise<IpcResult<string>> => {
+  // Graduate: archive the current source state into the store as a version, so it
+  // can be pinned/version-managed like a normal plugin. `targets` optionally
+  // switches profiles from their `link:` to the archive in the same run.
+  handle('plugins:devSnapshot', async (_event, name: string, targets?: { dshId: string; profile: string }[]): Promise<IpcResult<DevSnapshotResult>> => {
     try {
       const dev = listDevPlugins().find(p => p.name === name)
       if (dev === undefined) return fail(E.nameInvalid, [], `未注册的开发插件：${name}`)
       const store = pluginDir()
       if (store === '') return fail(E.storeNotConfigured)
-      const result = await addLocalPlugin(store, dev.dir)
-      return result.ok ? { ok: true, value: result.text } : fail(E.storeInstallFailed, { detail: result.text })
+      const resolved: (SnapshotTarget & { dshId: string })[] = []
+      for (const raw of targets ?? []) {
+        const ctx = ctxOf(raw.dshId)
+        if (ctx === null) return fail(E.dshNotFound)
+        if (pathIdentifierInvalid(raw.profile)) return fail(E.nameInvalid)
+        if (isProfileRunning(raw.dshId, raw.profile)) return fail(E.runAlreadyRunning, { profile: raw.profile })
+        resolved.push({ ctx, profile: raw.profile, dshId: raw.dshId })
+      }
+      // The pre-snapshot checks need a chain to resolve against: the first target's
+      // when there is one, else the first registered dsh. A snapshot must pass the
+      // diagnosis it would be judged by either way.
+      const first = resolved[0]
+      const host = devHostTarget(first !== undefined ? first.dshId : undefined)
+      if (host === null) return fail(E.dshNotFound)
+      const shot = await snapshotDevPlugin(dev, host.ctx, {
+        storeDir: store,
+        dsh: { id: host.id, name: host.name, version: host.version },
+        ...(resolved.length > 0 ? { targets: resolved } : {}),
+      })
+      if (!shot.ok) return fail(E.storeInstallFailed, { detail: shot.text })
+      return { ok: true, value: shot }
     } catch (error) {
       return failFromError(error)
     }
