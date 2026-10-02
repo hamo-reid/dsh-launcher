@@ -310,7 +310,7 @@ export default function DshSection() {
                 <Button onClick={() => setMirrorOpen(true)}>{t('data.mirror')}</Button>
               </Space>
             </Panel>
-            <SkillsManagePanel dshId={selected.id} />
+            <SkillsManagePanel dshId={selected.id} profile={null} />
             <McpManagePanel dshId={selected.id} profile={null} withPanel />
           </Space>
         )

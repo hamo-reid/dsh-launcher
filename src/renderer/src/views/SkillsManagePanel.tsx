@@ -23,17 +23,25 @@ const SOURCE_COLOUR: Record<SkillEntry['source'], string> = {
   'user-agents': 'purple',
   custom: 'orange',
   bundled: 'default',
+  preset: 'cyan',
 }
 
 /** Source label key suffix (`ext.skills.source.<suffix>`). */
-const SOURCE_KEY: Record<SkillEntry['source'], 'userDsh' | 'userAgents' | 'custom' | 'bundled'> = {
+const SOURCE_KEY: Record<SkillEntry['source'], 'userDsh' | 'userAgents' | 'custom' | 'bundled' | 'preset'> = {
   'user-dsh': 'userDsh',
   'user-agents': 'userAgents',
   custom: 'custom',
   bundled: 'bundled',
+  preset: 'preset',
 }
 
-export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
+const MONO: React.CSSProperties = {
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+  fontSize: 12,
+  wordBreak: 'break-all',
+}
+
+export default function SkillsManagePanel(p: { dshId: string; profile?: string | null }): JSX.Element {
   const { t } = useTranslation()
   const { token } = theme.useToken()
   const [listing, setListing] = useState<SkillListing | null>(null)
@@ -45,14 +53,14 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
   const load = useCallback(async (): Promise<void> => {
     setLoading(true)
     const [list, lib] = await Promise.all([
-      window.api.ext.skillList(p.dshId),
+      window.api.ext.skillList(p.dshId, p.profile ?? undefined),
       window.api.ext.libSkillOverview(),
     ])
     setLoading(false)
     if (!list.ok) { void message.error(apiErrorText(list)); return }
     setListing(list.value)
     if (lib.ok) setOverview(lib.value)
-  }, [p.dshId])
+  }, [p.dshId, p.profile])
 
   useEffect(() => { void load() }, [load])
 
@@ -104,6 +112,35 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
     <>
       <Panel title={t('dsh.skills')} extra={actionRow}>
         <Space direction="vertical" size={8} style={{ width: '100%' }}>
+          {listing !== null && (
+            <div style={{ color: token.colorTextTertiary, fontSize: token.fontSizeSM }}>
+              <div>{`${t('ext.skills.rootsLabel')} (${listing.roots.length})`}</div>
+              {listing.roots.map(root => (
+                <div key={root.root} style={{ marginTop: 2 }}>
+                  <Tag color={SOURCE_COLOUR[root.source]} style={{ marginInlineEnd: 6 }}>
+                    {t(`ext.skills.source.${SOURCE_KEY[root.source]}`)}
+                  </Tag>
+                  {root.runtime === true
+                    ? (
+                      <>
+                        <Tag style={{ marginInlineEnd: 6 }}>{t('ext.skills.rootRuntime')}</Tag>
+                        <span style={MONO}>{root.path}</span>
+                      </>
+                    )
+                    : (
+                      <>
+                        {root.source === 'preset' && (
+                          <Tag color="cyan" style={{ marginInlineEnd: 6 }}>
+                            {t('ext.skills.rootFromPreset', { owner: root.root.replace(/^preset:/, '') })}
+                          </Tag>
+                        )}
+                        <span style={MONO}>{root.path}</span>
+                      </>
+                    )}
+                </div>
+              ))}
+            </div>
+          )}
           {issues.map((issue, i) => (
             <Alert
               key={i}

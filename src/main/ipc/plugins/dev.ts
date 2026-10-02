@@ -10,13 +10,12 @@ import {
   listDevPlugins, registerDevPlugin, removeDevPlugin, shimDevPeers, snapshotDevPlugin, unshimDevPeers,
   type SnapshotTarget,
 } from '../../core/store/dev.ts'
-import { listProfiles } from '../../core/profile/home.ts'
 import {
   contextForEntry, dshEntryById, dshScopes, pluginDir, type DshContext,
 } from '../../core/profile/appState.ts'
 import { isProfileRunning } from '../dsh/run.ts'
 import { fail, failFromError, E } from '../../core/shared/errors.ts'
-import { pathIdentifierInvalid } from '../validate.ts'
+import { pathIdentifierInvalid, profileRefused, profileTarget } from '../validate.ts'
 import { ctxOf } from '../ctxOf.ts'
 import { handle } from '../handle.ts'
 import type {
@@ -42,21 +41,6 @@ function devHostTarget(dshId: unknown): { ctx: DshContext; id: string; name: str
     ctx: { execPath: scope.execPath ?? '', home: scope.home, version },
     id: scope.id, name: scope.name, version,
   }
-}
-
-/** The profile a diagnosis targets, validated: it becomes a path AND its
- * composition decides which ids mean what, so an unknown one is an error rather
- * than a silently profile-less report. `null` = no profile (host layers only). */
-function devTargetProfile(ctx: DshContext, raw: unknown): string | null | IpcResult<never> {
-  if (raw === undefined || raw === null || raw === '') return null
-  if (typeof raw !== 'string' || pathIdentifierInvalid(raw)) return fail(E.nameInvalid)
-  if (!listProfiles(ctx).includes(raw)) return fail(E.profileNotFound, { detail: raw })
-  return raw
-}
-
-/** Whether `devTargetProfile` refused. */
-function profileRefused(pick: string | null | IpcResult<never>): pick is IpcResult<never> {
-  return pick !== null && typeof pick !== 'string'
 }
 
 export function registerDevIpc(): void {
@@ -113,7 +97,7 @@ export function registerDevIpc(): void {
       if (dev === undefined) return fail(E.nameInvalid, [], `未注册的开发插件：${name}`)
       const target = devHostTarget(opts?.dshId)
       if (target === null) return fail(E.dshNotFound)
-      const profile = devTargetProfile(target.ctx, opts?.profile)
+      const profile = profileTarget(target.ctx, opts?.profile)
       if (profileRefused(profile)) return profile
       return {
         ok: true,
@@ -136,7 +120,7 @@ export function registerDevIpc(): void {
       if (dev === undefined) return fail(E.nameInvalid, [], `未注册的开发插件：${name}`)
       const target = devHostTarget(opts?.dshId)
       if (target === null) return fail(E.dshNotFound)
-      const profile = devTargetProfile(target.ctx, opts?.profile)
+      const profile = profileTarget(target.ctx, opts?.profile)
       if (profileRefused(profile)) return profile
       return { ok: true, value: shimDevPeers(dev, target.ctx, profile !== null ? { profile } : {}) }
     } catch (error) {

@@ -6,6 +6,7 @@ import { dialog } from 'electron'
 import { join } from 'node:path'
 import { ctxOf } from '../ctxOf.ts'
 import { handle } from '../handle.ts'
+import { profileRefused, profileTarget } from '../validate.ts'
 import { logger } from '../../core/shared/logger.ts'
 import {
   deleteSkill, installedEntry, installZipSkills, listSkills, parseSkillText, scaffoldSkill, writableSkillRoot,
@@ -26,11 +27,19 @@ import type { IpcResult, SkillEntry, SkillLibEntry, SkillLibOverviewRow, SkillLi
 export function registerSkillsExtIpc(): void {
   // Every root dsh scans, the discovered catalog (rank order), and every
   // skill-like file dsh would silently ignore — surfaced with the reason.
-  handle('ext:skillList', (_event, dshId: string): IpcResult<SkillListing> => {
+  //
+  // `profile` is optional and validated, never inferred: it becomes a PATH and it
+  // decides which presets compose, so a name that is unknown must not silently
+  // degrade into "this dsh with no preset roots" — that reads like "this
+  // deployment contributes no skills" when the truth is "you named a profile
+  // that is not there".
+  handle('ext:skillList', (_event, dshId: string, profile?: string): IpcResult<SkillListing> => {
     const ctx = ctxOf(dshId)
     if (ctx === null) return fail(E.dshNotFound)
+    const pick = profileTarget(ctx, profile)
+    if (profileRefused(pick)) return pick
     try {
-      return { ok: true, value: listSkills(ctx) }
+      return { ok: true, value: listSkills(ctx, pick !== null ? { profile: pick } : {}) }
     } catch (error) {
       return failFromError(error)
     }

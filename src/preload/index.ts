@@ -195,8 +195,8 @@ const api = {
       ipcRenderer.invoke('ext:mcpSecretSet', name, value),
     mcpSecretRemove: (name: string): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('ext:mcpSecretRemove', name),
-    skillList: (dshId: string): Promise<IpcResult<SkillListing>> =>
-      ipcRenderer.invoke('ext:skillList', dshId),
+    skillList: (dshId: string, profile?: string): Promise<IpcResult<SkillListing>> =>
+      ipcRenderer.invoke('ext:skillList', dshId, profile),
     skillDelete: (dshId: string, name: string): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('ext:skillDelete', dshId, name),
     libMcpOverview: (): Promise<IpcResult<McpLibOverviewRow[]>> =>

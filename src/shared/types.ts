@@ -1241,8 +1241,10 @@ export interface McpApplyTarget {
 }
 
 /** Origin bucket for a skill contribution (mirrors dsh's `SkillSource`).
- * Project roots are cwd-dependent and therefore not managed by the launcher. */
-export type SkillSource = 'user-dsh' | 'user-agents' | 'custom' | 'bundled'
+ * Project roots are cwd-dependent and therefore not managed by the launcher.
+ * `preset` is not a host bucket: it marks a root a PRESET contributes, which dsh
+ * registers through the same `customSkillDirs` key and therefore at custom rank. */
+export type SkillSource = 'user-dsh' | 'user-agents' | 'custom' | 'bundled' | 'preset'
 
 /** One filesystem root dsh scans for skills, with the launcher's read/write view. */
 export interface SkillRootInfo {

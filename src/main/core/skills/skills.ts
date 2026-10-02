@@ -24,6 +24,7 @@ import { readHomePatch } from '../profile/home.ts'
 import { extractKeyValue, parseNamedRows } from '../patch/patch.ts'
 import { loadYaml, isJsExpr, jsExprText } from '../patch/yaml.ts'
 import { logger } from '../shared/logger.ts'
+import { presetSkillRoots } from './preset-roots.ts'
 import { installZipSkills } from './zip.ts'
 import { parseSkillText } from './frontmatter.ts'
 import type { ParsedSkill } from './frontmatter.ts'
@@ -104,8 +105,15 @@ export function writableSkillRoot(ctx: DshContext): string {
   return join(ctx.home, 'skills')
 }
 
+/** Which profile's composed layers to read preset-contributed roots from. Absent
+ * means "this dsh, no profile" — the same convention `module-resolve.ts` uses,
+ * and it yields no preset roots, since a preset is only meaningful inside one. */
+export interface SkillRootOptions {
+  profile?: string
+}
+
 /** Resolve every root dsh would scan for this dsh, sorted by rank. */
-export function skillRoots(ctx: DshContext): SkillRootInfo[] {
+export function skillRoots(ctx: DshContext, opts: SkillRootOptions = {}): SkillRootInfo[] {
   const config = readSkillFsConfig(ctx)
   const includeDefault = config.includeDefaultRoots !== false
   const roots: SkillRootInfo[] = []
@@ -117,6 +125,15 @@ export function skillRoots(ctx: DshContext): SkillRootInfo[] {
     roots.push(runtime === true
       ? { root, source, rank, path, exists: false, writable, runtime: true }
       : { root, source, rank, path, exists: existsSync(path), writable })
+  }
+  // Preset-contributed roots are `customSkillDirs` to the host too, so they sit
+  // at custom rank. Their real order is whatever the selected preset's own row
+  // says — a session fact the launcher has no standing to decide — so this
+  // position is presentation only, and ties keep insertion order below.
+  if (opts.profile !== undefined && opts.profile !== '') {
+    for (const root of presetSkillRoots(ctx, opts.profile)) {
+      push(`preset:${root.owner}`, 'preset', CUSTOM_RANK, root.path, false)
+    }
   }
   ;(config.customSkillDirs ?? []).forEach((dir, i) => {
     push(`custom:${i}`, 'custom', CUSTOM_RANK, resolve(dir), false)
@@ -191,8 +208,8 @@ function scanRoot(info: SkillRootInfo, skills: SkillEntry[], issues: SkillIssue[
 
 /** The full skill picture for one dsh: roots, discovered catalog (rank order),
  * and every skill-like file that would not load, with the reason. */
-export function listSkills(ctx: DshContext): SkillListing {
-  const roots = skillRoots(ctx)
+export function listSkills(ctx: DshContext, opts: SkillRootOptions = {}): SkillListing {
+  const roots = skillRoots(ctx, opts)
   const skills: SkillEntry[] = []
   const issues: SkillIssue[] = []
   for (const info of roots) {

@@ -190,8 +190,10 @@ export interface WindowApi {
     /** Clear one launch secret (idempotent). */
     mcpSecretRemove: (name: string) => Promise<IpcResult<boolean>>
     /** Every root dsh scans for skills, the discovered catalog, and skill-like
-     * files that would not load (with reasons). dsh-scoped, not per-profile. */
-    skillList: (dshId: string) => Promise<IpcResult<SkillListing>>
+     * files that would not load (with reasons). Naming a profile also reports
+     * the roots its presets contribute; without one, the profile-scoped roots
+     * are absent rather than guessed at. */
+    skillList: (dshId: string, profile?: string) => Promise<IpcResult<SkillListing>>
     /** Move an editable skill to the OS recycle bin. */
     skillDelete: (dshId: string, name: string) => Promise<IpcResult<boolean>>
     // ── MCP library (launcher-global definitions; applied rows are copies) ──
