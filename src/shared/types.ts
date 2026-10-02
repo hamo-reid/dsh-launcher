@@ -1246,15 +1246,25 @@ export type SkillSource = 'user-dsh' | 'user-agents' | 'custom' | 'bundled'
 
 /** One filesystem root dsh scans for skills, with the launcher's read/write view. */
 export interface SkillRootInfo {
-  /** Stable label for the UI (`user-dsh`, `user-agents`, `custom:<i>`, `bundled`). */
+  /** Stable label for the UI (`user-dsh`, `user-agents`, `custom:<i>`, `runtime:<i>`, `bundled`). */
   root: string
   source: SkillSource
   /** dsh's precedence rank (custom 300 < user-dsh 400 < user-agents 500 < bundled 600). */
   rank: number
+  /** Absolute path to the root. NOT a path when `runtime` is set — see below. */
   path: string
   exists: boolean
   /** The launcher may create/edit/delete entries here (only the user-dsh root). */
   writable: boolean
+  /**
+   * A root dsh resolves at RUN time from a `!!js` expression, which the launcher
+   * deliberately does not evaluate: `patch/yaml.ts` only carries such a value
+   * through as a sentinel-prefixed string, so resolving it here produced a path
+   * built from JavaScript source. Such a root is reported so it is not mistaken
+   * for "this deployment has no such root" — `path` then holds the expression
+   * source verbatim, `exists` is always false, and nothing ever scans it.
+   */
+  runtime?: true
 }
 
 /** A discovered skill, mirroring dsh's catalog entry. */

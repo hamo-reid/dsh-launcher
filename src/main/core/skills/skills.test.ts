@@ -66,7 +66,8 @@ afterAll(() => {
 })
 
 // Tests share one tmp home; a home-layer config row written by one test must
-// not leak the roots it declares into the next.
+// not leak the roots it declares into the next. Skill fixtures are NOT reset
+// here — later tests in this file build on what earlier ones wrote.
 beforeEach(() => {
   const patch = join(home, 'cordis.patch.yml')
   if (existsSync(patch)) rmSync(patch)
@@ -106,6 +107,96 @@ describe('root resolution', () => {
       '',
     ].join('\n'))
     expect(skillRoots(ctx()).map(r => r.root)).toEqual(['custom:0'])
+  })
+
+  it('reports a !!js customSkillDirs as a runtime root instead of resolving it', () => {
+    // The shipped presets write exactly this form. A `!!js` scalar parses to a
+    // sentinel-prefixed STRING, so it survives a `typeof` filter — resolving one
+    // used to produce a path built from JavaScript source (and `resolve()` even
+    // normalised the slashes inside the expression).
+    const expression = "process.getBuiltinModule('node:path').join('/somewhere/pkg', 'skills')"
+    writeFileSync(join(home, 'cordis.patch.yml'), [
+      '- id: skills',
+      `  name: '@deepseek-ai/dsh-skill-filesystem'`,
+      '  config:',
+      '    customSkillDirs:',
+      `      - !!js "${expression}"`,
+      '',
+    ].join('\n'))
+    const roots = skillRoots(ctx())
+    expect(roots.map(r => r.root)).toEqual(['runtime:0', 'user-dsh', 'user-agents'])
+    const runtime = roots[0]
+    expect(runtime).toMatchObject({ source: 'custom', rank: 300, writable: false, exists: false, runtime: true })
+    // The expression survives verbatim — no sentinel byte, no cwd prefix, and
+    // the slashes inside it untouched (this is what `resolve()` used to mangle).
+    expect(runtime?.path).toBe(expression)
+    expect(runtime?.path).not.toContain('\u0000')
+    expect(runtime?.path).not.toContain(tmpdir())
+  })
+
+  it('keeps plain and !!js customSkillDirs apart, in order', () => {
+    writeFileSync(join(home, 'cordis.patch.yml'), [
+      '- id: skills',
+      `  name: '@deepseek-ai/dsh-skill-filesystem'`,
+      '  config:',
+      '    customSkillDirs:',
+      `      - ${custom}`,
+      `      - !!js "process.env.SOMEWHERE"`,
+      '',
+    ].join('\n'))
+    const roots = skillRoots(ctx())
+    expect(roots.map(r => [r.root, r.runtime === true])).toEqual([
+      ['custom:0', false],
+      ['runtime:0', true],
+      ['user-dsh', false],
+      ['user-agents', false],
+    ])
+    expect(roots[0].path).toBe(custom)
+  })
+
+  it('never scans a runtime root', () => {
+    // A real user-dsh skill next to a runtime declaration: the catalog holds the
+    // skill and nothing derived from the expression. Fixtures are removed again
+    // because later describes assert exact catalogs.
+    const greeter = join(USER_DSH(), 'greeter')
+    const phantomRoot = join(custom, 'skills')
+    try {
+      skill('greeter', makeSkill('greeter'))
+      writeFileSync(join(home, 'cordis.patch.yml'), [
+        '- id: skills',
+        `  name: '@deepseek-ai/dsh-skill-filesystem'`,
+        '  config:',
+        '    customSkillDirs:',
+        `      - !!js "process.getBuiltinModule('node:path').join('${custom}', 'skills')"`,
+        '',
+      ].join('\n'))
+      // The path the expression names really exists, so a scanner that ignored
+      // the flag would find it — the flag, not `exists`, is what keeps it out.
+      mkdirSync(phantomRoot, { recursive: true })
+      writeFileSync(join(phantomRoot, 'phantom.md'), makeSkill('phantom'))
+      const listing = listSkills(ctx())
+      expect(listing.skills.map(s => s.name)).toEqual(['greeter'])
+      expect(listing.roots.some(r => r.runtime === true && r.exists)).toBe(false)
+    } finally {
+      rmSync(greeter, { recursive: true, force: true })
+      rmSync(custom, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps a runtime root when the default roots are switched off', () => {
+    writeFileSync(join(home, 'cordis.patch.yml'), [
+      '- id: skills',
+      `  name: '@deepseek-ai/dsh-skill-filesystem'`,
+      '  config:',
+      '    includeDefaultRoots: false',
+      '    customSkillDirs:',
+      `      - !!js "process.env.SOMEWHERE"`,
+      '',
+    ].join('\n'))
+    // `customSkillDirs` survives `includeDefaultRoots: false` because dsh adds it
+    // AROUND the default roots, not inside them; a `!!js` entry is still a
+    // custom dir, so it must survive on the same terms.
+    expect(skillRoots(ctx()).map(r => r.root)).toEqual(['runtime:0'])
   })
 })
 

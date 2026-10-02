@@ -22,7 +22,7 @@ import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { readHomePatch } from '../profile/home.ts'
 import { extractKeyValue, parseNamedRows } from '../patch/patch.ts'
-import { loadYaml } from '../patch/yaml.ts'
+import { loadYaml, isJsExpr, jsExprText } from '../patch/yaml.ts'
 import { logger } from '../shared/logger.ts'
 import { installZipSkills } from './zip.ts'
 import { parseSkillText } from './frontmatter.ts'
@@ -53,6 +53,8 @@ interface SkillFsConfig {
   dshHome?: string
   agentsHome?: string
   customSkillDirs?: string[]
+  /** `customSkillDirs` entries written as `!!js` — dsh resolves them, we cannot. */
+  runtimeDirs?: string[]
   bundledSkillDir?: string
 }
 
@@ -77,8 +79,20 @@ function readSkillFsConfig(ctx: DshContext): SkillFsConfig {
   if (typeof config.dshHome === 'string' && config.dshHome !== '') out.dshHome = config.dshHome
   if (typeof config.agentsHome === 'string' && config.agentsHome !== '') out.agentsHome = config.agentsHome
   if (Array.isArray(config.customSkillDirs)) {
-    const dirs = config.customSkillDirs.filter((v): v is string => typeof v === 'string' && v !== '')
+    // A `!!js` entry parses to a SENTINEL-PREFIXED STRING, so a `typeof` filter
+    // does not catch it — and resolving one yields a path built from JavaScript
+    // source (verified: `resolve()` on the sentinel even normalises the slashes
+    // inside the expression). Shipped presets write exactly this form, so it is
+    // the common case, not an edge case.
+    const dirs: string[] = []
+    const runtime: string[] = []
+    for (const value of config.customSkillDirs) {
+      if (typeof value !== 'string' || value === '') continue
+      if (isJsExpr(value)) runtime.push(jsExprText(value))
+      else dirs.push(value)
+    }
     if (dirs.length > 0) out.customSkillDirs = dirs
+    if (runtime.length > 0) out.runtimeDirs = runtime
   }
   if (typeof config.bundledSkillDir === 'string' && config.bundledSkillDir !== '') out.bundledSkillDir = config.bundledSkillDir
   return out
@@ -95,11 +109,23 @@ export function skillRoots(ctx: DshContext): SkillRootInfo[] {
   const config = readSkillFsConfig(ctx)
   const includeDefault = config.includeDefaultRoots !== false
   const roots: SkillRootInfo[] = []
-  const push = (root: string, source: SkillSource, rank: number, path: string, writable: boolean): void => {
-    roots.push({ root, source, rank, path, exists: existsSync(path), writable })
+  const push = (
+    root: string, source: SkillSource, rank: number, path: string, writable: boolean, runtime?: true,
+  ): void => {
+    // A runtime root's `path` is JavaScript source, not a filesystem path, so it
+    // is never probed — the two facts are forced together rather than derived.
+    roots.push(runtime === true
+      ? { root, source, rank, path, exists: false, writable, runtime: true }
+      : { root, source, rank, path, exists: existsSync(path), writable })
   }
   ;(config.customSkillDirs ?? []).forEach((dir, i) => {
     push(`custom:${i}`, 'custom', CUSTOM_RANK, resolve(dir), false)
+  })
+  // Reported, never resolved: dsh evaluates these when it loads the row, so the
+  // launcher knows a root EXISTS without knowing where. `exists: false` plus the
+  // `runtime` flag keeps every scanner off them.
+  ;(config.runtimeDirs ?? []).forEach((expression, i) => {
+    push(`runtime:${i}`, 'custom', CUSTOM_RANK, expression, false, true)
   })
   if (includeDefault) {
     // dshHome: config override wins, else the launcher-set DSH_HOME (= ctx.home).
@@ -170,7 +196,9 @@ export function listSkills(ctx: DshContext): SkillListing {
   const skills: SkillEntry[] = []
   const issues: SkillIssue[] = []
   for (const info of roots) {
-    if (!info.exists) continue
+    // `exists: false` already keeps these out; the explicit check makes the rule
+    // independent of that coupling, since a future caller could report otherwise.
+    if (!info.exists || info.runtime === true) continue
     scanRoot(info, skills, issues)
   }
   skills.sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name))
