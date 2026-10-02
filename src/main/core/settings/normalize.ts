@@ -45,6 +45,16 @@ export interface AppSettings {
   marketSource?: MarketSource
   /** Custom market catalog URL, used when `marketSource === 'custom'`. */
   marketUrl?: string
+  /** The npm registry the launcher ITSELF resolves package versions from.
+   *
+   * Only half the job: it is what `core/store/registry.ts` asks before handing a
+   * spec to pnpm. It is deliberately the same registry pnpm uses — a launcher that
+   * resolved `latest` on one registry and installed from another would install a
+   * version the user did not ask for, and could not install anything at all on a
+   * network where the public one is unreachable. pnpm's own configuration stays
+   * the user's `.npmrc` until the `project` split lands; an unset value means the
+   * public registry, which is what every call site did before. */
+  registryUrl?: string
   /** The user's GitHub token, encrypted at rest (see `core/github/auth.ts`).
    * A secret: never exported and never logged. */
   githubTokenEnc?: string
@@ -72,7 +82,7 @@ export interface AppSettings {
 /** The `prefs` row: user preferences (no registry / no per-profile config). */
 export type PrefsSettings = Pick<AppSettings,
   'dataRoot' | 'pluginDir' | 'dshVersionDir' | 'uiLanguage' | 'closeToTray' | 'askOnClose' |
-  'nodePreference' | 'onboarded' | 'marketSource' | 'marketUrl' | 'githubTokenEnc' |
+  'nodePreference' | 'onboarded' | 'marketSource' | 'marketUrl' | 'registryUrl' | 'githubTokenEnc' |
   'mcpSecrets' | 'mcpLibrary' | 'devPlugins'>
 /** The `dsh` row: the registered dsh installs. */
 export type DshSettings = Pick<AppSettings, 'dshes'>
@@ -80,14 +90,15 @@ export type DshSettings = Pick<AppSettings, 'dshes'>
 export type LaunchSettings = Pick<AppSettings, 'launchOptions' | 'runModes'>
 
 /** Current on-disk schema version. Bump when a migration is added. */
-export const CURRENT_SCHEMA_VERSION = 2
+export const CURRENT_SCHEMA_VERSION = 3
 
 type Migration = (s: AppSettings) => AppSettings
 /** Ordered migrations keyed by the version they upgrade FROM (`v → v+1`).
  * 0 → 1 is the storage split, handled structurally, so no data-shape step.
  * 1 → 2 adds the optional `dataRoot` field — purely additive, so there is no
  * step either; the bump exists so `importSettings` refuses a newer export
- * instead of silently dropping the root on an older build. */
+ * instead of silently dropping the root on an older build.
+ * 2 → 3 adds the optional `registryUrl` — same reasoning, no data-shape step. */
 const MIGRATIONS: Record<number, Migration> = {}
 
 export function splitPrefs(s: AppSettings): PrefsSettings {
@@ -102,6 +113,7 @@ export function splitPrefs(s: AppSettings): PrefsSettings {
     ...(s.onboarded !== undefined ? { onboarded: s.onboarded } : {}),
     ...(s.marketSource !== undefined ? { marketSource: s.marketSource } : {}),
     ...(s.marketUrl !== undefined ? { marketUrl: s.marketUrl } : {}),
+    ...(s.registryUrl !== undefined ? { registryUrl: s.registryUrl } : {}),
     ...(s.githubTokenEnc !== undefined ? { githubTokenEnc: s.githubTokenEnc } : {}),
     ...(s.mcpSecrets !== undefined ? { mcpSecrets: s.mcpSecrets } : {}),
     ...(s.mcpLibrary !== undefined ? { mcpLibrary: s.mcpLibrary } : {}),
@@ -202,6 +214,8 @@ export function normalizeSettings(raw: unknown): AppSettings {
   if (raw.marketSource === 'official' || raw.marketSource === 'custom') out.marketSource = raw.marketSource
   const marketUrl = nonEmptyString(raw.marketUrl)
   if (marketUrl !== undefined) out.marketUrl = marketUrl
+  const registryUrl = nonEmptyString(raw.registryUrl)
+  if (registryUrl !== undefined) out.registryUrl = registryUrl
   const githubTokenEnc = nonEmptyString(raw.githubTokenEnc)
   if (githubTokenEnc !== undefined) out.githubTokenEnc = githubTokenEnc
   if (isRecord(raw.mcpSecrets)) {

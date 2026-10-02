@@ -1,9 +1,12 @@
 /** Query the npm registry: search for plugin candidates + list a package's
- * versions. The raw-normalization functions are exported for unit tests so the
+ * versions. The base URL comes from the configured registry (`store/registry.ts`)
+ * so the launcher's own lookups and the packages pnpm later installs come from
+ * one place. The raw-normalization functions are exported for unit tests so the
  * HTTP calls stay out of the test path. */
 
 import type { NpmSearchHit, PackageVersionInfo } from '../../../shared/types.ts'
 import { logger } from '../shared/logger.ts'
+import { registryBase } from './registry.ts'
 
 /** Raw shape of one registry search result. */
 export interface RawSearchPackage {
@@ -54,7 +57,8 @@ export async function npmSearch(
   const size = opts.size ?? 25
   const from = opts.from ?? 0
   logger.debug(`npm search: "${query}" (${size})`)
-  const url = `https://registry.npmjs.org/-/v1/search?text=${encodeURIComponent(query)}&size=${size}&from=${from}`
+  const base = registryBase()
+  const url = `${base}/-/v1/search?text=${encodeURIComponent(query)}&size=${size}&from=${from}`
   const res = await fetch(url)
   if (!res.ok) throw new Error(`npm search failed: HTTP ${res.status}`)
   const data = await res.json() as RawSearchResponse
@@ -65,8 +69,9 @@ export async function npmSearch(
 
 /** Fetch the full version list + dist-tags for a package (for the version picker). */
 export async function fetchPackageVersions(name: string): Promise<PackageVersionInfo> {
-  logger.debug(`npm versions: "${name}"`)
-  const res = await fetch(`https://registry.npmjs.org/${encodeURIComponent(name)}`)
+  const base = registryBase()
+  logger.debug(`npm versions: "${name}" @ ${base}`)
+  const res = await fetch(`${base}/${encodeURIComponent(name)}`)
   if (!res.ok) throw new Error(`npm 包不存在或不可访问：HTTP ${res.status}`)
   const data = await res.json() as {
     'dist-tags'?: Record<string, string>

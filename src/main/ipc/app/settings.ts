@@ -9,7 +9,7 @@ import {
 import {
   dataRoot, dshVersionDir, pluginDir, readDshState, shouldRunOnboarding, skillLibraryDir,
 } from '../../core/profile/appState.ts'
-import { failFromError } from '../../core/shared/errors.ts'
+import { fail, failFromError, E } from '../../core/shared/errors.ts'
 import { handle } from '../handle.ts'
 import { checkHealth } from '../../core/dsh/health.ts'
 import { checkAppUpdate } from '../../core/github/updates.ts'
@@ -116,6 +116,44 @@ export function registerSettingsIpc(): void {
   handle('settings:testGithubToken', async (): Promise<IpcResult<GithubRateLimit>> => {
     try {
       return { ok: true, value: await probeGithubRateLimit() }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  /** The registry the launcher resolves package versions from, or `null` for the
+   * public one. Read/write rather than an opaque "state" object because it is a
+   * single URL with no derived fields. */
+  handle('settings:getRegistryUrl', (): IpcResult<string | null> => {
+    try {
+      return { ok: true, value: loadSettings().registryUrl ?? null }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  /** Save (or clear, with `''`/`null`) the registry URL. Validated as an absolute
+   * http(s) URL at the boundary: this string becomes request URLs, so a bad value
+   * is refused here rather than warned about at the first search. */
+  handle('settings:setRegistryUrl', (_event, value: string | null): IpcResult<string | null> => {
+    try {
+      const raw = typeof value === 'string' ? value.trim() : ''
+      if (raw === '') {
+        patchSettings({ registryUrl: undefined })
+        return { ok: true, value: null }
+      }
+      let url: URL
+      try {
+        url = new URL(raw)
+      } catch {
+        return fail(E.nameInvalid, [], `registry URL 不合法：${raw}`)
+      }
+      if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+        return fail(E.nameInvalid, [], `registry URL 必须是 http(s)：${raw}`)
+      }
+      const saved = raw.replace(/\/+$/, '')
+      patchSettings({ registryUrl: saved })
+      return { ok: true, value: saved }
     } catch (error) {
       return failFromError(error)
     }

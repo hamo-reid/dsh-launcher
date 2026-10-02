@@ -30,6 +30,8 @@ export default function SettingsSection() {
   const [githubInput, setGithubInput] = useState('')
   const [githubBusy, setGithubBusy] = useState(false)
   const [githubLimit, setGithubLimit] = useState<GithubRateLimit>()
+  const [registryInput, setRegistryInput] = useState('')
+  const [registryBusy, setRegistryBusy] = useState(false)
 
   const load = async (): Promise<void> => {
     const d = await window.api.settings.getDataRoot()
@@ -44,6 +46,10 @@ export default function SettingsSection() {
     if (n.ok) setNodeEnv(n.value)
     const g = await window.api.settings.getGithubAuth()
     if (g.ok) setGithubAuth(g.value)
+    // Likewise: an unset registry shows empty rather than pre-filling the public
+    // URL, which would persist the default as if the user had chosen it.
+    const r = await window.api.settings.getRegistryUrl()
+    if (r.ok) setRegistryInput(r.value ?? '')
   }
 
   useEffect(() => { void load() }, [])
@@ -76,6 +82,15 @@ export default function SettingsSection() {
     setGithubInput('')
     setGithubLimit(undefined)
     void message.success(t('settings.github.saved'))
+  }
+
+  const saveRegistry = async (): Promise<void> => {
+    setRegistryBusy(true)
+    const r = await window.api.settings.setRegistryUrl(registryInput.trim())
+    setRegistryBusy(false)
+    if (!r.ok) { void message.error(apiErrorText(r)); return }
+    setRegistryInput(r.value ?? '')
+    void message.success(t('settings.registry.saved'))
   }
 
   const clearGithubToken = async (): Promise<void> => {
@@ -293,6 +308,37 @@ export default function SettingsSection() {
             )}
             <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, marginTop: token.paddingSM }}>
               {t('settings.github.hint')}
+            </div>
+          </div>
+        </Panel>
+
+        <Panel title={t('settings.section.registry')}>
+          <div style={{ maxWidth: 620 }}>
+            <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, margin: '4px 0 12px' }}>
+              {t('settings.registry.desc')}
+            </div>
+            <Space.Compact style={{ width: '100%', maxWidth: 560 }}>
+              <Input
+                value={registryInput}
+                onChange={e => setRegistryInput(e.target.value)}
+                placeholder={t('settings.registry.placeholder')}
+                autoComplete="off"
+              />
+              <Button type="primary" loading={registryBusy} disabled={registryInput.trim() === ''} onClick={() => void saveRegistry()}>
+                {t('common.save')}
+              </Button>
+              <Button loading={registryBusy} disabled={registryInput.trim() === ''} onClick={() => {
+                setRegistryInput('')
+                void window.api.settings.setRegistryUrl('').then(r => {
+                  if (r.ok) void message.success(t('settings.registry.cleared'))
+                  else void message.error(apiErrorText(r))
+                })
+              }}>
+                {t('settings.registry.clear')}
+              </Button>
+            </Space.Compact>
+            <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, marginTop: token.paddingSM }}>
+              {t('settings.registry.hint')}
             </div>
           </div>
         </Panel>

@@ -414,6 +414,14 @@ export interface WindowApi {
     setGithubToken: (token: string) => Promise<IpcResult<GithubAuthState>>
     /** Probe the live GitHub rate limit with the current token. */
     testGithubToken: () => Promise<IpcResult<GithubRateLimit>>
+    /** The registry the launcher resolves package versions from, or `null` for the
+     * public one. Governs the launcher's own lookups — plugin search, version
+     * lists, the dsh install/update lookup — so it must name the same registry
+     * pnpm installs from. */
+    getRegistryUrl: () => Promise<IpcResult<string | null>>
+    /** Save (or clear, with `''`) the registry URL; returns what was saved.
+     * Refused unless the value is an absolute http(s) URL. */
+    setRegistryUrl: (url: string) => Promise<IpcResult<string | null>>
     /** Export settings to a user-chosen JSON file (`''` = cancelled). */
     exportSettings: () => Promise<IpcResult<string>>
     /** Import settings from a JSON file (`false` = cancelled). */

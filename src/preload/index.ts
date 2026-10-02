@@ -406,6 +406,10 @@ const api = {
       ipcRenderer.invoke('settings:getGithubAuth'),
     setGithubToken: (token: string): Promise<IpcResult<GithubAuthState>> =>
       ipcRenderer.invoke('settings:setGithubToken', token),
+    getRegistryUrl: (): Promise<IpcResult<string | null>> =>
+      ipcRenderer.invoke('settings:getRegistryUrl'),
+    setRegistryUrl: (url: string): Promise<IpcResult<string | null>> =>
+      ipcRenderer.invoke('settings:setRegistryUrl', url),
     testGithubToken: (): Promise<IpcResult<GithubRateLimit>> =>
       ipcRenderer.invoke('settings:testGithubToken'),
     exportSettings: (): Promise<IpcResult<string>> =>

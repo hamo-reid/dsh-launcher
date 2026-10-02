@@ -1,9 +1,24 @@
 /**
  * Tests for the npm registry normalization (pure logic; the fetch is exercised
- * via the IPC layer at runtime, so here we feed canned raw payloads).
+ * via the IPC layer at runtime, so here we feed canned raw payloads), plus the
+ * base URL both HTTP calls build on — which is the point of the registry setting.
  */
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { afterAll, beforeAll, describe, it, expect, vi, afterEach } from 'vitest'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { openDatabase, patchSettings } from '../settings/settings.ts'
 import { fetchPackageVersions, normalizeSearchResults, npmSearch, type RawSearchPackage } from './npm.ts'
+
+let root: string
+
+beforeAll(async () => {
+  root = mkdtempSync(join(tmpdir(), 'pm-registry-'))
+  await openDatabase(join(root, 'app.sqlite'))
+  patchSettings({ registryUrl: 'https://registry.internal.example' })
+}, 20000)
+
+afterAll(() => rmSync(root, { recursive: true, force: true }))
 
 describe('normalizeSearchResults', () => {
   it('maps name/description/version and reads total', () => {
@@ -87,6 +102,34 @@ describe('fetchPackageVersions', () => {
 
 describe('npmSearch', () => {
   afterEach(() => vi.unstubAllGlobals())
+
+  it('asks the CONFIGURED registry, not the public one', async () => {
+    // The invariant this module exists for: choosing a version and installing it
+    // must resolve against the same registry. Both URLs were hardcoded before.
+    const seen: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      seen.push(url)
+      return { ok: true, status: 200, json: async () => ({}) }
+    }))
+    await fetchPackageVersions('@deepseek-ai/dsh')
+    await npmSearch('dsh')
+    expect(seen[0]).toBe(`https://registry.internal.example/${encodeURIComponent('@deepseek-ai/dsh')}`)
+    expect(seen[1]).toContain('https://registry.internal.example/-/v1/search')
+  })
+
+  it('falls back to the public registry with no configured one', async () => {
+    const seen: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      seen.push(url)
+      return { ok: true, status: 200, json: async () => ({}) }
+    }))
+    // Cleared first: this file configures a private registry for the test above,
+    // and both cases must be exercised against the same code path.
+    await patchSettings({ registryUrl: undefined })
+    await fetchPackageVersions('pkg')
+    expect(seen[0]).toBe('https://registry.npmjs.org/pkg')
+    await patchSettings({ registryUrl: 'https://registry.internal.example' })
+  })
 
   it('maps a search response and defers to the registry total', async () => {
     stubFetch(() => ({
