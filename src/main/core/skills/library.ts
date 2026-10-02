@@ -217,9 +217,22 @@ export function skillLibTextOf(lib: SkillLibEntry): string {
  * user-dsh root, so an editable copy there IS the installed copy — preferred
  * over a same-named entry in a higher-precedence root, which a reinstall could
  * never refresh. With no editable copy, any same-named entry counts (even one
- * that did not originally come from the library). */
+ * that did not originally come from the library).
+ *
+ * Every read is per-dsh and per-skill guarded: this maps the WHOLE library across
+ * EVERY dsh, so one unreadable file — a half-removed copy, a permission change, a
+ * root that vanished between the scan and the read — would otherwise fail the
+ * entire overview and hide every other skill on every other dsh. An unreadable
+ * copy is reported as stale WITH its reason, because "we cannot tell" and "it is
+ * current" are different answers and only one of them justifies a reinstall. */
 export function scanSkillInstalls(lib: SkillLibEntry): SkillLibInstall[] {
-  const libText = skillLibTextOf(lib)
+  const libText = safeText(lib.path)
+  if (libText === undefined) {
+    return readDshState().dshes.map(dsh => ({
+      dshId: dsh.id, dshName: dsh.name, installed: false, stale: false,
+      problem: `the library entry cannot be read: ${lib.path}`,
+    }))
+  }
   return readDshState().dshes.map((dsh) => {
     const ctx = contextForEntry(dsh)
     const named = listSkills(ctx).skills.filter(skill => skill.name === lib.name)
@@ -227,7 +240,17 @@ export function scanSkillInstalls(lib: SkillLibEntry): SkillLibInstall[] {
     if (found === undefined) {
       return { dshId: dsh.id, dshName: dsh.name, installed: false, stale: false }
     }
-    const installedText = readFileSync(found.path, 'utf8').replaceAll('\r\n', '\n')
+    const installedText = safeText(found.path)
+    if (installedText === undefined) {
+      return {
+        dshId: dsh.id,
+        dshName: dsh.name,
+        installed: true,
+        stale: true,
+        entry: found,
+        problem: `the installed copy cannot be read: ${found.path}`,
+      }
+    }
     return {
       dshId: dsh.id,
       dshName: dsh.name,
@@ -236,4 +259,14 @@ export function scanSkillInstalls(lib: SkillLibEntry): SkillLibInstall[] {
       entry: found,
     }
   })
+}
+
+/** One file's text with CRLF normalized, or `undefined` when it cannot be read. */
+function safeText(path: string): string | undefined {
+  try {
+    return readFileSync(path, 'utf8').replaceAll('\r\n', '\n')
+  } catch (error) {
+    logger.warn(`skills: cannot read ${path}: ${error instanceof Error ? error.message : String(error)}`)
+    return undefined
+  }
 }

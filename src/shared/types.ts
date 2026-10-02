@@ -1329,6 +1329,12 @@ export interface SkillLibInstall {
   stale: boolean
   /** The installed entry, when present (path/source for the UI). */
   entry?: SkillEntry
+  /** Why this cell could not be judged, when a read failed. Absent means a real
+   * answer: a library scan touches every skill on every dsh, so one unreadable
+   * file degrades its own cell instead of the whole overview. A degraded cell is
+   * reported `stale`, because "we cannot tell" and "it is current" are different
+   * answers and only one of them justifies leaving the copy alone. */
+  problem?: string
 }
 
 /** Library overview row: the entry plus where it is installed. */

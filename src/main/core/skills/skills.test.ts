@@ -260,6 +260,26 @@ describe('listing', () => {
     expect(listing.issues.some(i => i.path.endsWith(join('broken', 'SKILL.md')))).toBe(true)
   })
 
+  it('reports an unreadable skill file as an issue instead of failing the catalog', () => {
+    // `scanRoot` walks a whole root inside one call, so a file that cannot be
+    // read — here a directory where the entry claims a file — used to throw out
+    // of `listSkills` and lose every OTHER skill in the root with it. A file dsh
+    // also cannot read is a file dsh does not load, which is what an issue is.
+    const unreadable = join(USER_DSH(), 'unreadable', 'SKILL.md')
+    const sibling = join(USER_DSH(), 'sibling')
+    try {
+      skill('sibling', makeSkill('sibling'))
+      mkdirSync(unreadable, { recursive: true })
+      const listing = listSkills(ctx())
+      expect(listing.skills.map(s => s.name)).toContain('sibling')
+      const issue = listing.issues.find(i => i.path === unreadable)
+      expect(issue?.reason).toContain('cannot be read')
+    } finally {
+      rmSync(join(USER_DSH(), 'unreadable'), { recursive: true, force: true })
+      rmSync(sibling, { recursive: true, force: true })
+    }
+  })
+
   it('marks entries from non-writable roots read-only', () => {
     mkdirSync(custom, { recursive: true })
     writeFileSync(join(custom, 'shared.md'), makeSkill('shared'))

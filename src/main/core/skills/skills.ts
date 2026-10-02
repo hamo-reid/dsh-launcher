@@ -180,7 +180,13 @@ function toEntry(skill: ParsedSkill, info: SkillRootInfo, path: string, dir: str
 
 /** Scan one root's entries the way dsh's `discoverRoot` does: a directory
  * contributes `<name>/SKILL.md`, a `.md` file contributes itself. Files dsh
- * would ignore become issues instead of being silently dropped. */
+ * would ignore become issues instead of being silently dropped.
+ *
+ * The read is guarded per file: `scanRoot` walks a whole root inside one call, so
+ * a file that cannot be read — a half-removed copy, a directory where the entry
+ * claims a file, a permission change — would otherwise fail the entire catalog
+ * and every other skill in it. A file dsh also cannot read is a file dsh does
+ * not load, which is exactly what an issue says. */
 function scanRoot(info: SkillRootInfo, skills: SkillEntry[], issues: SkillIssue[]): void {
   let entries
   try {
@@ -189,19 +195,31 @@ function scanRoot(info: SkillRootInfo, skills: SkillEntry[], issues: SkillIssue[
     issues.push({ path: info.path, source: info.source, reason: 'root is not readable' })
     return
   }
+  /** Read and parse one file, reporting an unreadable one as an issue. */
+  const take = (file: string, dir: string, shape: 'bundle' | 'flat'): void => {
+    let text: string
+    try {
+      text = readFileSync(file, 'utf8')
+    } catch (error) {
+      issues.push({
+        path: file,
+        source: info.source,
+        reason: `the file cannot be read: ${error instanceof Error ? error.message : String(error)}`,
+      })
+      return
+    }
+    const parsed = parseSkillText(text)
+    if (parsed.ok) skills.push(toEntry(parsed.skill, info, file, dir, shape))
+    else issues.push({ path: file, source: info.source, reason: parsed.reason })
+  }
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     if (info.source === 'user-dsh' && entry.name === '.system') continue
     if (entry.isDirectory()) {
       const file = join(info.path, entry.name, 'SKILL.md')
       if (!existsSync(file)) continue
-      const parsed = parseSkillText(readFileSync(file, 'utf8'))
-      if (parsed.ok) skills.push(toEntry(parsed.skill, info, file, join(info.path, entry.name), 'bundle'))
-      else issues.push({ path: file, source: info.source, reason: parsed.reason })
+      take(file, join(info.path, entry.name), 'bundle')
     } else if (entry.isFile() && entry.name.endsWith('.md')) {
-      const file = join(info.path, entry.name)
-      const parsed = parseSkillText(readFileSync(file, 'utf8'))
-      if (parsed.ok) skills.push(toEntry(parsed.skill, info, file, info.path, 'flat'))
-      else issues.push({ path: file, source: info.source, reason: parsed.reason })
+      take(join(info.path, entry.name), info.path, 'flat')
     }
   }
 }

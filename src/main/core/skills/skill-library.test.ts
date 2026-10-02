@@ -1,4 +1,4 @@
-﻿/**
+/**
  * The launcher-global skill library: CRUD inside the data-root-derived
  * library dir (dsh-agnostic), acceptance rules shared with the skills track,
  * recycle-bin delete, zip import into the library, install-to-dsh as a plain
@@ -285,5 +285,38 @@ describe('drift detection (scanSkillInstalls)', () => {
       rmSync(join(home, 'cordis.patch.yml'), { force: true })
       rmSync(custom, { recursive: true, force: true })
     }
+  })
+
+  it('degrades one unreadable copy instead of failing the whole overview', () => {
+    // `scanSkillInstalls` maps EVERY library entry across EVERY dsh, so one
+    // unreadable file used to fail the call and hide every other skill on every
+    // other dsh. A file that cannot be read is a file dsh does not load either,
+    // so it surfaces as an issue and its own cell reads as not-installed —
+    // while its neighbours still get real verdicts on the same pass.
+    const greeter = writeSkillLib(null, makeSkill('greeter'))
+    const broken = writeSkillLib(null, makeSkill('broken'))
+    const target = writableSkillRoot(contextForEntry(ENTRY()))
+    installSkillToDsh(target, greeter, false)
+    installSkillToDsh(target, broken, false)
+    // A directory where the entry claims a file: the scan sees it, the read does not.
+    const brokenCopy = join(target, 'broken', 'SKILL.md')
+    rmSync(brokenCopy)
+    mkdirSync(brokenCopy, { recursive: true })
+
+    expect(scanSkillInstalls(broken)[0]).toMatchObject({ installed: false, stale: false })
+    const greeterRow = scanSkillInstalls(greeter)
+    expect(greeterRow[0]).toMatchObject({ installed: true, stale: false })
+    expect(greeterRow[0].problem).toBeUndefined()
+  })
+
+  it('degrades a library entry whose own file cannot be read', () => {
+    const entry = writeSkillLib(null, makeSkill('notes'))
+    rmSync(join(lib, 'notes', 'SKILL.md'))
+    mkdirSync(join(lib, 'notes', 'SKILL.md'), { recursive: true })
+    // Nothing is installed, and the comparison never happened — the cell says so
+    // instead of claiming the copy is current.
+    const rows = scanSkillInstalls(entry)
+    expect(rows[0]).toMatchObject({ installed: false, stale: false })
+    expect(rows[0].problem).toContain('library entry cannot be read')
   })
 })
