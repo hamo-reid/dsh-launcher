@@ -47,7 +47,7 @@ describe('packDevPackage', () => {
     const r = await packDevPackage(dev, store())
     expect(r.ok).toBe(true)
     expect(r.tgz).toBe(join(packDir(store(), '@me/dsh-foo'), 'deepseek-ai-dsh-foo-0.1.0.tgz'))
-    // The user's repo keeps its own pnpm store �?injecting the launcher's would
+    // The user's repo keeps its own pnpm store —injecting the launcher's would
     // fight whatever that repo is configured to do.
     expect(runPnpm).toHaveBeenCalledWith(
       devDir(), ['pack', '--pack-destination', packDir(store(), '@me/dsh-foo')], undefined, { skipStoreDir: true },
@@ -105,5 +105,28 @@ describe('packDevPackage', () => {
     writeFileSync(join(devDir(), 'package.json'), JSON.stringify({ version: '0.1.0' }))
     expect((await packDevPackage(dev, store())).ok).toBe(false)
     expect(runPnpm).not.toHaveBeenCalled()
+  })
+
+  it('refuses a package name that would put the pack dir outside the store', async () => {
+    // `dest` is recursively removed just before the pack, so an escaping name is
+    // the difference between clearing a stale tarball and deleting a directory
+    // the user did not name. The dev package's OWN manifest supplies it.
+    const dev = makeDev({ name: '../evil' })
+    const r = await packDevPackage(dev, store())
+    expect(r.ok).toBe(false)
+    expect(r.text).toContain('包名不合法')
+    expect(runPnpm).not.toHaveBeenCalled()
+    expect(existsSync(join(root, 'evil'))).toBe(false)
+  })
+
+  it('keeps a scoped name inside the store, nested as pnpm lays it out', async () => {
+    const dev = makeDev({ name: '@scope/pkg' })
+    vi.mocked(runPnpm).mockImplementation(async () => {
+      writeFileSync(join(packDir(store(), '@scope/pkg'), 'x.tgz'), '')
+      return { ok: true, text: 'packed' }
+    })
+    const r = await packDevPackage(dev, store())
+    expect(r.ok).toBe(true)
+    expect(r.tgz).toBe(join(store(), '.pack', '@scope', 'pkg', 'x.tgz'))
   })
 })

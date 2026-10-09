@@ -25,6 +25,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:f
 import { join } from 'node:path'
 import { runPnpm } from '../dsh/pnpm.ts'
 import { logger } from '../shared/logger.ts'
+import { pathIdentifierInvalid } from '../profile/name-guard.ts'
 import type { DevPlugin, DevRunResult } from '../../../shared/types.ts'
 
 /** pnpm's error when a workspace/catalog protocol cannot be resolved because the
@@ -97,6 +98,13 @@ export async function packDevPackage(dev: DevPlugin, storeDir: string): Promise<
   const id = packIdentity(dev.dir)
   if (id === undefined) {
     return { ok: false, text: `插件包缺少 name 字段或 package.json 不可读：${dev.dir}`, command: '', cwd: dev.dir }
+  }
+  // The name becomes `<store>/.pack/<name>`, which is recursively removed just
+  // below — the same untrusted field `installSource` guards, and it is the dev
+  // package's OWN manifest that supplies it. A scoped name keeps its one
+  // legitimate `/` (`@scope/name` nests inside `.pack`, still in the store).
+  if (pathIdentifierInvalid(id.name)) {
+    return { ok: false, text: `插件包名不合法：${id.name}`, command: '', cwd: dev.dir }
   }
   const dest = packDir(storeDir, id.name)
   rmSync(dest, { recursive: true, force: true })
