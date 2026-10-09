@@ -12,7 +12,7 @@
 import { fetchPackageVersions } from './npm.ts'
 import { buildInstalledOverview } from './overview.ts'
 import { readPluginSourceSpec } from './sources.ts'
-import { compareVersionsLoose } from '../shared/version.ts'
+import { compareVersionsLoose, latestPackageVersion } from '../shared/version.ts'
 import { githubAuthHeaders, noteGithubResponse, resetGithubRateLimit } from '../github/auth.ts'
 import { createKeyedCache } from '../shared/keyed-cache.ts'
 import { logger } from '../shared/logger.ts'
@@ -66,7 +66,7 @@ export function toUpdateInfo(
 async function latestNpmVersion(name: string): Promise<string | undefined> {
   try {
     const info = await fetchPackageVersions(name)
-    return info.distTags.latest ?? info.versions[info.versions.length - 1]
+    return latestPackageVersion(info)
   } catch {
     return undefined
   }

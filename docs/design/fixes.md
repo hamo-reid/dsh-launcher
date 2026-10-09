@@ -1,6 +1,6 @@
 # 缺陷修复计划（2026-10 代码审查）
 
-> 状态：**P0 已完成（4 条，含施工中新发现的 A7）；其余 22 条未实现**。这是一份施工计划，不是规范。
+> 状态：**P0 已完成（4 条，含施工中新发现的 A7）；F1、B4 已完成，并带出施工中新发现的 F10；其余 20 条未实现**。这是一份施工计划，不是规范。
 > 来源：对 `feature/preset-management` 三块功能代码的审查（preset 功能、dev 插件 pnpm pack 快照、registry/skills 修复）。
 > 定位：每条修完后 —— 仍生效的规则上收 `docs/specs/` 或 `docs/presets.md`，测试进仓库，然后**从本文删掉该条**。本文清空即代表这批缺陷关闭。
 
@@ -11,7 +11,7 @@
 | 批次 | 条目 | 为什么是这个顺序 |
 |---|---|---|
 | **P0 硬后果** ✅ | ~~A2、A1、A3~~（+ 施工中新发现的 **A7**） | 会静默把 profile 指向错误的构建，或让包/文件名可控的字符串决定写入/递归删除的路径。**已完成**，见 §1 |
-| **P1 正确性与信息丢失** | F1、F3、F9、A4、A5、B1、B2、B3、B4、B5 | 守卫失效、功能做完却不可达、诊断被丢掉、选错版本、归档不可修复、清单先改后失败 |
+| **P1 正确性与信息丢失** | ~~F1、B4~~ ✅（+ 施工中新发现的 **F10**）、F3、F9、A4、A5、B1、B2、B3、B5 | 守卫失效、功能做完却不可达、诊断被丢掉、选错版本、归档不可修复、清单先改后失败。**F1 / B4 / F10 已完成**，见 §2.1 |
 | **P2 一致性与性能** | F2、F5、F6、F7、F8、B6、B7、B8、B9、B10 | 文案/范围不一致、幻影根、缓存与 i18n 瑕疵、接线未完成的创作面 |
 | **先确证再定方案** | F4、A6 | 取决于宿主真实行为 / 数据根搬迁是否改变大小写，先做实验再改 |
 
@@ -53,19 +53,28 @@
 
 ## 2. P1
 
-### [ ] F1 —— loader 行 id 冲突守卫是裸文本搜索，会漏判
+## 2.1 ✅ 已完成（2026-10-09）：F1、F10、B4
 
-**现象**：`src/main/core/presets/index.ts:229-232` 用 `layer.text.includes(\`- id: ${rowId}\\n\`)` 判断"这个行 id 已被占用"。实测三种输入全部漏判：CRLF 文件、文件末尾无换行、`- id:  x`（两个空格）。漏判后 `insertDeclaration` 会往同一个顶层 `- insert:` 块追加第二个同 id 子行 → 宿主 `duplicate loader entry id` → **整个 profile 拒绝启动**。真实触发路径：Profile 页把该行 `disabled: true` 后，`declaration.ts:183` 的 preset id 检查会跳过它，只剩这个守卫。反方向它还会误伤 —— 子串在文件任意位置匹配，包括别的 declaration 的 `config.plugins` roster 里的 `- id:` 行。
+仍生效的规则已上收 [`specs/profile.md`](../specs/profile.md)：**F1** → §5（占用判定必须与启动预检同源）、
+**F10** → §4（补丁读写容忍 CRLF）、**B4** → §8 的 **P9**（registry 侧"最新"以 `dist-tags.latest` 为准）。
 
-**根因**：层文本不做换行归一化（`store/combo.ts:183-215` 是裸 `readFileSync`，无 `replaceAll`），而守卫用的是字符串包含而不是结构遍历 —— 后者已经在 `patch/patch.ts:194-213` 存在，且六个读取函数共用。
+| 条目 | 修法 | 测试 | 上收 |
+|---|---|---|---|
+| **F1** | `assertDeclaredIdFree` 的裸文本搜索换成与启动预检同源的 `collectInsertIds`（结构遍历） | `ipc/presets/presets.test.ts`：同一既有行在 4 种行形态（LF / CRLF / 无尾换行 / 多一个空格）下都必须拒绝；另一例断言 `config.plugins` 名册里的同形 id **不得**误拒。反向校验：还原成文本包含后 CRLF 那例**真的写成了**（`ok:true`），即写出一个宿主拒绝启动的 profile | §5 |
+| **F10** ★施工中新发现 | `patch.ts` 增加唯一的行构建器 `patchLines`（剥掉行尾 `\r`），替换 15 处 `split('\n')`；写入由此统一为 LF | `patch/patch.test.ts` 新增「CRLF patch files」3 例：与 LF 孪生的取值逐项相等、`disabled` 仍读成 true、编辑后无 `\r` 残留；IPC 侧断言 CRLF 下名册仍含源 preset。反向校验：还原后 4 例全挂，含端到端「名册只剩 `standard`」 | §4 |
+| **B4** | 新增 `shared/version.ts` 的 `latestPackageVersion(info)`（`compareVersionsLoose` 一并搬到跨进程模块，按 `majorOfVersion` 的先例在主侧 re-export），四个站点改为调它：`dsh/install.ts:98,187`、`store/updates.ts:69`、`DownloadVersionModal.tsx:41`、`OfficialInstallModal.tsx:60` | `core/shared/version.test.ts` 新增 4 例：tag 优先；无 tag 时乱序 `['0.0.3','1.3.0','0.0.9']` 解出 `1.3.0`；tag 指向不在表里的版本则忽略；空包 undefined。反向校验：还原成取下标后 2 例挂 | §8 P9 |
 
-**方案**：改成结构化判断：
-```ts
-if (layers.some(layer => collectInsertIds(layer.text).includes(rowId))) throwE(E.presetExists, { preset: id })
-```
-用 `collectInsertIds` 而不是 `parseClassifiedRows` 是刻意的：重复 **insert** 才是宿主的 duplicate-entry 失败形态，而 `appendInsertChild` 永远把新行写成 insert 子行。`collectInsertIds` 从 `patch/patch.ts` 导出，已带单测。
+**F10 现象**（原 25 条审查未发现，是在实现 F1 时按本文验证栏的 CRLF 用例实测出来的）：JS 的 `.` **不匹配 `\r`**，
+而 `(.*)$` 的 `$` 只匹配串尾 —— 所以对一条以 `\r` 结尾的行，取值正则**整个匹配失败**，而不是多捕一个字符。
+`patch.ts` 的 `directChild` / `ownKey` / `extractKeyValue` 全用这个形状，于是一份 CRLF 的 `cordis.patch.yml`：
 
-**验证**：`presets/index`（或 IPC）单测加四例：CRLF 的 profile 补丁、结尾无换行的补丁、缩进在 `- insert:` 下的既有行 —— 三者都必须**拒绝**创建；再加一例：`- id: local-preset-x` 出现在另一个 declaration 的 `config.plugins` roster 里时**不得**误拒。
+- `name:` 读不出来 → 声明模型的**名册整份消失**（实测 `preset:list` 只剩 bundle 层那一个 preset，且无任何告警）；
+- `disabled:` 读不出来 → 被禁用的行会被当成生效的行；
+- `insert:` 读不出来 → `collectInsertIds` 返回空 → **`run:start` 的重复行预检静默漏报**，用户要到宿主启动失败才知道。
+
+这同时说明 F1 的原方案**不足以**修好 CRLF 那一例：换成 `collectInsertIds` 之后，若不同时修 F10，结构遍历在 CRLF 上
+同样什么都看不见。两条必须同一批做（这就是它们同一个提交的原因）。触发条件是常规操作：Windows 编辑器把 LF 文件
+存成 CRLF（本机 `core.autocrlf=true` 也在放大这个面），而 Launcher 自己写的补丁是 LF。
 
 ### [ ] F3 —— 同一 loader 行 id 被两次 insert 时静默折叠，页面显示成健康名册
 
@@ -141,20 +150,6 @@ if (layers.some(layer => collectInsertIds(layer.text).includes(rowId))) throwE(E
 3. 决策后同步 `docs/specs/extensions.md` §3.4 的措辞：规范现在说库条目读不出要标 `stale` 并带理由，而 `library.ts:232` 给的是 `installed:false, stale:false` —— 二者必居其一。
 
 **验证**：`skill-library` 单测：`mkdirSync(join(lib,'notes','SKILL.md'))` 后调 **`listSkillLibrary()`**（不是 `scanSkillInstalls`），断言不抛、其余条目仍在、该路径出现在 issues 里；再加一条 IPC 级测试断言 `ext:libSkillOverview` 仍 `ok:true`。
-
-### [ ] B4 —— 四处把 `versions[0]` 当"最新版本"，而它是**最旧**的
-
-**现象**：packument 没有 `dist-tags.latest` 时（`store/npm.ts:81` 默认成 `{}`）：
-- `dsh/install.ts:98` `latest = info.distTags.latest ?? info.versions[0]` → "安装最新"装的是最旧的版本；
-- `dsh/install.ts:187` `stable = info.distTags.latest ?? info.versions[0]` → 后续比较判定永不升级，**静默地永远不提示更新**；
-- `renderer/src/views/plugins/modals/DownloadVersionModal.tsx:41` → 版本下拉预选最旧版本；
-- `renderer/src/views/dsh/modals/OfficialInstallModal.tsx:60` → 同样问题。
-
-**根因**：`versions` 是 package.json 的键序，不是 semver 序。仓库自己的约定是取**最后一个**：`store/updates.ts:69`、`BundleVersionModal.tsx:68`，`store/layout.ts:89-92` 还专门写明了理由。实测 `registry.npmjs.org/left-pad`：`versions[0] = 0.0.3`、`versions[length-1] = 1.3.0`，而 `dist-tags.latest = 1.3.0`。触发条件是"镜像省略 `dist-tags`" —— 正是 `2a49dcd` 要服务的私有 / 部分镜像场景。
-
-**方案**：四处统一改成 `info.distTags.latest ?? info.versions[info.versions.length - 1]`；更彻底的做法是在 `npm.ts` 的 `PackageVersionInfo` 上直接给出 `latest?: string`（读取时算好），调用方不再各自取下标。
-
-**验证**：`dsh/install` 单测：packument 无 `dist-tags`、`versions` 乱序（如 `['0.0.3','1.3.0','0.0.9']`）时断言解析出 `1.3.0`、且升级检查能报出更新；渲染侧断言默认选中 `1.3.0`。
 
 ### [ ] B5 —— `!!js` 只过滤了 `customSkillDirs`，三个兄弟字段仍会把哨兵当路径
 
@@ -320,6 +315,7 @@ if (layers.some(layer => collectInsertIds(layer.text).includes(rowId))) throwE(E
 ## 7. 完成标准
 
 - [x] **P0（含 A7）**：测试进仓库、三闸全绿、规则上收 `specs/profile.md` §8（P7 / P8），账目留在 §1。
+- [x] **P1 第一批（F1 / F10 / B4）**：同上；账目在 §2.1，规则上收 `specs/profile.md` §4（CRLF）、§5（占用判定同源）、§8 **P9**（registry 最新版本）。
 - [ ] 其余每条新增的测试都进仓库，并在本文件对应条目下留一行"验证方式"。
 - [ ] `pnpm typecheck`、`pnpm test`、`pnpm run build` 三项全绿（**已可在此机直接跑**：2026-10-09 验证 `pnpm test` = 82 files / 1050 tests 全绿，`typecheck` / `build` 亦为 0）。
 - [ ] 行为或口径有变化的条目（F2、F3、F5、F9、B1、B3、B10，以及 F4 的结论）已同步进 `docs/presets.md` / `docs/specs/extensions.md` / `docs/specs/launch.md`，§5 的三处修正已落地。

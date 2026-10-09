@@ -61,6 +61,11 @@
 - **机器相关的路径不进 profile 补丁**：绝对路径会随 profile 导出 / 迁移跑到别的机器上。
 - **patch 行级编辑**：只改目标行的行区间，文件内注释与手写行原样保留；`insert:` 的子行
   删光时连带删掉 `- insert:` 头。
+- **补丁读写容忍 CRLF**：读取时剥掉行尾 `\r`（`patch.ts` 的行构建器统一处理），写回统一为 LF。
+  理由不是风格：JS 的 `.` **不匹配 `\r`** 而 `$` 只在串尾匹配，所以 `(.*)$` 这类取值在 CRLF 行上
+  是**整个匹配失败**（不是多捕一个字符）—— 名册会整份消失、`disabled` / `insert:` 都读不出来，
+  连 `run:start` 的重复行预检都会漏报。写入统一 LF 是刻意的：这些文件由 Launcher 维护，
+  而读取保持宽容，编辑器再存回 CRLF 也不会坏。
 - **patch 行 id 走白名单**，不接受任意 id。
 - **`!!js` 只读**：可解析，永不 dump 回 js-yaml。
 - **跨 profile 复制 / 移动 patch**：按行 id 合并到目标 profile，写前复验；移动则清空源行。
@@ -75,6 +80,11 @@ loader entry id 被插入两次会以 `duplicate loader entry id` 硬失败。
 
 - `findInsertConflicts`（`core/store/combo.ts`）在 `run:start` 前复算一次，发现重复返回
   `run.insertConflict` 并点名冲突的层；Profile 详情页展示同一告警，便于启动前发现。
+- **"这个 id 是否已被占用"必须与上面这套判定同源**：走结构遍历
+  （`collectInsertIds`，只认真正被 insert 的行），不得用文本包含 —— 文本包含会漏判 CRLF /
+  无尾换行 / 多打一个空格这三种真实写法，也会把某个 declaration 的 `config.plugins` 名册行
+  误当作占用（那一行不是 loader entry，重复它不会让宿主拒绝启动）。创建 preset 前的占用检查
+  走的正是这条路径（`core/presets/index.ts`）。
 - `config` / `disabled` 这类 id 覆盖型 patch 允许跨层重复，不计入。
 - 典型冲突：一个 profile 同时含 `@deepseek-ai/dsh-web-app` 与某个自带官方 roster 的替代
   app bundle。
@@ -128,3 +138,10 @@ SectionHeading（全宽，只放全局操作）
 它回答的是「库里最高的版本」。库中已有更高版本时（已发布的 `2.0.0` 与本地开发中的 `1.0.0` 并存），
 反推会把 profile 切到**另一个构建**，并把这个号写进返回字段与提示文案，而所有消息都显示成功。
 `installSource` 在成功返回里带回 `version`（`InstallResult`），`snapshotDevPlugin` 用它而不是再查一次库。
+
+**P9** registry 侧「最新版本」以 **`dist-tags.latest`** 为准（`shared/version.ts` 的
+`latestPackageVersion`），不得用版本表的下标：`versions` 是 registry 版本 map 的 `Object.keys()`，
+顺序是**发布顺序（最旧在前）**，所以 `versions[0]` 是「这个包发布过的最老版本」——实测 `left-pad`
+给出 `0.0.3`，而 `dist-tags.latest` 是 `1.3.0`。踩到的后果不是显示错一个号：以它为 fallback 的
+更新检查会把最老版本拿去和当前版本比，于是**永远不提示更新**。显式版本（`pkg@1.2.3`）与存档版本
+的选择不受此约束 —— 存档列表由 `storeVersions` 按 semver 升序给出，末位即最高。

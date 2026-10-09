@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../../../lib/ipc.ts'
 import FieldLabel from '../../../components/FieldLabel.tsx'
 import { MODAL } from '../../../theme.ts'
+import { latestPackageVersion } from '../../../../../shared/version.ts'
 import type { DshInstallStep, PackageVersionInfo } from '../../../../../shared/types.ts'
 
 // ── Official install ───────────────────────────────────────────────────────
@@ -57,7 +58,7 @@ export function OfficialInstallModal(p: OfficialInstallModalProps): JSX.Element 
       setVersionsLoading(false)
       if (vv.ok) {
         setPkgInfo(vv.value)
-        const latest = vv.value.distTags.latest ?? vv.value.versions[0]
+        const latest = latestPackageVersion(vv.value)
         if (latest !== undefined) setVersion(latest)
       }
     })()

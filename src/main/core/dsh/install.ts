@@ -12,7 +12,7 @@ import { resolveLaunchEntry } from './launch.ts'
 import { installDir, isDeletableDsh } from './probe.ts'
 import { runPnpm } from './pnpm.ts'
 import { fetchPackageVersions } from '../store/npm.ts'
-import { compareVersionsLoose, majorOfVersion } from '../shared/version.ts'
+import { compareVersionsLoose, latestPackageVersion, majorOfVersion } from '../shared/version.ts'
 import { archiveHome } from '../profile/home-data.ts'
 import { readDshState, writeDshState } from '../profile/appState.ts'
 import type {
@@ -95,7 +95,7 @@ export async function installOfficialDsh(
     let latest: string | undefined
     try {
       const info = await fetchPackageVersions('@deepseek-ai/dsh')
-      latest = info.distTags.latest ?? info.versions[0]
+      latest = latestPackageVersion(info)
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error)
       emit({ kind: 'version', state: 'error', detail: text })
@@ -184,7 +184,7 @@ export async function checkForDshUpdate(current: string): Promise<DshUpdateInfo 
   const cur = current.trim()
   if (cur === '') return null
   const info = await fetchPackageVersions('@deepseek-ai/dsh')
-  const stable = (info.distTags.latest ?? info.versions[0] ?? '').trim()
+  const stable = (latestPackageVersion(info) ?? '').trim()
   const track = (version: string | undefined): DshUpdateTrack | undefined => {
     const v = version?.trim()
     if (v === undefined || v === '') return undefined

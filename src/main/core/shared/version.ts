@@ -30,21 +30,11 @@ export function compareVersions(a: string, b: string): number {
   return semver.compare(a.trim(), b.trim())
 }
 
-/** Compare versions by their full semver semantics, including prerelease
- * handling (`2.0.0-beta.1` > `1.9.0`, but < `2.0.0`). Falls back to `0` when
- * either side is unparseable as a real version. */
-export function compareVersionsLoose(a: string, b: string): number {
-  try {
-    return semver.compare(a.trim(), b.trim())
-  } catch {
-    return 0
-  }
-}
-
-// majorOfVersion now lives in `src/shared/version.ts` (pure, no main-only deps)
-// so the renderer can reuse it without crossing the process boundary; re-exported
-// here to keep existing main-side import paths working.
-export { majorOfVersion } from '../../../shared/version.ts'
+// majorOfVersion / compareVersionsLoose / latestPackageVersion now live in
+// `src/shared/version.ts` (pure, no main-only deps) so the renderer can reuse them
+// without crossing the process boundary; re-exported here to keep existing
+// main-side import paths working.
+export { majorOfVersion, compareVersionsLoose, latestPackageVersion } from '../../../shared/version.ts'
 
 /**
  * Whether `version` satisfies `spec` using semver's range semantics

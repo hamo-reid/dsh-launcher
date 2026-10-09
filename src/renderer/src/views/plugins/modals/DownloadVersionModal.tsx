@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../../../lib/ipc.ts'
 import FieldLabel from '../../../components/FieldLabel.tsx'
 import { MODAL } from '../../../theme.ts'
+import { latestPackageVersion } from '../../../../../shared/version.ts'
 import type { PackageVersionInfo } from '../../../../../shared/types.ts'
 
 // ── Download with a selectable version ──────────────────────────────────────
@@ -38,7 +39,7 @@ export function DownloadVersionModal(p: DownloadVersionModalProps): JSX.Element 
       setLoading(false)
       if (!r.ok) { setError(apiErrorText(r)); return }
       setInfo(r.value)
-      setVersion(r.value.distTags.latest ?? r.value.versions[0])
+      setVersion(latestPackageVersion(r.value))
     })
     return () => { alive = false }
   }, [p.pkg])
