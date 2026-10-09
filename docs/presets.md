@@ -12,7 +12,7 @@ dsh 先后出过**两套 preset 模型**，页面同时服务两套，不问你�
 | id | 目录名 | `config.id` |
 | 从哪发现 | 扫两个根目录 | 该 profile 组合出来的补丁层 |
 | 内置/自建 | `trust: system \| user` | 没有 trust：所在层即出身（bundle = 内置，profile/home = 自建） |
-| 重复 id | 靠前的根赢 | dsh 直接报 `Duplicate agent preset`，靠前的声明赢 |
+| 重复 id | 靠前的根赢 | dsh 直接报 `Duplicate agent preset`，靠前的声明赢（借 row id 当身份的坏行不参与，见 §3.2） |
 
 ## 1. 判定模型：看组合里挂了谁，不看版本号
 
@@ -22,7 +22,9 @@ dsh 先后出过**两套 preset 模型**，页面同时服务两套，不问你�
 |---|---|
 | `@deepseek-ai/dsh-agent-preset`（或 `…-registry`） | `declaration` |
 | `@deepseek-ai/dsh-agent-presets` | `directory` |
-| 都没有 | `none`（页面说这个 dsh 没启用 agent preset） |
+| 都没有 | `none`（页面说这个 dsh 没启用 agent preset，**并且不列任何「来源」**） |
+
+`none` 这一格有具体后果：没有任何东西会读 preset，所以退役根 `<home>/.agent-presets` 与未挂载包的 `presets/` **不是**这份名册的来源，页面不列它们（来源面板为空、按钮禁用），`preset:reveal` 也对这些 id 报 `preset.notFound`。列出来会与同页「这个 dsh 没有启用 agent preset」的空状态自相矛盾。
 
 - 版本号说的是**装了什么**，组合里挂着谁说的是**跑什么**：profile 仍选中旧版 bundle、或新版装了没被组合进去时，两者不一致。判定因此按 profile 做，而不是按 dsh 做。
 - 两个都在时报 `declaration`：目录包没有扫描它的 host 就只是一堆死代码，留着它证明不了什么。
@@ -87,6 +89,9 @@ dsh `0.2.0-rc.1` 删掉了目录 preset，没有兼容读取：`packages/preset/
 
 - 出现 `@deepseek-ai/dsh-agent-preset` 的行**定义**（或替换）它这个 loader 行 id 的定义；引用同一 id 但不带 name 的行只改它的 `disabled`。**后一层赢**，这就是「这个 entry 的字段最终是最后一层写的那个值」。
 - preset 身份取 `config.id`，不是 loader 行 id。两行声明同一个 preset id 就是 host 的 `Duplicate agent preset`：靠前的赢，输的那个进 `warnings` 而不是被悄悄丢掉。
+- **读到的 `config.id` 也要过 `^[a-z0-9][a-z0-9-]*$`**：不合规则的行标 `broken`（理由写明宿主也会拒），id 仍按文件原样显示。写侧本来就守这条，读侧不守就会把一个不可用的 id 当正常名册项列出来。
+- **`config.id` 缺失时那行借 loader 行 id 当身份，但借来的 id 不参与"谁先到"**：它带着 `broken` 留在名册里，永不被丢，也永不占位。否则一个坏行能遮蔽一个真能用的 preset（真 preset 被当重复项丢弃），而"谁先注册这个 id"本来就是关于身份的问题，row id 不是身份。两行因此可能显示同一个 id：行 key 与评级取值都不再只认 id（评级按名册位置取，名册与 `grades` 由同一个数组生成）。
+- **同一个 loader 行 id 被两个层各 `insert` 一次，是宿主的 `duplicate loader entry id`，整个 profile 起不来** —— 而折叠本身看不出它，因为"后一层再用一次同一 row id"正好是它存在的理由（上面那条替换）。所以折叠之外另按 `collectInsertIds`（与启动预检 `findInsertConflicts` 同一套结构遍历）数每个 row id 被 insert 的次数，**只对本名册自己的 row id** 报 warning，措辞用宿主那句 `duplicate loader entry id`。不这么报的话，页面会为一个起不来的 profile 显示一份健康名册。只改 `disabled` 的覆盖行不算 insert（两处判定同源）。
 - 激活不了的声明留在名册里带原因（缺 `config`、`config.id` 为空、`name`/`order` 类型不对、`plugins` 形状不合法、YAML 读不出来）。占着 id 却什么都不显示，比一个坏行更糟。
 - `disabled: true`（无论写在声明行上还是后一层的覆盖行上）会让这个 preset 从名册里消失，与 host 一致。
 
@@ -99,7 +104,9 @@ dsh `0.2.0-rc.1` 删掉了目录 preset，没有兼容读取：`packages/preset/
 - **删除**：从它所在的那一层删掉这一行（`removeInsertRow`）；那一层因此没有条目时留下 `[]` 标记 —— 只剩注释的补丁文件不是合法 YAML 文档，dsh 会拒绝启动整个 profile。
 - **新建的 loader 行 id 用 `local-preset-<id>`**，不是官方的 `preset-<id>`：loader 行 id 撞了会让 dsh **拒绝启动整个 profile**，而 preset id 撞了只让那一条声明失败。用 launcher 自己的命名空间，将来 dsh 新增同名内置 preset 时退化成「一个坏行」，而不是「起不来」。
 - 写入前三道护栏：`config.id` 已被任何层占用、`local-preset-<id>` 行 id 已被占用、id 不合法 —— 都拒绝。
-- 一份声明能否改，看它**在哪一层**：bundle 层属于部署，只读；profile / home 层是用户自己的，可改。折叠已经把「谁赢」算出来了，所以赢家天然就是该改的那一层。
+- **一份声明能否改，看它是不是 profile 层**：本页只写当前 profile 的补丁。bundle 层属于部署（`preset.readOnly`）；home 层（`<home>/cordis.patch.yml`）是用户自己的，但**机器级、所有 profile 都组合它**，所以这一页也只读，用**另一个错误码** `preset.homeReadOnly` 拒绝，行上给的原因也不同（`preset.homeReadOnlyHint`）。分成两个码是因为文案由 code 决定（`lib/ipc.ts` 查 `errors.<code>`）：一个码只可能说出其中一种原因，而"内置不能改"和"改了会影响所有 profile"是两件事、两个改法。
+- 只读不等于不可读：**复制仍允许以 home 层声明为源**（副本落在 profile 层）。
+- 同一判据必须在显示侧：`editable` 就是 `layer === 'profile'`，UI 与后端不同源时界面会给出后端随后拒绝的操作（`store/refstate.ts:18-20` 那条规矩，反方向同样成立）。连带效果：删除确认文案「声明式的会从 profile 补丁里移除」在这个口径下自动正确 —— 能删的只有 profile 层。
 
 ### 3.4 官方四个 preset 没有名称也没有描述
 
@@ -174,15 +181,15 @@ dsh `0.2.0-rc.1` 删掉了目录 preset，没有兼容读取：`packages/preset/
 
 ## 6. launcher 能做什么
 
-每行只有两个控件：「打开」下拉，和一个「…」菜单（编辑描述 / 复制 / 删除）。预设不属于用户时菜单少两项，而已。
+每行只有两个控件：「打开」下拉，和一个「…」菜单（编辑描述 / 复制 / 删除）。这一页不写的 preset 菜单少两项（只剩复制），标签上的悬浮说明写出**为什么**：内置的与 home 层的是两种不同原因（见 §3.3）。
 
 - **Profile 选择器**：页面右上角。它决定名册和评级，也是写入目标 —— 声明模型下每个 profile 有自己的名册。
-- **新建**：两种起点，在同一个弹窗里切换。最小实例 = 以内置的极简模式（id `minimal`）为起点，那是这个部署自己最小的组合面；复制已有 = 从名册里任选一个。两者的插件列表都来自源、逐字复制，所以新 preset 的可挂载性和它的起点一样。名册里没有内置极简模式时，最小实例这一项不可选。
-- **改描述**：目录模型写 `preset.yml`；声明模型改声明行里的标量。只对用户自己的 preset 开放，内置 preset 的「内置」标签上挂着只读原因。
-- **复制**：新 id 就是新身份。元数据随之重写：保留源的 description，name 用传入值，丢掉源的 order，否则副本会排进源的位次。id 不能改名，改 id 就是复制成新的。
-- **删除**：仅用户自己的 preset。目录模型进系统回收站（可还原）；声明模型从 profile 补丁里移除行。
-- **打开**：下拉里选「在文件管理器中显示」或用 VS Code。目录模型打开 preset 目录；声明模型打开**承载它的补丁文件**（在文件管理器里显示的是它所在的目录）。VS Code 走 `vscode://file/<path>` 协议，不 spawn `code`。
-- **来源**：页面右上角的「来源」列出这份名册来自哪些层（组合包的哪个 patch 文件、profile 层、home 层），路径可复制。
+- **新建**：两种起点，在同一个弹窗里切换。最小实例 = 以内置的极简模式（id `minimal`）为起点，那是这个部署自己最小的组合面；复制已有 = 从名册里任选一个。两者的插件列表都来自源、逐字复制，所以新 preset 的可挂载性和它的起点一样。名册里没有内置极简模式时，最小实例这一项不可选。**「已占用」的名册来自名册 + 退役目录**：core 两样都拒（退役目录的 id 一旦迁移就会撞），而名册只显示前者，所以弹窗只按名册判就会给出一个必然失败的「创建」。
+- **改描述**：目录模型写 `preset.yml`；声明模型改声明行里的标量。只对 **profile 层**的 preset 开放（§3.3）：内置的与 home 层的都只读，后者要改请直接编辑 `<home>/cordis.patch.yml`。
+- **复制**：新 id 就是新身份。元数据随之重写：保留源的 description，name 用传入值，丢掉源的 order，否则副本会排进源的位次。id 不能改名，改 id 就是复制成新的。**源可以是只读的**：副本落在 profile 层。
+- **删除**：仅 profile 层的 preset。目录模型进系统回收站（可还原）；声明模型从 profile 补丁里移除行。
+- **打开**：下拉里选「在文件管理器中显示」或用 VS Code。目录模型打开 preset 目录；声明模型打开**承载它的补丁文件**（在文件管理器里显示的是它所在的目录）。VS Code 走 `vscode://file/<path>` 协议，不 spawn `code`。**只定位，不评级**：一次点击不该为了一行路径把整份名册逐行走一遍解析链。
+- **来源**：页面右上角的「来源」列出这份名册来自哪些层（组合包的哪个 patch 文件、profile 层、home 层），路径可复制。`none` 模型下没有来源可列，按钮禁用（§1）。
 - **旧目录迁移**：在声明模型的 dsh 上，`.agent-presets` 里剩下的目录会被识别为**不会被加载**，并给出「迁移为声明」：往当前 profile 的补丁里写一条同 id 的声明（id 取目录名，name/description/order 取 `preset.yml`，`plugins` 取 `agent.cordis.yml` 逐字）。**旧目录一个字节都不动。** 已经存在同 id 声明（含刚迁移完）的目录标为「已有同 id 的声明」，按钮不可用；组合读不出来的目录标为「内容读不出来」，同样不可迁移。
 
 ## 7. 不做的部分
@@ -213,6 +220,8 @@ dsh `0.2.0-rc.1` 删掉了目录 preset，没有兼容读取：`packages/preset/
 | `src/main/core/store/combo.ts` | 组合层读取（一个组合包声明的全部 patch 文件） |
 | `src/main/ipc/presets/presets.ts` | `preset:*` 七个通道 |
 | `src/renderer/src/views/PresetsSection.tsx` | 一级「预设」页 |
+| `src/renderer/src/lib/presetRow.ts` | 行级决策：菜单项与「为什么不能改」的原因键（`Dropdown`/`Tooltip` 在 server render 里看不到，见 [`TESTING.md`](./TESTING.md) §4） |
+| `src/renderer/src/lib/presetCreate.ts` | 新建弹窗的判定：「已占用」的 id 集合（名册 + 退役目录）与草稿能否提交 |
 
 ## 9. 真机核对
 

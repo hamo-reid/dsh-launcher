@@ -85,6 +85,7 @@ export const E = {
   // agent presets
   presetNotFound: 'preset.notFound',
   presetReadOnly: 'preset.readOnly',
+  presetHomeReadOnly: 'preset.homeReadOnly',
   presetExists: 'preset.exists',
   presetBadId: 'preset.badId',
   presetNoUserRoot: 'preset.noUserRoot',

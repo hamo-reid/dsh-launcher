@@ -23,11 +23,12 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { collectInsertIds } from '../patch/patch.ts'
 import { homePatchPath, profilePatchPath, writePatchFile } from '../profile/home.ts'
-import { discoverPresets, presetRoots } from './roots.ts'
+import { discoverPresets, presetById, presetRoots } from './roots.ts'
 import { directoryGradeTargets, gradeTargets, type GradeTarget } from './rating.ts'
 import { detectModel, profileLayers } from './layers.ts'
 import {
-  configBodyOf, insertDeclaration, pluginsBlockOf, readDeclarations, removeDeclaration, saveDeclarationMeta,
+  configBodyOf, declarationLoaderId, insertDeclaration, pluginsBlockOf, readDeclarations,
+  removeDeclaration, saveDeclarationMeta,
   type ComposedLayer, type DeclarationInput, type DeclaredPreset,
 } from './declaration.ts'
 import { legacyPresets, migrationInput } from './legacy.ts'
@@ -103,8 +104,9 @@ function declarationItem(preset: DeclaredPreset): PresetListItem {
   return {
     id: preset.id,
     // A declaration in a bundle layer belongs to the deployment; one in the
-    // profile or home patch is the person's own — which is also what makes it
-    // editable, there being no `trust` field in this model to consult.
+    // profile or home patch is the person's own — which is also what decides
+    // whether it is editable, there being no `trust` field in this model to
+    // consult.
     trust: preset.layer === 'bundle' ? 'system' : 'user',
     source: preset.layer,
     ...(preset.bundle === undefined ? {} : { bundle: preset.bundle }),
@@ -112,7 +114,14 @@ function declarationItem(preset: DeclaredPreset): PresetListItem {
     ...(preset.description === undefined ? {} : { description: preset.description }),
     ...(preset.order === undefined ? {} : { order: preset.order }),
     ...(preset.broken === undefined ? {} : { broken: preset.broken }),
-    editable: preset.layer !== 'bundle',
+    // ONLY the profile's own layer. The home layer is writable on disk but not
+    // here: this page is one profile's roster, and a declaration there is shared
+    // by every profile of the machine, so editing it from a profile-scoped page
+    // would change rosters the person is not looking at. The same condition is
+    // what {@link assertEditable} enforces — a page that offers an action the
+    // core then refuses is the failure `store/refstate.ts` names as this repo's
+    // rule, in the other direction.
+    editable: preset.layer === 'profile',
     // The declaration, not the preset: this model has no directory, and the file
     // that carries the definition is the thing worth opening.
     location: preset.sourcePath,
@@ -201,19 +210,32 @@ export function presetListing(ctx: DshContext, profile: string): PresetListing {
     }
   }
 
-  return { profile, model, presets: [], grades: [], places: directoryPlaces(ctx), legacy: [], warnings: [] }
+  // Nothing mounts a preset roster here, so there is nowhere a preset could come
+  // from: the retired root and the unmounted package's `presets/` are not
+  // sources, they are directories dsh never reads. Listing them would contradict
+  // the page's own "this dsh enables no agent presets" state.
+  return { profile, model, presets: [], grades: [], places: [], legacy: [], warnings: [] }
 }
 
-/** The declaration that supplies one id, or a refusal. */
-function declarationOf(ctx: DshContext, profile: string, id: string): DeclaredPreset {
-  const found = readDeclarations(profileLayers(ctx, profile)).presets.find(p => p.id === id)
+/** The declaration that supplies one id in these layers, or a refusal. */
+function declarationIn(layers: readonly ComposedLayer[], id: string): DeclaredPreset {
+  const found = readDeclarations(layers).presets.find(p => p.id === id)
   if (found === undefined) throwE(E.presetNotFound, { preset: id })
   return found
 }
 
-/** Refuse a write to a layer the deployment owns. */
+/**
+ * Refuse a write this page does not own.
+ *
+ * Two refusals, not one, because the reasons differ and only one of them is
+ * about ownership: a bundle declaration is the deployment's, while a home-layer
+ * one is the person's own but shared by every profile of the machine. They are
+ * separate codes because the renderer turns a code into a sentence
+ * (`lib/ipc.ts`) — one code could only ever say one of the two.
+ */
 function assertEditable(preset: DeclaredPreset): void {
   if (preset.layer === 'bundle') throwE(E.presetReadOnly, { preset: preset.id })
+  if (preset.layer !== 'profile') throwE(E.presetHomeReadOnly, { preset: preset.id })
 }
 
 /**
@@ -222,12 +244,13 @@ function assertEditable(preset: DeclaredPreset): void {
  * Two different failures, one check: a repeated PRESET id makes dsh fail that one
  * declaration, while a repeated LOADER ROW id makes it refuse to boot the whole
  * profile. Both are the caller's to avoid before anything is written.
+ * @param layers - the profile's layers, composed once by the caller.
+ * @param id - the preset id being claimed.
  */
-function assertDeclaredIdFree(ctx: DshContext, profile: string, id: string): void {
+function assertDeclaredIdFree(layers: readonly ComposedLayer[], id: string): void {
   if (!PRESET_ID_RE.test(id)) throwE(E.presetBadId, { preset: id })
-  const layers = profileLayers(ctx, profile)
   if (readDeclarations(layers).presets.some(p => p.id === id)) throwE(E.presetExists, { preset: id })
-  const rowId = `local-preset-${id}`
+  const rowId = declarationLoaderId(id)
   // Ask the SAME structural walk the boot pre-flight uses ({@link findInsertConflicts})
   // which ids this layer INSERTS. A raw text search for `- id: <rowId>` misses
   // three shapes that all carry a real row — a CRLF file, one whose last line has
@@ -242,15 +265,18 @@ function assertDeclaredIdFree(ctx: DshContext, profile: string, id: string): voi
 /** {@link assertDeclaredIdFree} plus the directories the retired root still
  * holds — which dsh no longer reads, but which would collide with the id the
  * moment someone migrated them. */
-function assertIdFree(ctx: DshContext, profile: string, id: string): void {
-  assertDeclaredIdFree(ctx, profile, id)
+function assertIdFree(ctx: DshContext, layers: readonly ComposedLayer[], id: string): void {
+  assertDeclaredIdFree(layers, id)
   if (legacyPresets(ctx).some(p => p.id === id)) throwE(E.presetExists, { preset: id })
 }
 
 /** The declaration-model half of "create a preset from an existing one". */
-function copyIntoProfile(ctx: DshContext, profile: string, fromId: string, toId: string, name?: string): void {
-  const source = declarationOf(ctx, profile, fromId)
-  assertIdFree(ctx, profile, toId)
+function copyIntoProfile(
+  ctx: DshContext, profile: string, layers: readonly ComposedLayer[], fromId: string, toId: string,
+  name?: string,
+): void {
+  const source = declarationIn(layers, fromId)
+  assertIdFree(ctx, layers, toId)
   const body = configBodyOf(patchTextAt(source.sourcePath), source.rowId)
   const plugins = body === undefined ? undefined : pluginsBlockOf(body)
   if (plugins === undefined) throwE(E.presetNoPlugins, { preset: fromId })
@@ -278,14 +304,16 @@ function copyIntoProfile(ctx: DshContext, profile: string, fromId: string, toId:
  * @param profile - the profile whose roster the preset belongs to.
  * @param id - the preset id.
  * @param meta - the display half; `''`/`null` clears a key.
- * @throws `preset.notFound`, or `preset.readOnly` for a preset the deployment owns.
+ * @throws `preset.notFound`, `preset.readOnly` for a preset the deployment owns,
+ * or `preset.homeReadOnly` for one the machine-level home layer holds.
  */
 export function savePresetMetaIn(ctx: DshContext, profile: string, id: string, meta: PresetMetaInput): void {
-  if (detectModel(profileLayers(ctx, profile)) !== 'declaration') {
+  const layers = profileLayers(ctx, profile)
+  if (detectModel(layers) !== 'declaration') {
     savePresetMeta(ctx, id, meta)
     return
   }
-  const preset = declarationOf(ctx, profile, id)
+  const preset = declarationIn(layers, id)
   assertEditable(preset)
   writeLayer(preset.sourcePath, saveDeclarationMeta(patchTextAt(preset.sourcePath), preset.rowId, meta))
 }
@@ -302,11 +330,12 @@ export function savePresetMetaIn(ctx: DshContext, profile: string, id: string, m
 export function copyPresetIn(
   ctx: DshContext, profile: string, fromId: string, toId: string, name?: string,
 ): void {
-  if (detectModel(profileLayers(ctx, profile)) !== 'declaration') {
+  const layers = profileLayers(ctx, profile)
+  if (detectModel(layers) !== 'declaration') {
     copyPreset(ctx, fromId, toId, name)
     return
   }
-  copyIntoProfile(ctx, profile, fromId, toId, name)
+  copyIntoProfile(ctx, profile, layers, fromId, toId, name)
 }
 
 /**
@@ -316,14 +345,16 @@ export function copyPresetIn(
  * @param ctx - the dsh to write.
  * @param profile - the profile whose roster the preset belongs to.
  * @param id - the preset id.
- * @throws `preset.notFound`, or `preset.readOnly` for a preset the deployment owns.
+ * @throws `preset.notFound`, `preset.readOnly` for a preset the deployment owns,
+ * or `preset.homeReadOnly` for one the machine-level home layer holds.
  */
 export async function deletePresetIn(ctx: DshContext, profile: string, id: string): Promise<void> {
-  if (detectModel(profileLayers(ctx, profile)) !== 'declaration') {
+  const layers = profileLayers(ctx, profile)
+  if (detectModel(layers) !== 'declaration') {
     await deletePreset(ctx, id)
     return
   }
-  const preset = declarationOf(ctx, profile, id)
+  const preset = declarationIn(layers, id)
   assertEditable(preset)
   writeLayer(preset.sourcePath, removeDeclaration(patchTextAt(preset.sourcePath), preset.rowId))
 }
@@ -342,7 +373,7 @@ export async function deletePresetIn(ctx: DshContext, profile: string, id: strin
 export function migrateLegacyPreset(ctx: DshContext, profile: string, id: string): void {
   const legacy = legacyPresets(ctx).find(p => p.id === id)
   if (legacy === undefined) throwE(E.presetNotFound, { preset: id })
-  assertDeclaredIdFree(ctx, profile, id)
+  assertDeclaredIdFree(profileLayers(ctx, profile), id)
   const migrated = migrationInput(legacy)
   if (!migrated.ok) throwE(E.presetBadComposition, { preset: id, detail: migrated.problem })
   writeLayer(profilePatchPath(ctx, profile), insertDeclaration(profilePatchText(ctx, profile), migrated.input))
@@ -350,17 +381,32 @@ export function migrateLegacyPreset(ctx: DshContext, profile: string, id: string
 
 /**
  * What "open" targets for one preset.
+ *
+ * Location only: this asks which model the profile mounts and where that model
+ * keeps the one id's definition. Reading the whole roster here would grade every
+ * preset of the profile — a full module resolution walk per row — to answer a
+ * question about a single path, and "open" is a click on a file, not a verdict.
  * @param ctx - the dsh to read.
  * @param profile - the profile whose roster the preset belongs to.
  * @param id - the preset id.
  * @returns the path and whether it is a directory.
- * @throws `preset.notFound` when no layer supplies that id.
+ * @throws `preset.notFound` when no layer supplies that id, or when the profile
+ * mounts no preset model at all.
  */
 export function presetLocationOf(
   ctx: DshContext, profile: string, id: string,
 ): { path: string; kind: 'dir' | 'file' } {
-  const listing = presetListing(ctx, profile)
-  const found = listing.presets.find(p => p.id === id)
-  if (found === undefined) throwE(E.presetNotFound, { preset: id })
-  return { path: found.location, kind: found.locationKind }
+  const layers = profileLayers(ctx, profile)
+  const model = detectModel(layers)
+  if (model === 'declaration') {
+    return { path: declarationIn(layers, id).sourcePath, kind: 'file' }
+  }
+  if (model === 'directory') {
+    const row = presetById(discoverPresets(presetRoots(ctx)), id)
+    if (row === undefined) throwE(E.presetNotFound, { preset: id })
+    return { path: row.dir, kind: 'dir' }
+  }
+  // No model, no roster: the directory the retired root holds is not where this
+  // dsh's presets come from, so "open" has nothing to open.
+  throwE(E.presetNotFound, { preset: id })
 }

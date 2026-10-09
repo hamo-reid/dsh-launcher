@@ -27,6 +27,8 @@ import {
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
 import { nextProfileChoice } from '../lib/profileScope.ts'
+import { presetReadOnlyHintKey, presetRowActions, type PresetRowAction } from '../lib/presetRow.ts'
+import { presetTakenIds } from '../lib/presetCreate.ts'
 import AppShell from '../components/AppShell.tsx'
 import ConfirmMenu, { type MenuAction } from '../components/ConfirmMenu.tsx'
 import EmptyState from '../components/EmptyState.tsx'
@@ -59,6 +61,22 @@ const SOURCE_KEY = {
   home: 'preset.source.home',
   'user-dir': 'preset.source.userDir',
 } as const satisfies Record<PresetSource, string>
+
+/** The label each row action wears. `as const` keeps the values literal, which is
+ * what lets `t()` typecheck a looked-up key. */
+const ACTION_KEY = {
+  edit: 'preset.edit',
+  copy: 'preset.copy',
+  delete: 'preset.delete',
+} as const satisfies Record<PresetRowAction, string>
+
+/** One roster row's React identity. Not the preset id alone: a declaration that
+ * could not name a preset borrows its loader row id as one, and that string can
+ * equal the id of a preset that does name itself. Both rows are kept (the broken
+ * one may not shadow a working preset, and must not be hidden either), so the key
+ * has to tell them apart — location and the broken reason do. */
+const rowKey = (preset: PresetListItem): string =>
+  `${preset.id}\u0000${preset.location}\u0000${preset.broken ?? ''}`
 
 export default function PresetsSection(): JSX.Element {
   const { t } = useTranslation()
@@ -153,6 +171,11 @@ export default function PresetsSection(): JSX.Element {
     .find(preset => preset.id === MINIMAL_PRESET_ID && preset.trust === 'system' && preset.broken === undefined)
     ?.id ?? null
 
+  // Every id the core will refuse a new preset under: the roster's, plus the
+  // directories the retired root keeps — which the roster does not show, so a
+  // dialog built from the roster alone offers a create that is certain to fail.
+  const takenIds = presetTakenIds(presets, legacy)
+
   /** The minimal instance: a fresh preset off the deployment's smallest one. */
   const createPreset = async (mode: PresetCreateMode, fromId: string, toId: string, name: string): Promise<void> => {
     if (selectedId === undefined || profile === undefined) return
@@ -206,9 +229,18 @@ export default function PresetsSection(): JSX.Element {
     if (!r.ok) void message.error(apiErrorText(r))
   }
 
-  /** This preset's grade under the profile the page is showing. */
-  const gradeOf = (presetId: string): PresetGrade | undefined =>
-    listing?.grades.find(cell => cell.presetId === presetId)
+  /** This preset's grade under the profile the page is showing.
+   *
+   * By POSITION first: the listing grades exactly one profile, so its cells line
+   * up with the roster one for one (`presetListing` builds both from the same
+   * array). That matters because two roster rows can carry one id — a row that
+   * could not name a preset borrows its loader row id, which may equal another
+   * preset's id — and lookup by id would hand one row the other's verdict. The
+   * id lookup stays as the fallback for a listing whose cells do not line up. */
+  const gradeOf = (presetId: string, index: number): PresetGrade | undefined =>
+    listing !== null && listing.grades.length === presets.length
+      ? listing.grades[index]
+      : listing?.grades.find(cell => cell.presetId === presetId)
 
   /** What a grade reads as. An `incomplete` grade leads with the count, which is
    * the whole reason the tag is worth looking at. */
@@ -242,22 +274,16 @@ export default function PresetsSection(): JSX.Element {
     )
   }
 
-  /** What the row's menu offers. A preset the deployment owns keeps only the
-   * copy, since every other entry would write where the launcher may not. */
-  const actionsFor = (preset: PresetListItem): MenuAction[] => {
-    const actions: MenuAction[] = []
-    if (preset.editable) actions.push({ key: 'edit', label: t('preset.edit') })
-    actions.push({ key: 'copy', label: t('preset.copy') })
-    if (preset.editable) {
-      actions.push({
-        key: 'delete',
-        label: t('preset.delete'),
-        danger: true,
-        confirmText: t('preset.deleteConfirm', { id: preset.id }),
-      })
-    }
-    return actions
-  }
+  /** What the row's menu offers. A preset this page may not write keeps only the
+   * copy — a copy lands in the profile's own layer, so it is allowed from any
+   * source, and every other entry would write where the page may not. */
+  const actionsFor = (preset: PresetListItem): MenuAction[] => presetRowActions(preset).map(key => ({
+    key,
+    label: t(ACTION_KEY[key]),
+    ...(key === 'delete'
+      ? { danger: true, confirmText: t('preset.deleteConfirm', { id: preset.id }) }
+      : {}),
+  }))
 
   const act = (preset: PresetListItem, key: string): void => {
     if (key === 'edit') setEditing(preset)
@@ -267,7 +293,7 @@ export default function PresetsSection(): JSX.Element {
 
   /** One row: what the preset says about itself, how it grades here, and the two
    * controls the launcher offers on it — open it, or act on it. */
-  const row = (preset: PresetListItem): ReactNode => {
+  const row = (preset: PresetListItem, index: number): ReactNode => {
     const description = preset.description ?? t('preset.noDescription')
     const text = (
       <div
@@ -283,9 +309,13 @@ export default function PresetsSection(): JSX.Element {
         {description}
       </div>
     )
-    const cell = gradeOf(preset.id)
+    const cell = gradeOf(preset.id, index)
+    // Why this row offers no edit. Not always "it is built-in": a declaration in
+    // the machine-level home patch is the person's own and still not editable
+    // here, so the reason has to be the row's own.
+    const readOnlyHint = presetReadOnlyHintKey(preset)
     return (
-      <List.Item key={preset.id}>
+      <List.Item key={rowKey(preset)}>
         <div style={{ display: 'flex', gap: token.paddingLG, width: '100%', alignItems: 'flex-start' }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <Space size={8} wrap>
@@ -293,9 +323,9 @@ export default function PresetsSection(): JSX.Element {
                 {preset.name ?? preset.id}
               </Typography.Text>
               <Typography.Text code type="secondary">{preset.id}</Typography.Text>
-              {/* Why a built-in preset offers no edit is worth saying out loud:
-                  its row menu simply has one entry fewer, with no reason. */}
-              <Tooltip title={preset.editable ? undefined : t('preset.readOnlyHint')}>
+              {/* Why a preset offers no edit is worth saying out loud: its row
+                  menu simply has one entry fewer, with no reason. */}
+              <Tooltip title={readOnlyHint === undefined ? undefined : t(readOnlyHint)}>
                 <Tag>{t(preset.trust === 'user' ? 'preset.sourceUser' : 'preset.sourceSystem')}</Tag>
               </Tooltip>
               {/* Where the definition lives. Two shipped presets and a local one
@@ -442,7 +472,7 @@ export default function PresetsSection(): JSX.Element {
         <div style={{ padding: `0 ${String(token.padding)}px` }}>
           {warningsBlock()}
           {legacyBlock()}
-          <List dataSource={presets} rowKey="id" renderItem={row} />
+          <List dataSource={presets} rowKey={rowKey} renderItem={row} />
         </div>
       </Panel>
     )
@@ -569,7 +599,15 @@ export default function PresetsSection(): JSX.Element {
                   </div>
                 )}
               >
-                <Button size="small" icon={<InfoCircleOutlined />}>{t('preset.location')}</Button>
+                {/* With no preset model mounted there are no sources either, so
+                    the control is disabled rather than opening an empty list. */}
+                <Button
+                  size="small"
+                  icon={<InfoCircleOutlined />}
+                  disabled={places.length === 0}
+                >
+                  {t('preset.location')}
+                </Button>
               </Popover>
               <Button
                 size="small"
@@ -606,6 +644,7 @@ export default function PresetsSection(): JSX.Element {
         open={create !== null}
         initialMode={create?.mode ?? 'minimal'}
         presets={presets}
+        takenIds={takenIds}
         minimalId={minimalId}
         defaultFrom={create?.from ?? ''}
         busy={busy === 'create'}

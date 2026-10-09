@@ -17,12 +17,50 @@ import { setPresetTrash } from '../../core/presets/authoring.ts'
 import { registerPresetsIpc } from './presets.ts'
 import type { IpcResult, PresetListing } from '../../../shared/types.ts'
 
-/** Every registered channel, plus the shell calls the write handlers make. */
-const { channels, openPath, openExternal } = vi.hoisted(() => ({
+/** Every registered channel, plus the shell calls the write handlers make, and
+ * three call counters: how often the layer stack was composed, how often the
+ * roster was graded, and how many module probes a call spent. They are here to
+ * pin what a PRESET action must NOT do — composition and grading are the
+ * expensive reads, and grading costs one probe per row. */
+const { channels, openPath, openExternal, counters } = vi.hoisted(() => ({
   channels: new Map<string, (event: unknown, ...args: unknown[]) => unknown>(),
   openPath: vi.fn(async () => ''),
   openExternal: vi.fn(async () => undefined),
+  counters: { compose: 0, grade: 0, resolve: 0 },
 }))
+
+vi.mock('../../core/store/combo.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../core/store/combo.ts')>()
+  return {
+    ...actual,
+    composeLayerTexts: (...args: Parameters<typeof actual.composeLayerTexts>) => {
+      counters.compose += 1
+      return actual.composeLayerTexts(...args)
+    },
+  }
+})
+
+vi.mock('../../core/presets/rating.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../core/presets/rating.ts')>()
+  return {
+    ...actual,
+    gradeTargets: (...args: Parameters<typeof actual.gradeTargets>) => {
+      counters.grade += 1
+      return actual.gradeTargets(...args)
+    },
+  }
+})
+
+vi.mock('../../core/store/module-resolve.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../core/store/module-resolve.ts')>()
+  return {
+    ...actual,
+    resolveModule: (...args: Parameters<typeof actual.resolveModule>) => {
+      counters.resolve += 1
+      return actual.resolveModule(...args)
+    },
+  }
+})
 
 vi.mock('electron', () => ({
   app: { getVersion: () => '0.0.0-test' },
@@ -39,6 +77,7 @@ let root: string
 let trashed: string[]
 const home = (): string => join(root, 'home')
 const userRoot = (): string => join(home(), '.agent-presets')
+const homePatch = (): string => join(home(), 'cordis.patch.yml')
 const profileDir = (name: string): string => join(home(), 'profiles', name)
 const patchPath = (name: string): string => join(profileDir(name), 'cordis.patch.yml')
 const bundleDir = (): string => join(profileDir('decl'), 'node_modules', '@deepseek-ai', 'dsh-web-app')
@@ -95,6 +134,23 @@ const DECLARED_ROW = [
 /** `decl`'s own patch layer: a declaration, plus whatever else a test adds. */
 function mkDeclaringProfile(...extra: string[]): void {
   writeFileSync(patchPath('decl'), ['- insert:', ...DECLARED_ROW, ...extra, ''].join('\n'))
+}
+
+/** A declaration in the machine-level home patch: the same file for every
+ * profile of this dsh, which is why this page may not write to it. */
+const HOME_DECLARED_ROW = [
+  '    - id: local-preset-machine',
+  "      name: '@deepseek-ai/dsh-agent-preset'",
+  '      config:',
+  '        id: machine',
+  '        plugins:',
+  '          - id: persona',
+  "            name: '@deepseek-ai/dsh-persona'",
+]
+
+/** Put {@link HOME_DECLARED_ROW} into the home patch, beside nothing else. */
+function mkHomeDeclaringProfile(): void {
+  writeFileSync(homePatch(), ['- insert:', ...HOME_DECLARED_ROW, ''].join('\n'))
 }
 
 /** A bundle that declares one preset in its SECOND patch file — the shape
@@ -154,10 +210,14 @@ afterAll(() => rmSync(root, { recursive: true, force: true }))
 
 beforeEach(() => {
   rmSync(userRoot(), { recursive: true, force: true })
+  rmSync(homePatch(), { force: true })
   trashed = []
   setPresetTrash(async (target) => { trashed.push(target) })
   openPath.mockClear()
   openExternal.mockClear()
+  counters.compose = 0
+  counters.grade = 0
+  counters.resolve = 0
   mkPreset('mine')
   mkDirectoryProfile('alpha')
   mkDirectoryProfile('beta')
@@ -488,5 +548,153 @@ describe('the declaration-model writes', () => {
     mkdirSync(join(userRoot(), 'ghost'), { recursive: true })
     expect(await call('preset:migrate', 'a', 'decl', 'ghost'))
       .toMatchObject({ ok: false, code: 'preset.badComposition' })
+  })
+})
+
+// ── the home layer, a boot-stopping conflict, and what a click costs ─────────
+
+describe('a declaration in the machine-level home patch', () => {
+  beforeEach(() => {
+    rmSync(userRoot(), { recursive: true, force: true })
+    mkProfile('decl', ['@deepseek-ai/dsh-web-app'])
+    mkPresetBundle()
+    mkDeclaringProfile()
+    mkHomeDeclaringProfile()
+  })
+
+  it('is listed as read-only here, and every write to it is refused untouched', async () => {
+    const listing = await ok<PresetListing>('preset:list', 'a', 'decl')
+    // The person's own — `home` is not the deployment's — but not this page's to
+    // change: every profile of this machine composes that patch.
+    expect(listing.presets.find(preset => preset.id === 'machine'))
+      .toMatchObject({ source: 'home', trust: 'user', editable: false })
+
+    const homeBefore = readFileSync(homePatch(), 'utf8')
+    const profileBefore = readFileSync(patchPath('decl'), 'utf8')
+    expect(await call('preset:saveMeta', 'a', 'decl', 'machine', { name: 'x', description: '', order: null }))
+      .toMatchObject({ ok: false, code: 'preset.homeReadOnly' })
+    expect(await call('preset:delete', 'a', 'decl', 'machine'))
+      .toMatchObject({ ok: false, code: 'preset.homeReadOnly' })
+    // Byte for byte: the refusal is decided before anything is written, so
+    // neither the home patch nor the profile's own layer moved.
+    expect(readFileSync(homePatch(), 'utf8')).toBe(homeBefore)
+    expect(readFileSync(patchPath('decl'), 'utf8')).toBe(profileBefore)
+  })
+
+  it('is still a legal SOURCE for a copy, which lands in this profile', async () => {
+    expect(await ok<boolean>('preset:copy', 'a', 'decl', 'machine', 'copied', 'Copied')).toBe(true)
+    const written = readFileSync(patchPath('decl'), 'utf8')
+    expect(written).toContain('    - id: local-preset-copied')
+    expect(written).toContain("            name: '@deepseek-ai/dsh-persona'")
+    // The home layer is not written to by a copy either.
+    expect(readFileSync(homePatch(), 'utf8')).toContain('local-preset-machine')
+  })
+})
+
+describe('a loader row id two layers insert', () => {
+  beforeEach(() => {
+    rmSync(userRoot(), { recursive: true, force: true })
+    mkProfile('decl', ['@deepseek-ai/dsh-web-app'])
+    mkPresetBundle()
+    // The bundle's second patch file already inserts `preset-standard`; this
+    // profile's layer inserts the SAME row id, which the host refuses to boot.
+    mkDeclaringProfile(...[
+      '    - id: preset-standard',
+      "      name: '@deepseek-ai/dsh-agent-preset'",
+      '      config:',
+      '        id: standard',
+      '        plugins: []',
+    ])
+  })
+
+  it('is reported to the page, which would otherwise show a healthy roster', async () => {
+    const listing = await ok<PresetListing>('preset:list', 'a', 'decl')
+    // The fold keeps one row per row id — that is what a replace looks like —
+    // so the roster alone cannot tell the two apart.
+    expect(listing.presets.filter(preset => preset.id === 'standard')).toHaveLength(1)
+    expect(listing.warnings.some(line => line.includes('preset-standard'))).toBe(true)
+    expect(listing.warnings.some(line => line.includes('duplicate loader entry id'))).toBe(true)
+  })
+})
+
+describe('what one preset action reads', () => {
+  beforeEach(() => {
+    rmSync(userRoot(), { recursive: true, force: true })
+    mkProfile('decl', ['@deepseek-ai/dsh-web-app'])
+    mkPresetBundle()
+    mkDeclaringProfile()
+  })
+
+  it('locates a preset for "open" without grading the roster', async () => {
+    counters.compose = 0
+    counters.grade = 0
+    counters.resolve = 0
+    expect(await ok<boolean>('preset:reveal', 'a', 'decl', 'mine')).toBe(true)
+    expect(openPath).toHaveBeenCalledWith(profileDir('decl'))
+    // Locating is one composition and NO grading: walking every row of the
+    // roster through a resolver is what a click used to cost.
+    expect(counters.compose).toBe(1)
+    expect(counters.grade).toBe(0)
+    expect(counters.resolve).toBe(0)
+
+    // The counter itself is alive: listing DOES grade.
+    counters.compose = 0
+    counters.grade = 0
+    expect(await ok<PresetListing>('preset:list', 'a', 'decl')).toBeTruthy()
+    expect(counters.compose).toBe(1)
+    expect(counters.grade).toBe(1)
+    expect(counters.resolve).toBeGreaterThan(0)
+  })
+
+  it('composes the layer stack once per write', async () => {
+    counters.compose = 0
+    counters.grade = 0
+    expect(await ok<boolean>('preset:saveMeta', 'a', 'decl', 'mine', {
+      name: 'Renamed', description: '', order: null,
+    })).toBe(true)
+    expect(counters.compose).toBe(1)
+    expect(counters.grade).toBe(0)
+
+    counters.compose = 0
+    counters.grade = 0
+    expect(await ok<boolean>('preset:copy', 'a', 'decl', 'mine', 'copy', 'Copy')).toBe(true)
+    expect(counters.compose).toBe(1)
+    expect(counters.grade).toBe(0)
+  })
+})
+
+describe('what "open" reads on a directory-model dsh', () => {
+  // No `beforeEach` of its own: the fixture user root this page scans is the
+  // one the outer setup just built.
+  it('locates the preset directory without grading the roster', async () => {
+    counters.compose = 0
+    counters.grade = 0
+    expect(await ok<boolean>('preset:reveal', 'a', 'alpha', 'mine')).toBe(true)
+    expect(openPath).toHaveBeenCalledWith(join(userRoot(), 'mine'))
+    expect(counters.compose).toBe(1)
+    expect(counters.grade).toBe(0)
+    // One probe remains, and it is finding the ROOT this roster is scanned from
+    // (`presetRoots` resolves the built-in package), not grading a row.
+    expect(counters.resolve).toBe(1)
+  })
+})
+
+// ── no model at all ─────────────────────────────────────────────────────────
+
+describe('a profile that mounts no preset model', () => {
+  it('names no definition source, because nothing reads one there', async () => {
+    mkProfile('none')
+    // The retired root is on disk and this profile mounts no presets package:
+    // the page says so, and must not offer that directory as a "source" of a
+    // roster that does not exist.
+    mkPreset('liangshen')
+    const listing = await ok<PresetListing>('preset:list', 'a', 'none')
+    expect(listing).toMatchObject({
+      model: 'none', presets: [], grades: [], places: [], legacy: [], warnings: [],
+    })
+    // And "open" has nothing to point at, not even that directory.
+    expect(await call('preset:reveal', 'a', 'none', 'liangshen'))
+      .toMatchObject({ ok: false, code: 'preset.notFound' })
+    expect(openPath).not.toHaveBeenCalled()
   })
 })

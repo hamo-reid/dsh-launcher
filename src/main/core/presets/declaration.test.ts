@@ -17,6 +17,16 @@ const layer = (kind: ComposedLayer['kind'], ...lines: string[]): ComposedLayer =
   ...(kind === 'bundle' ? { bundle: '@deepseek-ai/dsh-web-app' } : {}),
 })
 
+/** One composed layer at its own path. Two layers of one KIND are two FILES —
+ * which is the granularity a repeated insert is counted at. */
+const layerFile = (kind: ComposedLayer['kind'], file: string, ...lines: string[]): ComposedLayer => ({
+  kind,
+  text: lines.length === 0 ? '' : `${lines.join('\n')}\n`,
+  path: `C:/layers/${file}`,
+  baseDir: `C:/layers/${file.replace(/\.patch\.yml$/, '')}`,
+  ...(kind === 'bundle' ? { bundle: '@deepseek-ai/dsh-web-app' } : {}),
+})
+
 /** A shipped-style declaration row, 4-space base indent like the real patches. */
 const shipped = (id: string, order: number, ...extra: string[]): string[] => [
   '- insert:',
@@ -147,6 +157,85 @@ describe('readDeclarations', () => {
     expect(read.warnings).toHaveLength(1)
     expect(read.warnings[0]).toContain('declared twice')
     expect(read.warnings[0]).toContain('Duplicate agent preset: standard')
+  })
+
+  it('warns when two layers INSERT the same loader row id, which dsh refuses to boot for', () => {
+    // Folding cannot tell this from the replace it exists for — a later layer
+    // saying the same row id again — so the roster silently keeps one row, and
+    // only this warning says the profile will not start.
+    const read = readDeclarations([
+      layerFile('bundle', 'web.patch.yml', ...shipped('standard', 1)),
+      layerFile('profile', 'mine.patch.yml',
+        '- insert:',
+        '    - id: preset-standard',
+        "      name: '@deepseek-ai/dsh-agent-preset'",
+        '      config:',
+        '        id: standard',
+        '        plugins: []'),
+    ])
+    expect(read.presets.map(p => p.id)).toEqual(['standard'])
+    expect(read.warnings).toHaveLength(1)
+    expect(read.warnings[0]).toContain('preset-standard')
+    expect(read.warnings[0]).toContain('2 times')
+    expect(read.warnings[0]).toContain('web.patch.yml')
+    expect(read.warnings[0]).toContain('mine.patch.yml')
+    expect(read.warnings[0]).toContain('duplicate loader entry id')
+  })
+
+  it('does not read a later layer naming a row id as inserting it', () => {
+    // A row that only names the id changes that row; it adds no entry, so it
+    // cannot collide. This is the same distinction the create guard rests on.
+    const read = readDeclarations([
+      layerFile('bundle', 'web.patch.yml', ...shipped('standard', 1)),
+      layerFile('home', 'home.patch.yml', '- id: preset-standard', '  disabled: false'),
+    ])
+    expect(read.presets.map(p => p.id)).toEqual(['standard'])
+    expect(read.warnings).toEqual([])
+  })
+
+  it('says nothing about an insert conflict outside the preset roster', () => {
+    // Two layers inserting one PLUGIN row is the profile page's finding. Naming
+    // it here too would report rows this page never shows.
+    const read = readDeclarations([
+      layerFile('bundle', 'web.patch.yml', '- insert:', '    - id: tool-bash', "      name: '@x/tool-bash'"),
+      layerFile('profile', 'mine.patch.yml', '- insert:', '    - id: tool-bash', "      name: '@x/tool-bash'"),
+    ])
+    expect(read).toEqual({ presets: [], warnings: [] })
+  })
+
+  it('lets a preset keep its id when a nameless row borrowed the loader row id as one', () => {
+    // The broken row comes FIRST and its borrowed id IS `standard`. First come
+    // first served would hand it the slot and drop the preset that works — for a
+    // preset id, which is a question about identities, not about row ids.
+    const read = readDeclarations([
+      layerFile('bundle', 'web.patch.yml',
+        '- insert:',
+        '    - id: standard',
+        "      name: '@deepseek-ai/dsh-agent-preset'",
+        '      config:',
+        '        plugins: []'),
+      layerFile('profile', 'mine.patch.yml', ...shipped('standard', 2)),
+    ])
+    const working = read.presets.filter(p => p.broken === undefined)
+    expect(working.map(p => [p.id, p.rowId, p.order])).toEqual([['standard', 'preset-standard', 2]])
+    // And the row that borrowed the id is still shown, with its own reason.
+    expect(read.presets).toHaveLength(2)
+    expect(read.presets.filter(p => p.broken !== undefined)[0].broken).toContain('config.id')
+    expect(read.warnings).toEqual([])
+  })
+
+  it('marks a `config.id` the host would reject instead of listing it as a preset', () => {
+    const read = readDeclarations([layer('profile',
+      '- insert:',
+      '    - id: local-preset-bad',
+      "      name: '@deepseek-ai/dsh-agent-preset'",
+      '      config:',
+      '        id: Bad_ID',
+      '        plugins: []')])
+    expect(read.presets).toHaveLength(1)
+    // The file's own spelling is still what the page shows.
+    expect(read.presets[0].id).toBe('Bad_ID')
+    expect(read.presets[0].broken).toContain('not a preset id the host accepts')
   })
 
   it('keeps a broken declaration on the roster with the reason', () => {

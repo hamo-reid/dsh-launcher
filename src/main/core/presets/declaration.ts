@@ -20,10 +20,10 @@
 
 import { dumpYaml, isJsExpr, loadYaml } from '../patch/yaml.ts'
 import {
-  appendInsertChild, extractKeyValue, parseClassifiedRows, removeInsertRow, setConfigScalar,
+  appendInsertChild, collectInsertIds, extractKeyValue, parseClassifiedRows, removeInsertRow, setConfigScalar,
 } from '../patch/patch.ts'
 import { readCompositionValue, type CompositionRead } from './rows.ts'
-import { DECLARATION_PLUGIN } from '../../../shared/preset.ts'
+import { DECLARATION_PLUGIN, PRESET_ID_RE } from '../../../shared/preset.ts'
 import type { PresetMetaInput } from '../../../shared/types.ts'
 
 /** One patch layer of a profile's composition, as the host applies it. */
@@ -44,6 +44,10 @@ export interface ComposedLayer {
 export interface DeclaredPreset {
   /** Preset identity — the row's `config.id`, never the loader row id. */
   id: string
+  /** Whether {@link id} is only the loader row id, because `config.id` was not
+   * usable. Such a row is always `broken`, and it is NOT an identity: it must
+   * never shadow a preset that actually works, nor another broken row. */
+  idFromRow: boolean
   /** Loader row id carrying the definition; this is what a patch targets. */
   rowId: string
   layer: ComposedLayer['kind']
@@ -96,10 +100,11 @@ function badScalar(value: unknown, kind: 'string' | 'number'): boolean {
 /** Read one accepted `config` value into the row the page renders. */
 function toPreset(rowId: string, layer: ComposedLayer, config: Record<string, unknown>): DeclaredPreset {
   const raw = config.id
-  const identity = typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : rowId
+  const named = typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : undefined
   const read = readCompositionValue(config.plugins)
   const base: DeclaredPreset = {
-    id: identity,
+    id: named ?? rowId,
+    idFromRow: named === undefined,
     rowId,
     layer: layer.kind,
     sourcePath: layer.path,
@@ -112,8 +117,17 @@ function toPreset(rowId: string, layer: ComposedLayer, config: Record<string, un
       ? { description: config.description } : {}),
     ...(typeof config.order === 'number' && Number.isFinite(config.order) ? { order: config.order } : {}),
   }
-  if (typeof raw !== 'string' || raw.trim() === '') {
+  if (named === undefined) {
     return { ...base, broken: 'the declaration names no preset id (`config.id`)' }
+  }
+  // An id the host will not take is not a roster entry: listing it as one offers
+  // a preset that cannot be selected. The launcher's own writes apply the same
+  // rule up front (`presets.ts`), so this is the read-side half of one contract.
+  if (!PRESET_ID_RE.test(named)) {
+    return {
+      ...base,
+      broken: `\`config.id\` is not a preset id the host accepts: "${named}" (lowercase letters, digits and hyphens, starting with a letter or digit)`,
+    }
   }
   if (badScalar(config.name, 'string')) return { ...base, broken: 'invalid config: `name` is not a string' }
   if (badScalar(config.description, 'string')) {
@@ -128,6 +142,9 @@ function toPreset(rowId: string, layer: ComposedLayer, config: Record<string, un
 function unreadable(rowId: string, layer: ComposedLayer, broken: string): DeclaredPreset {
   return {
     id: rowId,
+    // Nothing here named a preset: the row id is all there is, and it is not an
+    // identity that may stand in for one.
+    idFromRow: true,
     rowId,
     layer: layer.kind,
     sourcePath: layer.path,
@@ -149,6 +166,13 @@ function unreadable(rowId: string, layer: ComposedLayer, broken: string): Declar
  * declaring one PRESET id are the host's `Duplicate agent preset` failure: the
  * earlier wins, exactly as the registry's first-registration-wins rule, and the
  * loser is reported rather than silently dropped.
+ *
+ * Folding is also what hides the one failure that outranks all of these: a loader
+ * row id INSERTED by two layers is the host's `duplicate loader entry id`, and a
+ * repeated insert looks exactly like the replace this fold is built for. It is
+ * therefore counted separately, over the same structural walk the boot
+ * pre-flight uses ({@link collectInsertIds}), and reported as a warning — the
+ * page would otherwise show a healthy roster for a profile dsh refuses to boot.
  * @param layers - the profile's patch layers, in application order.
  * @returns the roster in declaration order, plus roster-level warnings.
  */
@@ -156,7 +180,15 @@ export function readDeclarations(layers: readonly ComposedLayer[]): DeclarationR
   const definitions = new Map<string, Pending>()
   const disabled = new Map<string, boolean>()
   const order: string[] = []
+  /** How often each loader row id is inserted, and from which files. */
+  const inserted = new Map<string, { count: number; paths: Set<string> }>()
   for (const layer of layers) {
+    for (const id of collectInsertIds(layer.text)) {
+      const site = inserted.get(id) ?? { count: 0, paths: new Set<string>() }
+      site.count += 1
+      site.paths.add(layer.path)
+      inserted.set(id, site)
+    }
     for (const row of parseClassifiedRows(layer.text)) {
       disabled.set(row.id, row.disabled)
       if (row.name !== DECLARATION_PLUGIN) continue
@@ -178,6 +210,16 @@ export function readDeclarations(layers: readonly ComposedLayer[]): DeclarationR
 
   const presets: DeclaredPreset[] = []
   const warnings: string[] = []
+  // Only a repeated insert of a row this roster is built from belongs here: a
+  // collision between two plugin rows elsewhere in the profile is the profile
+  // page's to report, and naming it here as well would be noise about rows the
+  // presets page never shows.
+  for (const [rowId, site] of inserted) {
+    if (site.count < 2 || !definitions.has(rowId)) continue
+    warnings.push(
+      `loader row id "${rowId}" is inserted ${String(site.count)} times (${[...site.paths].join(', ')}) — a repeated loader entry id makes dsh refuse to boot the whole profile (dsh reports "duplicate loader entry id")`,
+    )
+  }
   const byId = new Map<string, DeclaredPreset>()
   for (const rowId of order) {
     if (disabled.get(rowId) === true) continue
@@ -190,6 +232,14 @@ export function readDeclarations(layers: readonly ComposedLayer[]): DeclarationR
       preset = unreadable(rowId, pending.layer, String((config as Record<string, unknown>)[UNPARSABLE]))
     } else {
       preset = toPreset(rowId, pending.layer, config as Record<string, unknown>)
+    }
+    // A row that could not name a preset gets listed as broken and nothing more:
+    // "who registered this id first" is a question about identities, and a row id
+    // is not one. Letting it register would let a broken row silence a working
+    // preset that declares the same id, and two broken rows silence each other.
+    if (preset.idFromRow) {
+      presets.push(preset)
+      continue
     }
     const first = byId.get(preset.id)
     if (first === undefined) {

@@ -1405,7 +1405,10 @@ export interface PresetListItem {
   order?: number
   /** Why dsh cannot use this preset, when it cannot. */
   broken?: string
-  /** Whether the launcher may edit this preset's display text here. */
+  /** Whether the launcher may edit this preset's display text HERE — from this
+   * profile's page. On the declaration model only the profile's own layer
+   * qualifies: a bundle declaration belongs to the deployment, and a home-layer
+   * one is shared by every profile of the machine, so this page offers neither. */
   editable: boolean
   /** What "open" targets: a preset directory, or the file that declares it. */
   location: string
@@ -1473,7 +1476,10 @@ export interface PresetListing {
   presets: PresetListItem[]
   /** One grade per preset, for this profile. */
   grades: PresetGrade[]
-  /** The definition sources, in the order dsh applies them. */
+  /** The definition sources, in the order dsh applies them. Empty when the
+   * profile mounts no preset model: nothing reads a preset then, so there is no
+   * source to name — the retired root and an unmounted package are not places a
+   * roster comes from. */
   places: PresetPlace[]
   /** Directories the retired root still holds; empty on a directory-model dsh,
    * where those directories ARE the roster. */

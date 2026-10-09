@@ -65,10 +65,30 @@ expect(html).toContain('Unreadable (1)')
 三条边界（都是踩过的）：
 
 1. **antd 的 `Modal` 走 portal，SSR 下渲染为空** —— 要断言弹窗内容，就把**主体**拆成独立展示组件
-   （如 `InstallSkillFields`）再渲染它。
+   （如 `InstallSkillFields`、`PresetCreateFields`）再渲染它。注意 `Modal` 的 `footer` 也在 portal 里：
+   按钮在静态产物里根本不出现，"提交按钮禁用与否"只能靠 `lib/` 里的纯函数钉（`presetCreateReady`）。
 2. **tooltip 内容只在悬停时渲染**，静态产物里没有 —— 别断言 tooltip 文案，改为断言那个可见的标签。
 3. **effect 不跑** —— 初始态（未选中的 scope、空列表）可以断言；"点一下就发 IPC"这类要真机验证，
    或在 `lib/` 里把决策抽成纯函数单测。
+4. **`Dropdown`（含 `ConfirmMenu`）的菜单项同样只在展开时进 portal** —— "这一行少了哪两项菜单"在静态
+   产物里断言不到。把**菜单项的决策**抽成纯函数（如 `lib/presetRow.ts` 的 `presetRowActions` /
+   `presetReadOnlyHintKey`）单测，比渲染断言更直接；组件只负责把 key 映射成文案。
+
+**"调用次数"类断言**（"点一次不该评级整份名册"）：用 `vi.mock(spec, async (importOriginal) => ...)`
+包住真实现并计数 —— 委派给 `importOriginal()` 的那份，行为不变：
+
+```ts
+const counters = vi.hoisted(() => ({ compose: 0 }))
+vi.mock('../../core/store/combo.ts', async (ia) => {
+  const actual = await ia<typeof import('../../core/store/combo.ts')>()
+  return { ...actual, composeLayerTexts: (...a: Parameters<typeof actual.composeLayerTexts>) => {
+    counters.compose += 1; return actual.composeLayerTexts(...a)
+  } }
+})
+```
+
+计数为 0 的断言必须配一个"计数器是活的"的反例（同一个文件里先跑一次会调用它的操作），否则一个永远
+不生效的 mock 也能让测试通过。
 
 覆盖率的统计范围**不变**（仍然只算 `src/main/core/**`），渲染测试只提供断言，不参与阈值。
 

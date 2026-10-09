@@ -10,7 +10,7 @@ import { Button, Input, InputNumber, Modal, Segmented, Select, Space, theme } fr
 import { useTranslation } from 'react-i18next'
 import FieldLabel from '../../components/FieldLabel.tsx'
 import { MODAL } from '../../theme.ts'
-import { PRESET_ID_RE } from '../../../../shared/preset.ts'
+import { presetCreateBlock, presetCreateReady } from '../../lib/presetCreate.ts'
 import type { PresetListItem, PresetMetaInput } from '../../../../shared/types.ts'
 
 interface PresetMetaModalProps {
@@ -97,6 +97,10 @@ interface PresetCreateModalProps {
   initialMode: PresetCreateMode
   /** The roster, as the copy mode's sources. */
   presets: PresetListItem[]
+  /** Every id already in use here — the roster's PLUS the directories the
+   * retired root keeps, which the roster does not show but the core still
+   * refuses. See {@link presetCreateBlock}. */
+  takenIds: ReadonlySet<string>
   /** The built-in minimal preset to start from, or null when this dsh has none. */
   minimalId: string | null
   /** The preset the copy mode opens on. */
@@ -104,6 +108,88 @@ interface PresetCreateModalProps {
   busy: boolean
   onCancel: () => void
   onSubmit: (mode: PresetCreateMode, fromId: string, toId: string, name: string) => void
+}
+
+/** The dialog's body, controlled by its owner.
+ *
+ * Split out for the same reason as `InstallSkillFields`: an antd `Modal` renders
+ * through a portal, so nothing inside it exists in a server render — and this
+ * body is where the "already taken" line has to be visible. */
+export interface PresetCreateFieldsProps {
+  mode: PresetCreateMode
+  onMode: (mode: PresetCreateMode) => void
+  minimalId: string | null
+  presets: PresetListItem[]
+  fromId: string
+  onFromId: (id: string) => void
+  toId: string
+  onToId: (id: string) => void
+  name: string
+  onName: (name: string) => void
+  /** What is wrong with the draft, already localized, or null. */
+  blocker: string | null
+}
+
+/** The fields of the create dialog: where to start from, the new id, its name. */
+export function PresetCreateFields(props: PresetCreateFieldsProps): JSX.Element {
+  const { t } = useTranslation()
+  const { token } = theme.useToken()
+  return (
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <Segmented
+        block
+        value={props.mode}
+        onChange={value => props.onMode(value as PresetCreateMode)}
+        options={[
+          { value: 'minimal', label: t('preset.create.minimal'), disabled: props.minimalId === null },
+          { value: 'copy', label: t('preset.create.copy') },
+        ]}
+      />
+      {props.mode === 'copy'
+        ? (
+          <div>
+            <FieldLabel required>{t('preset.create.from')}</FieldLabel>
+            <Select
+              value={props.fromId === '' ? undefined : props.fromId}
+              style={{ width: '100%' }}
+              placeholder={t('preset.create.fromPlaceholder')}
+              onChange={props.onFromId}
+              options={props.presets.map(preset => ({
+                value: preset.id,
+                label: preset.name === undefined ? preset.id : `${preset.name} (${preset.id})`,
+              }))}
+            />
+          </div>
+        )
+        : (
+          <div style={{ color: token.colorTextTertiary, fontSize: token.fontSizeSM }}>
+            {props.minimalId === null
+              ? t('preset.create.noMinimal')
+              : t('preset.create.minimalHint', { id: props.minimalId })}
+          </div>
+        )}
+      <div>
+        <FieldLabel required>{t('preset.create.id')}</FieldLabel>
+        <Input
+          value={props.toId}
+          autoFocus
+          spellCheck={false}
+          placeholder={t('preset.create.idPlaceholder')}
+          onChange={event => props.onToId(event.target.value)}
+        />
+      </div>
+      <div>
+        <FieldLabel>{t('preset.create.name')}</FieldLabel>
+        <Input
+          value={props.name}
+          spellCheck={false}
+          placeholder={t('preset.create.namePlaceholder')}
+          onChange={event => props.onName(event.target.value)}
+        />
+      </div>
+      {props.blocker === null ? null : <div style={{ color: token.colorError }} role="alert">{props.blocker}</div>}
+    </Space>
+  )
 }
 
 /**
@@ -115,7 +201,6 @@ interface PresetCreateModalProps {
  */
 export function PresetCreateModal(props: PresetCreateModalProps): JSX.Element {
   const { t } = useTranslation()
-  const { token } = theme.useToken()
   const [mode, setMode] = useState<PresetCreateMode>(props.initialMode)
   const [fromId, setFromId] = useState(props.defaultFrom)
   const [toId, setToId] = useState('')
@@ -131,13 +216,13 @@ export function PresetCreateModal(props: PresetCreateModalProps): JSX.Element {
     setName('')
   }, [props.open, props.initialMode, props.defaultFrom, props.minimalId])
 
-  const malformed = toId !== '' && !PRESET_ID_RE.test(toId)
-  const taken = props.presets.some(preset => preset.id === toId)
-  const blocker = malformed
+  const takenIds = props.takenIds
+  const block = presetCreateBlock({ toId, takenIds })
+  const blocker = block === 'badId'
     ? t('preset.create.badId')
-    : taken ? t('preset.create.taken') : null
+    : block === 'taken' ? t('preset.create.taken') : null
   const source = mode === 'minimal' ? props.minimalId ?? '' : fromId
-  const ready = source !== '' && toId !== '' && blocker === null && !props.busy
+  const ready = presetCreateReady({ toId, takenIds, source, busy: props.busy })
 
   return (
     <Modal
@@ -159,60 +244,19 @@ export function PresetCreateModal(props: PresetCreateModalProps): JSX.Element {
         </Space>
       )}
     >
-      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-        <Segmented
-          block
-          value={mode}
-          onChange={value => setMode(value as PresetCreateMode)}
-          options={[
-            { value: 'minimal', label: t('preset.create.minimal'), disabled: props.minimalId === null },
-            { value: 'copy', label: t('preset.create.copy') },
-          ]}
-        />
-        {mode === 'copy'
-          ? (
-            <div>
-              <FieldLabel required>{t('preset.create.from')}</FieldLabel>
-              <Select
-                value={fromId === '' ? undefined : fromId}
-                style={{ width: '100%' }}
-                placeholder={t('preset.create.fromPlaceholder')}
-                onChange={setFromId}
-                options={props.presets.map(preset => ({
-                  value: preset.id,
-                  label: preset.name === undefined ? preset.id : `${preset.name} (${preset.id})`,
-                }))}
-              />
-            </div>
-          )
-          : (
-            <div style={{ color: token.colorTextTertiary, fontSize: token.fontSizeSM }}>
-              {props.minimalId === null
-                ? t('preset.create.noMinimal')
-                : t('preset.create.minimalHint', { id: props.minimalId })}
-            </div>
-          )}
-        <div>
-          <FieldLabel required>{t('preset.create.id')}</FieldLabel>
-          <Input
-            value={toId}
-            autoFocus
-            spellCheck={false}
-            placeholder={t('preset.create.idPlaceholder')}
-            onChange={event => setToId(event.target.value)}
-          />
-        </div>
-        <div>
-          <FieldLabel>{t('preset.create.name')}</FieldLabel>
-          <Input
-            value={name}
-            spellCheck={false}
-            placeholder={t('preset.create.namePlaceholder')}
-            onChange={event => setName(event.target.value)}
-          />
-        </div>
-        {blocker === null ? null : <div style={{ color: token.colorError }} role="alert">{blocker}</div>}
-      </Space>
+      <PresetCreateFields
+        mode={mode}
+        onMode={setMode}
+        minimalId={props.minimalId}
+        presets={props.presets}
+        fromId={fromId}
+        onFromId={setFromId}
+        toId={toId}
+        onToId={setToId}
+        name={name}
+        onName={setName}
+        blocker={blocker}
+      />
     </Modal>
   )
 }

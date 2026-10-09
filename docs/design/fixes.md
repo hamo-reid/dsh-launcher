@@ -1,6 +1,6 @@
 # 缺陷修复计划（2026-10 代码审查）
 
-> 状态：**P0 已完成（4 条，含施工中新发现的 A7）；F1、B4、F9、B2、B10、B3、B1、A4、A5、B5、B6、B7、B8、B9 已完成，并带出施工中新发现的 F10；其余 8 条未实现**。这是一份施工计划，不是规范。
+> 状态：**P0 已完成（4 条，含施工中新发现的 A7）；F1、B4、F9、B2、B10、B3、B1、A4、A5、B5、B6、B7、B8、B9、F3、F2、F5、F6、F7、F8 已完成，并带出施工中新发现的 F10；其余 2 条（F4、A6）待实验确证后施工**。这是一份施工计划，不是规范。
 > 来源：对 `feature/preset-management` 三块功能代码的审查（preset 功能、dev 插件 pnpm pack 快照、registry/skills 修复）。
 > 定位：每条修完后 —— 仍生效的规则上收 `docs/specs/` 或 `docs/presets.md`，测试进仓库，然后**从本文删掉该条**。本文清空即代表这批缺陷关闭。
 
@@ -11,8 +11,8 @@
 | 批次 | 条目 | 为什么是这个顺序 |
 |---|---|---|
 | **P0 硬后果** ✅ | ~~A2、A1、A3~~（+ 施工中新发现的 **A7**） | 会静默把 profile 指向错误的构建，或让包/文件名可控的字符串决定写入/递归删除的路径。**已完成**，见 §1 |
-| **P1 正确性与信息丢失** ✅ | ~~F1、B4、F9、B2、B3、B1、A4、A5、B5、B6~~（+ 施工中新发现的 **F10**）、F3 | 守卫失效、功能做完却不可达、诊断被丢掉、选错版本、归档不可修复、清单先改后失败。**F1 / B4 / F10 见 §2.1，F9 / B2 见 §2.2，B3 / B1 见 §2.3，A4 / A5 见 §2.4，B5 / B6 见 §2.5** |
-| **P2 一致性与性能** | ~~B10~~ ✅（见 §2.2）、~~B7、B8、B9~~ ✅（见 §3.1）、F2、F5、F6、F7、F8 | 文案/范围不一致、幻影根、缓存与 i18n 瑕疵 |
+| **P1 正确性与信息丢失** ✅ | ~~F1、B4、F9、B2、B3、B1、A4、A5、B5、B6~~（+ 施工中新发现的 **F10**）、~~F3~~ | 守卫失效、功能做完却不可达、诊断被丢掉、选错版本、归档不可修复、清单先改后失败。**F1 / B4 / F10 见 §2.1，F9 / B2 见 §2.2，B3 / B1 见 §2.3，A4 / A5 见 §2.4，B5 / B6 见 §2.5，F3 见 §3.2** |
+| **P2 一致性与性能** ✅ | ~~B10~~（见 §2.2）、~~B7、B8、B9~~（见 §3.1）、~~F2、F5、F6、F7、F8~~（见 §3.2） | 文案/范围不一致、幻影根、缓存与 i18n 瑕疵 |
 | **先确证再定方案** | F4、A6 | 取决于宿主真实行为 / 数据根搬迁是否改变大小写，先做实验再改 |
 
 **已定决策**（2026-10-02 评审）：
@@ -129,13 +129,9 @@ A5 → §4（改清单前先留原文，失败即恢复）。
 | **B5** | `dshHome` / `agentsHome` / `bundledSkillDir` 与 `customSkillDirs` 一视同仁：命中 `isJsExpr` 即视为**未配置**，绝不 `resolve`。`dshHome` 是四个里最严重的 —— 它**替换**真实可写根，被哨兵顶掉后 `user-dsh` 从列表里消失，同时报出一个 writable 的幻影根 | `skills.test.ts`：`!!js dshHome` → `user-dsh` 仍在、`path` 就是 `<home>/skills`、`writable: true`、无哨兵字节；`!!js agentsHome` + `bundledSkillDir` → 不新增根、`user-agents` 退回默认。反向校验：还原旧行为 → 3 例挂（可写根被替掉、多出幻影根、空白字段落进 cwd） |
 | **B6** | 空白（`''` 或纯空格）在 **config 与环境变量两侧**都等于未配置：`resolve('')` 是当前工作目录而它存在，扫描器会走进 Launcher 的 cwd，把那里的 `SKILL.md` / `*.md` 当成这个 dsh 的技能。`??` 不吃 `''`，所以 env 覆盖显式判空 | `skills.test.ts`：`DSH_AGENTS_HOME=''` / `DSH_BUNDLED_SKILL_DIR=''` 的解析结果与**未设置完全相同**，且没有根落在 cwd；另一例断言非空 env 覆盖仍然生效（守卫必须能区分"空白"与"已设置"）。反向校验：还原 `??` → 空白 env 多出一个根 |
 
-### [ ] F3 —— 同一 loader 行 id 被两次 insert 时静默折叠，页面显示成健康名册
+### F3 —— 同一 loader 行 id 被两次 insert 时静默折叠，页面显示成健康名册
 
-**现象**：`declaration.ts:155-177` 的 fold 以 row id 为键、后者覆盖前者，`order` 只压栈一次 → 两层各 insert 一次同一 row id，只得到**一条**名册记录、**零**警告。而那是硬性启动失败（`store/combo.ts:255` 的 `findInsertConflicts`，接在 `ipc/dsh/run.ts:222` 与 `ipc/profile/read.ts:73`）。重复 preset id 的警告只在"两个不同 row id 共用同一 `config.id`"时触发。
-
-**方案**：不要在 `readDeclarations` 里另写一套规则 —— 让页面复用权威判定。在 `presetListing`（`index.ts:171`）拿到 `ctx`/`profile` 之后调一次 `findInsertConflicts(ctx, profile)`，把其中涉及 declaration row id（即 fold 里出现过的 row id）的冲突转成 `warnings`，用宿主自己的措辞（duplicate loader entry id）。若希望 `readDeclarations` 保持纯函数，退路是在它内部按层记录 `collectInsertIds`，第二次出现同一 id 时推 warning。
-
-**验证**：`presets/index` 单测：构造两层同时 insert `- id: preset-x`（同一 preset id），断言 `warnings` 非空、且文案点到冲突双方；再断言"后层只写 `- id: preset-x` + `disabled:`（合法的 id 覆盖）"**不**产生 warning。
+**已修**，与 P2 的五条同批：账目见 §3.2。
 
 
 
@@ -161,56 +157,40 @@ A5 → §4（改清单前先留原文，失败即恢复）。
 另外 8 个码里有 4 个（`profile.exists` / `npm.notFound` / `yaml.invalid` / `trash.conflict`）目前没有生产
 调用点，是测试里的示例码；文案照样补齐，好让"每个 code 都有文案"这条不变量**没有例外**要记。
 
-### [ ] F2 —— home 层 declaration 在本页只读（**已定：方案 B**）
+## 3.2 ✅ 已完成（2026-10-09）：F3、F2、F5、F6、F7、F8
 
-**现象**：`i18n/locales/zh.ts:1196` / `en.ts:1198` 说「声明式的会从 profile 补丁里移除」；但 `index.ts:147-148` 把 home 补丁标为 `writable: true`，`:114` 用 `editable: layer !== 'bundle'` 判定，`:319-321` 写的是 `preset.sourcePath` —— home 层时即机器级 `<home>/cordis.patch.yml`，**影响所有 profile**。`saveMeta` 同理。页面标题与 `preset.desc` 又都说这是"这个 profile 的 preset"。
+六条都在 preset 门面内，共享同一条判断：**页面与 core 必须是同一个判据，而且话要说到点上** ——
+本页该不该写这一层、守卫失效、被折叠吃掉的启动失败、看不出来的"已占用"、说不出理由的来源。
+仍生效的规则上收 [`docs/presets.md`](../presets.md) §1（`none` 模型不列来源）/ §3.2（折叠、借来的 id、
+重复 insert）/ §3.3（本页只写 profile 层、两个只读原因）/ §6（各动作的口径）；
+测试侧的边界与"调用次数"手法上收 [`docs/TESTING.md`](../TESTING.md) §4。
 
-**方案（已定 B：在本页拒绝 home 层写入，把"影响所有 profile 的写入"留给 home 补丁自己的编辑面）**：
-1. `presets/index.ts` 的 `assertEditable`：条件从 `layer === 'bundle'` 扩为 `layer !== 'profile'`，仍抛 `E.presetReadOnly`，`params` 带上 id 与层级以便文案区分。
-2. 同一个判据必须同时用在显示侧：`declarationItem`（`index.ts:107-114`）的 `editable: preset.layer !== 'bundle'` 改成 `preset.layer === 'profile'`。UI 与后端不一致时界面会给出后端随后拒绝的操作 —— `store/refstate.ts:18-20` 已经把这条写成了本仓库的规矩。
-3. 只读提示：行上已有来源标签（`preset.source.home` = 「home 层」），给被拒的行补一条专用提示键 `preset.homeReadOnlyHint`（en/zh）："这行在机器级 home 补丁里，改动会影响所有 profile；请直接编辑 home 补丁"。
-4. 连带好处：**现有删除确认文案因此变正确** —— "声明式的会从 profile 补丁里移除"在方案 B 下只对 profile 层成立，不需要新增文案。
-5. 复制（`copyIntoProfile`）仍允许以 home 层 declaration 为**源**（只读），只有编辑与删除被拒。
-6. 文档：`docs/presets.md` 的写入口径里写明"本页只写 profile 层；home 层的 declaration 只读，改它请走 home 补丁"。
+| 条目 | 修法 | 测试 |
+|---|---|---|
+| **F3** | `readDeclarations` 的折叠看不出"两层各 insert 同一个 loader row id"—— 那正是它存在的理由（后一层用同一 row id 替换）—— 而宿主对此以 `duplicate loader entry id` **拒绝启动整个 profile**。改为在折叠之外按 `collectInsertIds`（与启动预检 `findInsertConflicts` 同一个结构遍历）数每个 row id 被 insert 的次数，只对**本名册自己的 row id**（折叠里出现过的）报 warning，措辞用宿主那句 | `declaration.test.ts` 3 例：两层同 insert 一行 → `presets` 只剩一条而 `warnings` 点名两个文件与 `duplicate loader entry id`；只写 `- id: x` + `disabled:` 的合法覆盖 → 无 warning；两层 insert 同一个**插件**行 → 本页不说话（那是 profile 页的账）。IPC 侧：同一 profile 的 bundle 层与 profile 层各 insert `preset-standard` → 页面收到该 warning。反向校验：注释掉计数 → **只有这一例挂**（其余 25 例全过） |
+| **F2** | `declarationItem` 的 `editable` 从"非 bundle"收成"就是 profile 层"，`assertEditable` 用同一判据（显示侧与后端同源，`store/refstate.ts:18-20` 那条规矩的两个方向）；home 层用**新码** `preset.homeReadOnly` 拒绝（bundle 仍 `preset.readOnly`），行上的只读原因也分成 `preset.homeReadOnlyHint` / `preset.readOnlyHint`；复制仍允许以 home 声明为**源**。连带效果：删除确认文案「声明式的会从 profile 补丁里移除」在这个口径下自动正确 | IPC：home 层声明 → `editable:false, source:'home', trust:'user'`；`preset:saveMeta` / `preset:delete` → `preset.homeReadOnly`，且 home 补丁与 profile 补丁**逐字节未变**；`preset:copy` 以它为源仍成功并落在 profile 层。渲染侧：`lib/presetRow.test.ts` 断言 home 行只剩复制、原因键取 home 那条（不是内置那条）。反向校验两条：还原 `assertEditable` → saveMeta 返回 `ok:true`（**真的写了机器级补丁**）；还原 `editable` → 该行变成可编辑 |
+| **F5** | `DeclaredPreset` 增内部标记 `idFromRow`；折叠的"先到先得"只为 `config.id` 真正可用的条目登记与比较 —— 借 row id 当身份的坏行仍进名册（带自己的 `broken`）但**永不占位**。读到的 `config.id` 另过 `PRESET_ID_RE`，不合规则标 `broken`（理由写明宿主也会拒），id 按文件原样显示。**显示侧连带**（施工中新发现）：名册因此可能出现两行同 id，行 key 改成 id+来源+broken 的复合键，评级改按名册位置取（`grades` 与 `presets` 由同一个数组生成，一个 profile 一格） | `declaration.test.ts`：坏行在前 + 同名真 preset → 真 preset 的 `id/rowId/order` 完好留在名册、两条都在、`warnings` 为空；`config.id: Bad_ID` → `broken` 且 id 原样显示。反向校验：还原 `idFromRow` 判断 → 真 preset 被当重复项丢弃（该例挂）；还原正则校验 → 该例挂 |
+| **F6** | `presetLocationOf` 只定位：组合一次层栈 → 声明模型查 `readDeclarations`、目录模型 `discoverPresets(presetRoots)`、`none` 仍 `preset.notFound`；不构造 `PresetListItem`、不评级。内部 helper 改收 `layers`：`declarationIn(layers, id)` / `assertDeclaredIdFree(layers, id)`，写入口各自只组合一次（原来 saveMeta 2 次、copy 3 次）。顺带 `assertDeclaredIdFree` 的 row id 改用 `declarationLoaderId()`，不再手写前缀 | `ipc/presets/presets.test.ts` 装三个计数器（`vi.mock` + `importOriginal` 委派真实现）：`composeLayerTexts` / `gradeTargets` / `resolveModule`。`preset:reveal` → 组合 1、评级 0、探测 0（目录模型：组合 1、评级 0、探测 1 —— 那次是 `presetRoots` 解析内置包，不是评级）。同一文件先用 `preset:list` 证明计数器**是活的**（组合 1、评级 1、探测 >0）。`preset:saveMeta` / `preset:copy` → 组合 1、评级 0。反向校验：还原 `presetLocationOf` 走 `presetListing` → 两个 reveal 例报组合 2；还原 saveMeta 的二次组合 → 报 2 |
+| **F7** | 新建弹窗的"已占用"改由页面传入的 `takenIds` 决定，页面用 `presetTakenIds(presets, legacy)` 把名册与退役目录合并 —— core 的 `assertIdFree` 两样都拒，而名册只显示前者，所以只按名册判就会给出一个**必然失败**的创建。core 守卫不变（它才是权威） | `lib/presetCreate.test.ts`：`presetTakenIds` 把退役目录算进去（反向校验：只取名册 → `['mine']` vs `['liangshen','mine']` 挂）；`presetCreateBlock` 对占用 id 返回 `taken`、畸形 id 先返回 `badId`；`presetCreateReady` 在占用 / 空 id / 无源 / busy 下为 false。渲染：`views/presetCreateRender.test.tsx` 断言弹窗体在 `taken` 时出现「已被占用」、畸形时出现 id 规则、正常时两句都不出现。**仍未断言**：`PresetsSection` 把 `takenIds` 递给弹窗那一步（页面要跑 effect 才渲染得出行，与 §2.2 记的 F9 缺口同类） |
+| **F8** | `model === 'none'` 分支返回 `places: []`（原来返回 `directoryPlaces(ctx)`：页面把 `.agent-presets` 与未挂载包的 `presets/` 当"来源"列出，与同页的 `noModel` 空状态自相矛盾）。来源面板为空时按钮禁用（此前 `places` 永不为空，所以没有这个状态）；`preset:reveal` 在该模型下仍 `preset.notFound` | IPC：`model:'none'` 的 profile → `places` 为空数组，`presets`/`grades`/`legacy`/`warnings` 也空；`preset:reveal` 指向退役目录里的 id → `preset.notFound` 且没有调用 `shell.openPath`。反向校验：还原成 `directoryPlaces(ctx)` → 该例挂 |
 
-**验证**：IPC 单测：对 home 层 declaration 调 `preset:saveMeta` / `preset:delete` → `preset.readOnly`，且 home 补丁与 profile 补丁字节都不变；渲染测试：`source === 'home'` 的行没有「编辑详情 / 删除」菜单项，且只读提示可见。
+**施工中与计划原文不同的四处判定**（都记在此，免得回头按计划原文"复核"出假问题）：
 
-### [ ] F5 —— 坏 declaration 借 row id 挤掉真 preset id
+1. **F2 用一个新错误码，而不是"仍抛 `presetReadOnly` + params 带层级"**。文案是 code 的函数
+   （`lib/ipc.ts` 查 `errors.<code>`），一个 code 只对应一句话，参数**选不了句子**；照计划原文写，
+   home 层会显示「内置 preset 不能修改」，原因说错。B9 刚立的规矩（不复用泛化码、拒绝要带原因）在这里同样适用。
+2. **F3 用的是计划自己写的退路**（在 `readDeclarations` 内按层数 `collectInsertIds`），不是首选方案
+   （在 `presetListing` 里调一次 `findInsertConflicts`）。首选会**再把层栈组合一遍**，而同一批的 F6 正在消掉
+   这种重复；退路用的仍是同一套权威结构遍历 —— `collectInsertIds` 就是 `findInsertConflicts` 内部那个函数，
+   所以并没有"另写一套规则"。另外报的范围收窄到本名册自己的 row id，避免与 profile 页重复报同一件事。
+3. **F2 / F7 的"渲染测试"部分改为纯函数断言**（`lib/presetRow.ts` 的菜单项与原因键、`lib/presetCreate.ts`
+   的占用判定与"能否提交"）。`Dropdown`（含 `ConfirmMenu`）的菜单项与 `Tooltip` 的内容在 server render 里
+   都不存在，`Modal` 的 `footer` 也在 portal 里 —— 这一批据此给 `docs/TESTING.md` §4 补了第 4 条边界。
+   F7 的「已被占用出现在弹窗里」仍有渲染断言（弹窗体 `PresetCreateFields`）。
+4. **F5 带出一条计划没写的显示后果**：坏行借 row id 之后，名册里可能同时出现两行同 id。行 key 与评级取值
+   因此不再只认 id（见上表）。
 
-**现象**：`declaration.ts:98-100` 在 `config.id` 缺失时把 **loader row id** 当 id，于是 `:194-202` 的"先到先得"可能让真 preset 被当重复项丢弃。另外读入的 id 从不校验 `PRESET_ID_RE`（写入侧有守卫，无穿越风险，但显示层会把不合宿主规则的 id 当正常 preset）。
 
-**方案**：
-1. `DeclaredPreset` 增一个内部标记 `idFromRow: boolean`（`config.id` 不可用时 true）。
-2. `readDeclarations` 的重复判定只为 `idFromRow === false` 的条目登记与比重复 —— 坏行永远带着 `broken`，不该有机会遮蔽一个能用的 preset；两坏行相撞时两条都留着（各带自己的 broken 理由）。
-3. `toPreset` 里对读到的 id 加 `PRESET_ID_RE` 校验，不合规则直接标 `broken`（理由说明宿主也会拒），避免把不可用的 id 当成正常名册项。
-
-**验证**：`presets/declaration` 单测加两例：`config.id` 缺失的行 + 同名真 preset → 真 preset 仍在名册且无 warning；`config.id: "Bad_ID"` → 该行 `broken` 且 id 原样显示。
-
-### [ ] F6 —— 打开/在文件管理器显示会触发整份名册评级
-
-**现象**：`index.ts:352-359` 的 `presetLocationOf` 调 `presetListing`，后者组合整个层栈、读全部 declaration，并跑 `gradeTargets`（逐行 `resolveModule`，无缓存）。一次"打开"= 一次全量评级。另外每个写操作会重复组合层栈 2–3 次（`index.ts:277`、`:298`、`:315` 的 `detectModel(profileLayers(...))` 再加 `declarationOf` 内部的 `profileLayers`）。
-
-**方案**：
-1. `presetLocationOf` 只做定位：组合一次层栈 → `readDeclarations` 找 id（declaration 模型）或 `discoverPresets(presetRoots(ctx))`（directory 模型），不构造 `PresetListItem`、不评级。
-2. 内部 helper 收层栈参数：`declarationOf(layers, id)`、`modelOf(layers)`，让 `savePresetMetaIn`/`copyPresetIn`/`deletePresetIn` 各自只组合一次（`const layers = profileLayers(ctx, profile)`）。
-
-**验证**：给 `module-resolve` 或 `gradeTargets` 装计数器（或 spy）的单测：调 `preset:reveal` 时 `resolveModule` 调用次数为 0；调 `preset:saveMeta` 时 `profileLayers`/`composeLayerTexts` 只被调用一次。
-
-### [ ] F7 —— 创建对话框的"已占用"与 core 守卫不同源
-
-**现象**：`views/presets/PresetModals.tsx:135` 的 `taken` 只看名册，而 core 的 `assertIdFree`（`index.ts:238-241`）还拒绝被退役目录占用的 id。用户会先看到"可创建"，再收到 `preset.exists`（"已经被占用"），而名册里根本看不到那个 id。
-
-**方案**：`PresetCreateModal` 增加 `takenIds: ReadonlySet<string>`（或 `legacyIds`）prop，由 `PresetsSection` 从 `listing.legacy.map(p => p.id)` 与 `presets` 合并传入；`blocker` 判定改用它。core 的守卫保持不变（它才是权威），UI 只是不再给出必然失败的按钮。
-
-**验证**：`PresetModals` 渲染测试：`takenIds` 含某个 id 时，输入该 id 出现"已被占用"且提交按钮禁用。
-
-### [ ] F8 —— `model === 'none'` 时仍把退役目录根当"来源"列出
-
-**现象**：`index.ts:203` 在没有挂载任何 preset 模型的 dsh 上返回 `places: directoryPlaces(ctx)`，Sources 面板会列出 `.agent-presets` 与未挂载包的 `presets/`，与 `PresetsSection.tsx:408` 的 `noModel` 空状态自相矛盾。
-
-**方案**：该分支返回 `places: []`（`presets`/`grades`/`legacy`/`warnings` 已是空）。若希望仍能告诉用户"退役根在哪"，改为只列 `<home>/.agent-presets` 并带上 `exists`，但不要列未挂载包的目录。
-
-**验证**：IPC 单测：`model === 'none'` 时 `listing.places` 为空（或只含用户根），且页面显示 `noModel` 空状态。
 
 ---
 
@@ -269,7 +249,9 @@ A5 → §4（改清单前先留原文，失败即恢复）。
 - [x] **P1 第四批（A4 / A5）**：账目在 §2.4，规则上收 `specs/profile.md` §8 **P10**（pack 按版本分层 + 版本段守卫）与 §4（改清单前先留原文，失败即恢复）。
 - [x] **P1 第五批（B5 / B6）**：账目在 §2.5，规则上收 `specs/extensions.md` §3.1（四个 config 路径字段都拒绝哨兵、空白即未配置）。
 - [x] **P2 第一批（B7 / B8 / B9）**：账目在 §3.1，规则上收 `specs/profile.md` §8 **P11**（缓存键覆盖答案依赖的输入）与 `ui-guidelines.md` §4/§7（错误码是契约：每个 code 两种语言、拒绝要带原因）；顺带把错误码表移到 `src/shared/error-codes.ts`，让渲染层的对照测试成立。
-- [x] `pnpm typecheck`、`pnpm test`、`pnpm run build` 三项全绿（**已可在此机直接跑**：2026-10-09 最新一次 = 88 files / 1104 tests 全绿，`typecheck` / `build` 亦为 0）。
+- [x] **P2 第二批（F3 / F2 / F5 / F6 / F7 / F8）**：账目在 §3.2，规则上收 `docs/presets.md` §1/§3.2/§3.3/§6（`none` 模型不列来源、折叠与借来的 id、重复 insert、本页只写 profile 层）与 `docs/TESTING.md` §4（Dropdown/Tooltip/Modal footer 的 SSR 边界 + "调用次数"断言手法）。四处与计划原文不同的判定写在 §3.2 末尾。**仍未断言**：`PresetsSection` 递 `takenIds` 那一步的接线（同类缺口见 §2.2）。
+- [x] `pnpm typecheck`、`pnpm test`、`pnpm run build` 三项全绿（**已可在此机直接跑**：2026-10-09 本批最新一次 = 91 files / 1130 tests 全绿，`typecheck` / `build` 亦为 0）。
 - [ ] 其余每条新增的测试都进仓库，并在本文件对应条目下留一行"验证方式"。
-- [ ] 行为或口径有变化的条目（F2、F3、F5，以及 F4 的结论）已同步进 `docs/presets.md` / `docs/specs/extensions.md` / `docs/specs/launch.md`，§5 的三处修正已落地。
+- [x] 行为或口径有变化的条目（F2、F3、F5）已同步进 [`docs/presets.md`](../presets.md) §1/§3.2/§3.3/§6，§5 的三处修正已落地。
+- [ ] **F4 的结论**落地后再同步进 `docs/presets.md`（preset 行判定口径）或 `docs/specs/extensions.md`（若涉及 skill 行）。
 - [ ] 本文所有 `[ ]` 清空后，删除本文件，并从 `docs/README.md` 的"未实现的设计"表里移除对应行。
