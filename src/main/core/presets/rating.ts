@@ -55,7 +55,13 @@ function rowResolves(
   if (row.kind === 'file') {
     try {
       // A `file:` URL is what the host hands a resolver; an absolute path is the
-      // same thing spelled the way a person writes it.
+      // same thing spelled the way a person writes it. Deliberately resolved
+      // WITHOUT a base, which is what the host does: a `file:` specifier is an
+      // absolute URL there too, so `file:./x.mjs` beside the declaring file never
+      // reaches it (the host refuses the row on Windows and lands on the drive
+      // root on POSIX — measured, see rows.ts). Supplying a base here would call
+      // a row the host rejects usable. A preset that means "the file next to me"
+      // writes `./x.mjs`, which is the `preset` row kind and IS based.
       return isFile(row.name.startsWith('file:') ? fileURLToPath(new URL(row.name)) : row.name)
     } catch {
       // A malformed URL names no file either.

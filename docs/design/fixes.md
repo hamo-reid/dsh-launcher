@@ -1,6 +1,6 @@
 # 缺陷修复计划（2026-10 代码审查）
 
-> 状态：**P0 已完成（4 条，含施工中新发现的 A7）；F1、B4、F9、B2、B10、B3、B1、A4、A5、B5、B6、B7、B8、B9、F3、F2、F5、F6、F7、F8 已完成，并带出施工中新发现的 F10；其余 2 条（F4、A6）待实验确证后施工**。这是一份施工计划，不是规范。
+> 状态：**P0 已完成（4 条，含施工中新发现的 A7）；P1、P2 全部完成（F1、B4、F9、B2、B10、B3、B1、A4、A5、B5、B6、B7、B8、B9、F3、F2、F5、F6、F7、F8），并带出施工中新发现的 F10；F4 已确证（结论：不改代码，见 §4.1）；仅剩 A6**。这是一份施工计划，不是规范。
 > 来源：对 `feature/preset-management` 三块功能代码的审查（preset 功能、dev 插件 pnpm pack 快照、registry/skills 修复）。
 > 定位：每条修完后 —— 仍生效的规则上收 `docs/specs/` 或 `docs/presets.md`，测试进仓库，然后**从本文删掉该条**。本文清空即代表这批缺陷关闭。
 
@@ -13,13 +13,14 @@
 | **P0 硬后果** ✅ | ~~A2、A1、A3~~（+ 施工中新发现的 **A7**） | 会静默把 profile 指向错误的构建，或让包/文件名可控的字符串决定写入/递归删除的路径。**已完成**，见 §1 |
 | **P1 正确性与信息丢失** ✅ | ~~F1、B4、F9、B2、B3、B1、A4、A5、B5、B6~~（+ 施工中新发现的 **F10**）、~~F3~~ | 守卫失效、功能做完却不可达、诊断被丢掉、选错版本、归档不可修复、清单先改后失败。**F1 / B4 / F10 见 §2.1，F9 / B2 见 §2.2，B3 / B1 见 §2.3，A4 / A5 见 §2.4，B5 / B6 见 §2.5，F3 见 §3.2** |
 | **P2 一致性与性能** ✅ | ~~B10~~（见 §2.2）、~~B7、B8、B9~~（见 §3.1）、~~F2、F5、F6、F7、F8~~（见 §3.2） | 文案/范围不一致、幻影根、缓存与 i18n 瑕疵 |
-| **先确证再定方案** | F4、A6 | 取决于宿主真实行为 / 数据根搬迁是否改变大小写，先做实验再改 |
+| **先确证再定方案** | ~~F4~~ ✅（见 §4.1）、A6 | 取决于宿主真实行为 / 数据根搬迁是否改变大小写，先做实验再改 |
 
 **已定决策**（2026-10-02 评审）：
 - **F2 → 方案 B**：home 层 declaration 在预设页**只读**，写入一律走 profile 层。连带效果是现有删除确认文案自动变正确（方案 A 才需要新增层级文案）。
 - **B10 → 接线**：补齐 dsh 侧 skill 创作的 IPC 与页面入口（复用现成 UI 组件），**不删码**；同批把 F9（技能页 profile 选择）与 B2（zip 覆盖守卫）一起做，因为它们动的是同一个面板与同一条路径。
 
-**仍待确证**：**F4**（宿主是否按声明层 base 解析相对 `file:`）、**A6**（数据根搬迁是否改变路径大小写）。这两条在拿到实验结论前不要动代码。
+**仍待确证**：**A6**（数据根搬迁是否改变路径大小写）。这条在拿到实验结论前不要动代码。
+**F4 已确证**：宿主不按声明层 base 解析相对 `file:`，结论是"不改代码"，见 §4.1。
 
 建议一条一个提交，提交信息写清「修的是哪一类失败」，并带上本文件的条目编号（例如 `docs/design/fixes.md A2`），这样关掉本文件后仍能从提交历史追溯到当时的判定依据。
 
@@ -196,17 +197,25 @@ A5 → §4（改清单前先留原文，失败即恢复）。
 
 ## 4. 先确证，再定方案
 
-### [ ] F4 —— `file:` 相对路径被解析到盘根，评级可能误报缺行
+## 4.1 ✅ 已确证（2026-10-09）：F4 —— 结论是"不改代码"
 
-**现象**：`rating.ts:55-63` 对 `file:` 前缀走 `fileURLToPath(new URL(row.name))`。实测 `new URL('file:./tools/x.mjs')` **不抛异常**，得到 `file:///tools/x.mjs`（当前盘根）→ `isFile` 假 → 该行报"缺失"，即使文件就在 preset/声明文件旁边。
+**结论（b）**：宿主**不**按声明层的 base 解析 `file:`，所以评级现在的行为是对的 —— 它把这种行算作"缺行"，
+而宿主同样不会挂载它。改的是**注释与文档**（原来没人知道这是"与宿主一致"还是"忘了传 base"），
+外加一条把这个行为钉住的测试。证据与实测记录上收 [`docs/presets.md`](../presets.md) §4.3 与 §9。
 
-**先做的事**：确证宿主行为 —— 宿主接受 `file:` URL 时是否按声明层的 base 解析（`rows.ts:31` 目前把 kind `file` 定义为"names one file and no base"）。做法：在临时 home 里写一个含 `name: file:./x.mjs` 的 preset/declaration 与同名文件，看运行中的 dsh 是否挂载成功（或直接读宿主 resolver 源码）。
+| 条目 | 结论与修法 | 测试 |
+|---|---|---|
+| **F4** | 原判断"`new URL('file:./x')` 解析到盘根"只对了一半：`new URL(spec)` 不带 base 确实得到 `file:///x.mjs`（盘根），但**宿主也不带 base** —— `.` 开头的 `name` 由 `anchorInsertedPluginNames` 锚到声明文件旁，而带 `file:` 的交给 Node 的 ESM 解析器当 URL 处理，那里从不按 base 解析。于是 `rows.ts` 的 `classifyRowSpecifier` 注释写明"`file:` 是绝对 URL，不是 base 相对"，`rating.ts` 的 `file:` 分支注释写明**故意不传 base**（传了就会把宿主拒绝的行判成可用），`docs/presets.md` §4.3 给出写法建议（要"旁边那个文件"就写 `./x.mjs`） | `rating.test.ts` 新增一例：`file:./x.mjs` 与 `file:x.mjs` 写在 preset 目录里、同名文件就在旁边 → 两行都进 `missing`、等级 `incomplete`；同一例对照 `.` 写法（`./x.mjs` + 真文件）→ `ok`。反向校验：把实现改成带 base 解析 → 该例立刻变 `ok`（正是"把宿主拒绝的行判成可用"这个失败） |
 
-**两种结论各自的方案**：
-- 宿主按 base 解析 → `rowResolves` 的 `file:` 分支改为 `isFile(resolve(presetDir, path))`（`presetDir` 已传入，改动两行），并加测试锁定。
-- 宿主也视为盘根/拒绝 → 不改代码，在 `rows.ts` 的 `classifyRowSpecifier` 注释里写明"与宿主一致地不按 base 解析"，并加一条测试把该行为钉住，同时把这条写进 `docs/specs/extensions.md`（若涉及 skill 行）或 `docs/presets.md`（preset 行判定口径）。
+**F4 的实测记录**（细节见 `docs/presets.md` §9）：临时 `$DSH_HOME` + 不挂任何组合包的 profile，补丁层与
+`--patch` overlay 各插一行 `file:./…` 并放好文件，跑 `dsh --profile probe --patch <overlay> --dump-config-schema`
+（这条路径会真的 import 每一行）。四行相对形式**全部** `dsh: error: [/N] File URL path must be absolute`、
+进程退 1；同一次运行里那行**绝对** `file:///C:/…` 正常导入。Node 侧复核：`import.meta.resolve('file:./x.mjs')`
+抛 `ERR_INVALID_FILE_URL_PATH`，而 `import.meta.resolve('./x.mjs')` 正常解析到同目录。
 
-**验证**：结论 a → 带 `file:./x.mjs` 的 preset 评分为 `ok`；结论 b → 保持 `incomplete` 且注释/规范说明原因。
+> 顺带记下一个容易误导人的地方：宿主的**兼容预检**里 `manifestOf` 用的是 `new URL(specifier, parentURL)`
+> （**带** base，`dsh-app-boot/lib/index.js:2024`）。只看那一处会以为"宿主按 base 解析 `file:`"，
+> 但那一处只是查 `package.json` 用的宽松路径；真正决定能否挂载的是 import，而 import 拒绝它。
 
 ### [ ] A6 —— `profilesPointingAt` 字符串前缀比较未做大小写归一
 
@@ -253,5 +262,5 @@ A5 → §4（改清单前先留原文，失败即恢复）。
 - [x] `pnpm typecheck`、`pnpm test`、`pnpm run build` 三项全绿（**已可在此机直接跑**：2026-10-09 本批最新一次 = 91 files / 1130 tests 全绿，`typecheck` / `build` 亦为 0）。
 - [ ] 其余每条新增的测试都进仓库，并在本文件对应条目下留一行"验证方式"。
 - [x] 行为或口径有变化的条目（F2、F3、F5）已同步进 [`docs/presets.md`](../presets.md) §1/§3.2/§3.3/§6，§5 的三处修正已落地。
-- [ ] **F4 的结论**落地后再同步进 `docs/presets.md`（preset 行判定口径）或 `docs/specs/extensions.md`（若涉及 skill 行）。
+- [x] **F4 的结论**（§4.1）已同步进 [`docs/presets.md`](../presets.md) §4.3（preset 行判定口径）与 §9（实测记录）。
 - [ ] 本文所有 `[ ]` 清空后，删除本文件，并从 `docs/README.md` 的"未实现的设计"表里移除对应行。

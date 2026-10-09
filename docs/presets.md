@@ -164,6 +164,8 @@ dsh `0.2.0-rc.1` 删掉了目录 preset，没有兼容读取：`packages/preset/
 
 1. 形状：非列表、行不是映射、行没有 `name`、group 的 `config` 不是列表，命中任一就是「不能挂载」，行上打红标。
 2. 可解析：只看会启动的行。`Boolean(disabled)` 为真就跳过（`disabled: 0` 是要启动的，`disabled: !!js ...` 解析成非空字符串 → 跳过）；`name` 分类与 host 一致 —— `cordis:` → builtin，`.` 开头 → 相对**声明所在的补丁文件**目录（目录模型则是相对 preset 目录），`file:`/绝对路径 → 文件，其余 → 包名。
+   - **`file:` 是绝对 URL，不是"相对"的另一种写法**（实测 0.2.0-rc.1 宿主：见 §9）。宿主只把 `.` 开头的 `name` 锚到声明文件旁边；带 `file:` 的交给 Node 的 ESM 解析器当 URL 处理，而那里**从不**按声明层 base 解析。于是 `file:./x.mjs` 写在与声明同一目录里也**取不到那个文件**：Windows 上宿主直接拒绝这一行（`File URL path must be absolute`），POSIX 上它塌成文件系统根。所以评级也**不**给它加 base（加了就会把一个宿主拒绝的行判成可用），这种行按"缺行"计入 —— 那是关于**行**的实话，不是关于文件的误报。
+   - 想让"我旁边的这个文件"生效，写 `./x.mjs`（宿主会按每个补丁文件锚定，评级同样按声明的 baseDir 解析）。`file:` 只用于绝对位置。
 
 ## 5. profile 评级
 
@@ -230,4 +232,5 @@ dsh `0.2.0-rc.1` 删掉了目录 preset，没有兼容读取：`packages/preset/
 - **上面两条 0.2.0-rc1 隐患都由此暴露**（数组形式 `dsh.bundle.patch` 的连带）：按缩进读行会让那四个文件各报出整套名册（33/34/8/34 行）—— 32 条幻影「重复插入的 entry id」、`validateComposition.ok = false`、名册里多出幻影插件、删除确认里的补丁行数从 2 变 40；`subdeps` 把声明交给 `path.join` 则 TypeError 抛出 `install` / `uninstall` / 已装概览。修后同一台机器：`insert conflicts: 0`、`validateComposition.ok = true`、组合插件 217（base 94 + web 116 + agent-team 7）、名册 standard/ptc/minimal/cordis 全 `ok`；`listBundleSubdepNames(web-app)` 返回 85 个子包，不再抛。
 - **描述的对照**（同一台机器，同一套读代码）：声明模型下四个内置 `name` 与 `description` **都**是 `undefined`（见 §3.4）；目录模型下四条都读得出来，例如 `minimal` 的「仅提供持久 shell 的单工具编码 Agent。」。这条对照是「数据缺失、不是读坏」的直接证据。
 - **目录模型未受影响**（`official`，dsh `0.1.5-rc.2`，profile `base-web`）：3 层 84/94/1 行，每层 1 个文件，0 冲突，名册与判分与改动前一致。
+- **相对 `file:` 的实测**（`official-0.2.0-rc1`，dsh `0.2.0-rc.1`，2026-10-09）：临时 `$DSH_HOME` 下一个**不挂任何组合包**的 profile（`bundles: []`，`cordis.yml` 为 `[]`），补丁层与 `--patch` overlay 各插一行 `file:./…`，同目录放好对应文件，再跑 `dsh --profile probe --patch <overlay> --dump-config-schema`（这条路径会真的 `import` 每一行）。结果：**四行相对形式（`file:./x`、`file:x`，分别写在 profile 层与 overlay 层）全部报 `dsh: error: [/N] File URL path must be absolute`**，进程退 1；同一次运行里那一行**绝对** `file:///C:/…/profile-abs.mjs` 正常导入（`entries[0]` 无诊断），文件也确实存在。文件"就在声明旁边"这件事与结果无关 —— 那个文件从头到尾没被查过。机制在 Node 侧复核过：`import.meta.resolve('file:./x.mjs')` 抛 `ERR_INVALID_FILE_URL_PATH`，而 `import.meta.resolve('./x.mjs')` 正常解析到同目录；`new URL('file:./x.mjs')` 不带 base 得到 `file:///x.mjs`（盘根），带 base 才得到 `<base>/x.mjs` —— 宿主走的是前者那条路。
 - 声明模型的包名解析靠 pnpm 的 `.pnpm/node_modules` 提升目录，所以 launcher 现有的解析链（`moduleSearchRoots` 第一段）直接可用，不需要为它另造一套。

@@ -27,7 +27,8 @@ export type RowKind =
   | 'builtin'
   /** A path relative to the preset's own directory; the preset ships the file. */
   | 'preset'
-  /** An absolute path or `file:` URL; it names one file and no base. */
+  /** An absolute path, or a `file:` URL — which is ALSO absolute by definition,
+   * never a base-relative spelling of one. */
   | 'file'
   /** A package name, resolved from the installed harness and the profile. */
   | 'package'
@@ -56,6 +57,17 @@ export type CompositionRead =
  * An absolute filesystem path is a `file` row: Node's ESM resolver rejects a
  * bare drive-letter path on Windows, and the Loader accepts both spellings of
  * the same thing.
+ *
+ * A `file:` specifier is a `file` row too, and — measured against the
+ * 0.2.0-rc.1 host — it is an ABSOLUTE URL in every relative-looking spelling:
+ * the Loader hands it to Node's ESM resolver as a URL, and that resolver never
+ * anchors a URL-carrying specifier to the importing tree. `file:./x.mjs` beside
+ * the declaring patch file therefore does NOT reach that file: on Windows the
+ * host refuses the row outright ("File URL path must be absolute"), and on
+ * POSIX the specifier collapses to the filesystem root. So the row judgement
+ * must not treat it as base-relative either — a preset that means "the file next
+ * to me" writes `./x.mjs` (which the host DOES anchor, per patch file), and the
+ * `file:` form is for an absolute location only. See docs/presets.md section 4.3.
  * @param name - the specifier exactly as the row wrote it.
  * @returns which base the specifier belongs to.
  */

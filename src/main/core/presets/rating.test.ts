@@ -112,6 +112,32 @@ describe('gradePresets', () => {
     expect(byId.get('files')?.missing).toEqual([{ label: 'row 2', name: 'file:///%zz' }])
   })
 
+  it('does not anchor a relative `file:` row to the file beside it — the host does not either', () => {
+    // A `file:` specifier is an ABSOLUTE URL, in every spelling. Measured against
+    // the 0.2.0-rc.1 host with a real profile: every relative form (file:./x and
+    // file:x, declared in the profile layer AND in a --patch overlay) makes it
+    // refuse the row with "File URL path must be absolute", while an absolute
+    // file URL in the same run imports fine. The file placed right beside the
+    // declaration is never consulted, so "this row cannot mount here" is the
+    // truth about the ROW, not a false alarm about the file — and the rating must
+    // not helpfully add a base the host does not use, or it would grade a row the
+    // host rejects as usable.
+    mkPreset('beside', `${row('file:./pm-f4-unanchored.mjs')}${row('file:pm-f4-unanchored.mjs')}`)
+    writeFileSync(join(userRoot(), 'beside', 'pm-f4-unanchored.mjs'), 'export default 1\n')
+    const [cell] = gradePresets(ctx(), roster(), ['alpha'])
+    expect(cell.level).toBe('incomplete')
+    expect(cell.missing).toEqual([
+      { label: 'row 1', name: 'file:./pm-f4-unanchored.mjs' },
+      { label: 'row 2', name: 'file:pm-f4-unanchored.mjs' },
+    ])
+    // The `preset` spelling of the same intent is the one that works, and it is
+    // anchored — that contrast is the whole point of the two row kinds.
+    mkPreset('anchored', row('./pm-f4-anchored.mjs'))
+    writeFileSync(join(userRoot(), 'anchored', 'pm-f4-anchored.mjs'), 'export default 1\n')
+    expect(gradePresets(ctx(), roster(), ['alpha'])
+      .find(cellGrade => cellGrade.presetId === 'anchored')?.level).toBe('ok')
+  })
+
   it('calls an unreadable composition unusable, with the reason discovery gave', () => {
     mkPreset('broken', '[1, 2\n')
     const [cell] = gradePresets(ctx(), roster(), ['alpha'])
