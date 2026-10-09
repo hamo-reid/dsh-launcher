@@ -8,10 +8,16 @@ import { resolve, sep } from 'node:path'
 
 /** True when `v` is not a safe path-identifier token. Refuses `..`, `\`, a
  * leading/trailing/doubled `/`, a drive-letter prefix, `:` (drive / NTFS ADS),
- * or shell metacharacters. An npm scoped name (`@scope/name`) is the one
- * legitimate `/`. */
+ * shell metacharacters, and any all-dots token. An npm scoped name
+ * (`@scope/name`) is the one legitimate `/`.
+ *
+ * The all-dots rule matters beyond `..`: `join('archive', '.', '1.0.0')` and
+ * `join('archive', 'pkg', '..')` both name an EXISTING ancestor, so a token that
+ * is nothing but dots turns a per-plugin path into the whole archive (or the
+ * store) — and those paths are cleaned up recursively. No real id is all dots. */
 export function pathIdentifierInvalid(v: string): boolean {
   if (v === '') return true
+  if (/^\.+$/.test(v)) return true
   if (v.includes('\\') || v.includes('..')) return true
   if (v.startsWith('/') || v.endsWith('/') || v.includes('//')) return true
   if (v.includes(':')) return true

@@ -186,6 +186,27 @@ describe('local installs', () => {
     const zip = new AdmZip(); zip.addFile('folder/readme.txt', Buffer.from('hi')); zip.writeZip(z)
     expect((await addLocalPlugin(store(), z)).ok).toBe(false)
   })
+
+  it('refuses a zip whose own name aims the extract dir at the store root', async () => {
+    // A file named `...zip` strips its `.zip` suffix to `..`, and
+    // `join(storeDir, '.import', '..')` IS the store — cleared recursively before
+    // the extract. The name is the user's rather than the package's, but the
+    // consequence is the same class as a hostile package-declared name.
+    const keep = join(store(), 'archive', 'keep.txt')
+    mkdirSync(join(store(), 'archive'), { recursive: true })
+    writeFileSync(keep, 'archived body')
+    const zipPath = join(root, '...zip')
+    const zip = new AdmZip()
+    zip.addFile('package.json', Buffer.from(JSON.stringify({ name: 'inner', version: '1.0.0' })))
+    zip.writeZip(zipPath)
+
+    const r = await addLocalPlugin(store(), zipPath)
+    expect(r.ok).toBe(false)
+    expect(r.text).toContain('zip 文件名不可用')
+    expect(existsSync(keep)).toBe(true)
+    expect(existsSync(keep)).toBe(true)
+    expect(runPnpm).not.toHaveBeenCalled()
+  })
 })
 
 describe('archive staging shape', () => {

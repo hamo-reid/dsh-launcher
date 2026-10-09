@@ -289,7 +289,16 @@ export async function addLocalPlugin(storeDir: string, path: string): Promise<Pn
     source = path
   } else {
     if (!path.toLowerCase().endsWith('.zip')) return { ok: false, text: `${path} 不是 .zip 包` }
-    const dest = join(storeDir, '.import', basename(path).replace(/\.zip$/i, '') || 'plugin')
+    // `basename` guarantees a single path segment, but not a SAFE one: a file
+    // named `...zip` strips its `.zip` suffix down to `..`, and
+    // `join(storeDir, '.import', '..')` IS the store — which the `rmSync` below
+    // would then clear recursively, taking every archived plugin with it. Same
+    // guard as a package-declared name, applied where the segment is built.
+    const stem = basename(path).replace(/\.zip$/i, '')
+    if (stem !== '' && pathIdentifierInvalid(stem)) {
+      return { ok: false, text: `zip 文件名不可用：${basename(path)}` }
+    }
+    const dest = join(storeDir, '.import', stem || 'plugin')
     rmSync(dest, { recursive: true, force: true })
     mkdirSync(dest, { recursive: true })
     try {

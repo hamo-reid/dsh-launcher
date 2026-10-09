@@ -25,6 +25,19 @@ describe('pathIdentifierInvalid', () => {
     expect(pathIdentifierInvalid('a:b')).toBe(true)
   })
 
+  it('refuses all-dots identifiers, which name an existing ancestor', () => {
+    // `join('archive', '.', '1.0.0')` is `archive/1.0.0` and
+    // `join('archive', 'pkg', '..')` is `archive` — both real ancestors that the
+    // store clears recursively. `..` above is refused by the `..` rule; `.` and
+    // longer dot runs are refused by this one.
+    expect(pathIdentifierInvalid('.')).toBe(true)
+    expect(pathIdentifierInvalid('...')).toBe(true)
+    expect(pathIdentifierInvalid('....')).toBe(true)
+    // A dot INSIDE a name is still fine — this is about a token made only of dots.
+    expect(pathIdentifierInvalid('a.b')).toBe(false)
+    expect(pathIdentifierInvalid('.hidden')).toBe(false)
+  })
+
   it('refuses shell metacharacters', () => {
     for (const v of ['a`b', 'a$b', 'a;b', 'a|b', 'a&b', 'a<b', 'a>b']) {
       expect(pathIdentifierInvalid(v)).toBe(true)
