@@ -376,6 +376,63 @@ describe('the declaration-model writes', () => {
       .toMatchObject({ ok: false, code: 'preset.badId' })
   })
 
+  it('refuses an id whose loader row is already inserted, in every line shape', async () => {
+    // A row that is already there keeps `local-preset-taken` occupied even when
+    // the roster does not show its preset — a DISABLED declaration is skipped by
+    // readDeclarations, so this guard is the only thing left between a create and
+    // a duplicate loader row id, and the host answers a duplicate by refusing to
+    // boot the WHOLE profile. A raw text search for "- id: x\n" misses the CRLF,
+    // the missing trailing newline and the extra space; the structural walk finds
+    // the row in all three.
+    const occupied = [
+      '    - id: local-preset-taken',
+      "      name: '@deepseek-ai/dsh-agent-preset'",
+      '      disabled: true',
+      '      config:',
+      '        id: taken',
+    ]
+    const base = ['- insert:', ...DECLARED_ROW, ...occupied, ''].join('\n')
+    const shapes: [string, string][] = [
+      ['LF with a trailing newline', base],
+      ['CRLF', base.replace(/\n/g, '\r\n')],
+      ['no trailing newline', base.replace(/\n$/, '')],
+      ['an extra space after the colon', base.replace('- id: local-preset-taken', '- id:  local-preset-taken')],
+    ]
+    for (const [label, text] of shapes) {
+      writeFileSync(patchPath('decl'), text)
+      // Nothing else can refuse it: the disabled row is not in the roster.
+      const listing = await ok<PresetListing>('preset:list', 'a', 'decl')
+      expect(listing.presets.map(p => p.id), label).not.toContain('taken')
+      // The source is still readable in every shape — a CRLF file used to lose the
+      // whole roster, which would refuse this call for the wrong reason and hide
+      // the guard being tested.
+      expect(listing.presets.map(p => p.id), label).toContain('mine')
+      expect(await call('preset:copy', 'a', 'decl', 'mine', 'taken', 'x'), label)
+        .toMatchObject({ ok: false, code: 'preset.exists' })
+    }
+  })
+
+  it('does not read a plugin row inside a roster as a taken loader id', async () => {
+    // `config.plugins` holds the declaration's private plugin rows, not loader
+    // entries, so an id that merely looks like one cannot collide and must not
+    // refuse the create. The substring is present in the text either way — only a
+    // structural read can tell the two apart.
+    const roster = [
+      '    - id: local-preset-mine',
+      "      name: '@deepseek-ai/dsh-agent-preset'",
+      '      config:',
+      '        id: mine',
+      '        plugins:',
+      '          - id: local-preset-taken',
+      "            name: '@deepseek-ai/dsh-persona'",
+    ]
+    writeFileSync(patchPath('decl'), ['- insert:', ...roster, ''].join('\n'))
+    expect(await ok<boolean>('preset:copy', 'a', 'decl', 'mine', 'taken', 'Taken')).toBe(true)
+    const written = readFileSync(patchPath('decl'), 'utf8')
+    expect(written).toContain('    - id: local-preset-taken')
+    expect(written).toContain('        id: taken')
+  })
+
   it('removes a declaration this profile owns, and refuses one it does not', async () => {
     expect(await ok<boolean>('preset:delete', 'a', 'decl', 'mine')).toBe(true)
     const after = readFileSync(patchPath('decl'), 'utf8')

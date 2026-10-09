@@ -21,6 +21,7 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs'
+import { collectInsertIds } from '../patch/patch.ts'
 import { homePatchPath, profilePatchPath, writePatchFile } from '../profile/home.ts'
 import { discoverPresets, presetRoots } from './roots.ts'
 import { directoryGradeTargets, gradeTargets, type GradeTarget } from './rating.ts'
@@ -227,7 +228,13 @@ function assertDeclaredIdFree(ctx: DshContext, profile: string, id: string): voi
   const layers = profileLayers(ctx, profile)
   if (readDeclarations(layers).presets.some(p => p.id === id)) throwE(E.presetExists, { preset: id })
   const rowId = `local-preset-${id}`
-  if (layers.some(layer => layer.text.includes(`- id: ${rowId}\n`))) {
+  // Ask the SAME structural walk the boot pre-flight uses ({@link findInsertConflicts})
+  // which ids this layer INSERTS. A raw text search for `- id: <rowId>` misses
+  // three shapes that all carry a real row — a CRLF file, one whose last line has
+  // no newline, and `- id:  x` with extra spaces — and in the other direction it
+  // matches a plugin row inside a declaration's own `config.plugins` roster,
+  // which is not an entry and cannot collide with anything.
+  if (layers.some(layer => collectInsertIds(layer.text).includes(rowId))) {
     throwE(E.presetExists, { preset: id })
   }
 }

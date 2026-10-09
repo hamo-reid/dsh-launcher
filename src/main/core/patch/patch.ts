@@ -32,12 +32,34 @@ function isTopLevelEmptyArray(line: string): boolean {
  * `[]` lines so appending rows replaces the empty overlay instead of sitting
  * beside it. Read-only parsing still sees the text as-is. */
 function stripEmptyArrayMarker(text: string): string {
-  return text.split('\n').filter(line => !isTopLevelEmptyArray(line)).join('\n')
+  return patchLines(text).filter(line => !isTopLevelEmptyArray(line)).join('\n')
 }
 
 /** Leading-space count of a line (0 for a column-0 line). */
 function indentOf(line: string): number {
   return /^(\s*)/.exec(line)?.[1].length ?? 0
+}
+
+/**
+ * The lines of a patch document, with the `\r` a CRLF file leaves on them removed.
+ *
+ * Every reader here matches a line's value with `(.*)$`, and in JavaScript `.`
+ * does NOT match `\r` while `$` is the end of the input — so a trailing `\r` makes
+ * the match fail outright instead of capturing one character too many. Measured on
+ * a CRLF twin of a working declaration: `parseNamedRows` reported no `name` at all.
+ * That is how a CRLF `cordis.patch.yml` ends up with an EMPTY preset roster, a
+ * `disabled:` nothing can read, and an `insert:` list no reader sees — including
+ * the duplicate-row pre-flight, which then passes a profile the host refuses to
+ * boot.
+ *
+ * Writers assemble their output from these same lines, so editing a CRLF file
+ * normalizes it to LF. Deliberate: this module owns the on-disk shape of the files
+ * it edits, LF is what it already writes, and the alternative is every reader
+ * carrying `\r` handling forever. Reads stay tolerant, so a file an editor hands
+ * back as CRLF keeps working.
+ */
+function patchLines(text: string): string[] {
+  return text.split('\n').map(line => (line.endsWith('\r') ? line.slice(0, -1) : line))
 }
 
 /**
@@ -220,7 +242,7 @@ function findIdLine(lines: string[], id: string): number | undefined {
 
 /** Parse every row the layer holds, and whether it is disabled. */
 export function parsePatchRows(text: string): PluginRow[] {
-  const lines = text.split('\n')
+  const lines = patchLines(text)
   return positionedRows(lines).map(row => ({
     id: row.id,
     disabled: directChild(lines, row.line, 'disabled')?.value === 'true',
@@ -268,12 +290,12 @@ export function assertPatchDocValid(next: string): void {
  * id is exactly the host's duplicate-entry failure.
  */
 export function collectInsertIds(text: string): string[] {
-  return positionedRows(text.split('\n')).filter(row => row.inserted).map(row => row.id)
+  return positionedRows(patchLines(text)).filter(row => row.inserted).map(row => row.id)
 }
 
 /** Parse rows including each block's `name:` (for bundle-built plugin rows). */
 export function parseNamedRows(text: string): NamedRow[] {
-  const lines = text.split('\n')
+  const lines = patchLines(text)
   return positionedRows(lines).map(row => {
     const name = directChild(lines, row.line, 'name')?.value
     return {
@@ -290,7 +312,7 @@ export function parseNamedRows(text: string): NamedRow[] {
  */
 export function setRowDisabled(text: string, id: string, disabled: boolean): string {
   text = stripEmptyArrayMarker(text)
-  const lines = text.split('\n')
+  const lines = patchLines(text)
   const idIndex = findIdLine(lines, id)
 
   // ── no row yet: append a fresh block ────────────────────────────────
@@ -340,7 +362,7 @@ export function setRowDisabled(text: string, id: string, disabled: boolean): str
 
 /** Parse every row, classifying each block's shape (name/disabled/config/insert). */
 export function parseClassifiedRows(text: string): ClassifiedRow[] {
-  const lines = text.split('\n')
+  const lines = patchLines(text)
   return positionedRows(lines).map(row => {
     const name = directChild(lines, row.line, 'name')?.value
     return {
@@ -401,7 +423,7 @@ function appendKey(lines: string[], idIndex: number, render: (indent: string) =>
  * targets an existing row. */
 export function setRowConfig(text: string, id: string, configText: string): string {
   text = stripEmptyArrayMarker(text)
-  const lines = text.split('\n')
+  const lines = patchLines(text)
   const idIndex = findIdLine(lines, id)
   if (idIndex === undefined) throw new Error(`row "${id}" not found`)
   const render = (indent: string): string[] => renderConfig(indent, configText)
@@ -415,7 +437,7 @@ export function setRowConfig(text: string, id: string, configText: string): stri
 export function setRowInsert(text: string, id: string, insertItems: string[]): string {
   text = stripEmptyArrayMarker(text)
   const items = insertItems.map(item => item.trim()).filter(item => item !== '')
-  const lines = text.split('\n')
+  const lines = patchLines(text)
   const idIndex = findIdLine(lines, id)
   const render = (indent: string): string[] => renderInsert(indent, items)
   if (idIndex === undefined) {
@@ -455,7 +477,7 @@ export function appendRowBlock(text: string, block: string): string {
  * given fields in (disabled/config/insert each edited independently). */
 export function upsertRow(text: string, patch: RowCreateInput): string {
   text = stripEmptyArrayMarker(text)
-  const lines = text.split('\n')
+  const lines = patchLines(text)
   if (findIdLine(lines, patch.id) === undefined) {
     return appendRowBlock(text, buildRowBlock(patch))
   }
@@ -470,7 +492,7 @@ export function upsertRow(text: string, patch: RowCreateInput): string {
  * when the row does not exist. All other lines are preserved. */
 export function removeRow(text: string, id: string): string {
   text = stripEmptyArrayMarker(text)
-  const lines = text.split('\n')
+  const lines = patchLines(text)
   const idx = findIdLine(lines, id)
   if (idx === undefined) return text
   lines.splice(idx, blockEnd(lines, idx) - idx)
@@ -510,7 +532,7 @@ function blockEndByIndent(lines: string[], start: number): number {
  */
 export function appendInsertChild(text: string, childLines: string[]): string {
   const base = stripEmptyArrayMarker(text)
-  const lines = base.split('\n')
+  const lines = patchLines(base)
   const header = lines.findIndex(line => /^- insert\s*:\s*$/.test(line))
   if (header < 0) {
     const body = ['- insert:', ...childLines].join('\n') + '\n'
@@ -532,7 +554,7 @@ export function appendInsertChild(text: string, childLines: string[]): string {
  */
 export function removeInsertRow(text: string, id: string): string {
   const base = stripEmptyArrayMarker(text)
-  const lines = base.split('\n')
+  const lines = patchLines(base)
   const idx = findIdLine(lines, id)
   if (idx === undefined) return base
   if (indentOf(lines[idx]) === 0) return removeRow(base, id)
@@ -547,7 +569,7 @@ export function removeInsertRow(text: string, id: string): string {
 
 /** Extract a row block's verbatim text (its `- id:` line + child keys). */
 export function extractRowBlock(text: string, id: string): string | undefined {
-  const lines = text.split('\n')
+  const lines = patchLines(text)
   const idx = findIdLine(lines, id)
   if (idx === undefined) return undefined
   return lines.slice(idx, blockEnd(lines, idx)).join('\n')
@@ -558,7 +580,7 @@ export function extractRowBlock(text: string, id: string): string | undefined {
  * sub-block text (with the key's 2-space nesting stripped) for a block form.
  * `undefined` when the row or key is absent. */
 export function extractKeyValue(text: string, id: string, key: string): string | undefined {
-  const lines = text.split('\n')
+  const lines = patchLines(text)
   const idx = findIdLine(lines, id)
   if (idx === undefined) return undefined
   const end = blockEnd(lines, idx)
@@ -621,7 +643,7 @@ function configKeyLine(lines: string[], idIndex: number): { line: number; childI
 export function setConfigScalar(
   text: string, id: string, key: string, value: string | number | undefined,
 ): string {
-  const lines = text.split('\n')
+  const lines = patchLines(text)
   const idIndex = findIdLine(lines, id)
   if (idIndex === undefined) throw new Error(`row "${id}" not found`)
   const config = configKeyLine(lines, idIndex)

@@ -359,6 +359,58 @@ describe('collectInsertIds', () => {
   })
 })
 
+describe('CRLF patch files', () => {
+  /**
+   * One declaration row with a roster, every value on its own line — the shape a
+   * Windows editor hands back after saving a file that was written as LF.
+   */
+  const LF = [
+    '- insert:',
+    '    - id: local-preset-mine',
+    "      name: '@deepseek-ai/dsh-agent-preset'",
+    '      disabled: false',
+    '      config:',
+    '        id: mine',
+    '        plugins:',
+    '          - id: gate',
+    "            name: '@deepseek-ai/dsh-agent-instructions'",
+    "            disabled: !!js process.platform === 'win32'",
+    '',
+  ].join('\n')
+  const crlf = (text: string): string => text.replace(/\n/g, '\r\n')
+
+  it('reads the same values out of a CRLF file as out of its LF twin', () => {
+    // `.` does not match `\r` and `$` is the end of the input, so a `(.*)$` value
+    // match used to FAIL on a CRLF line rather than capture one character too
+    // many — every scalar child of such a file read as absent. That is the whole
+    // preset roster gone, not one field.
+    expect(parseNamedRows(crlf(LF))).toEqual(parseNamedRows(LF))
+    expect(parseClassifiedRows(crlf(LF))).toEqual(parseClassifiedRows(LF))
+    expect(collectInsertIds(crlf(LF))).toEqual(['local-preset-mine'])
+    expect(extractKeyValue(crlf(LF), 'local-preset-mine', 'config'))
+      .toEqual(extractKeyValue(LF, 'local-preset-mine', 'config'))
+    // The two reads whose loss changes a MEANING rather than a display: a
+    // declaration that is not recognised, and a disabled row read as active.
+    expect(parseNamedRows(crlf(LF))[0].name).toBe('@deepseek-ai/dsh-agent-preset')
+    expect(parseClassifiedRows(crlf(LF))[0].disabled).toBe(false)
+  })
+
+  it('keeps reading a disabled row as disabled', () => {
+    const off = LF.replace('      disabled: false', '      disabled: true')
+    expect(parseClassifiedRows(crlf(off))[0].disabled).toBe(true)
+    expect(parsePatchRows(crlf(off))).toEqual(parsePatchRows(off))
+  })
+
+  it('edits a CRLF file and leaves it uniformly LF, not mixed', () => {
+    const out = setRowDisabled(crlf(LF), 'local-preset-mine', true)
+    expect(out).not.toContain('\r')
+    expect(out).toContain('      disabled: true')
+    // The untouched lines survive, including the `!!js` one.
+    expect(out).toContain('        id: mine')
+    expect(out).toContain("            disabled: !!js process.platform === 'win32'")
+  })
+})
+
 // The profile patch the launcher itself writes now carries preset declarations,
 // whose `plugins` rosters reuse plugin ids. Editing by id must land on the loader
 // row; an indent-blind search lands on a roster row and rewrites the preset's
