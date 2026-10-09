@@ -23,6 +23,28 @@ function tmpStore(): string {
   return mkdtempSync(join(tmpdir(), 'pm-store-'))
 }
 
+/** Make the mocked `pnpm add` leave a package body behind with `version` in its
+ * manifest — the only place `installSource` learns the version from, and the
+ * field a `github:`/zip/folder source controls itself. */
+function mockAddWithVersion(version: string, name = 'foo'): void {
+  runPnpmMock.mockImplementation(async (dir: string) => {
+    const body = join(dir, 'node_modules', name)
+    mkdirSync(body, { recursive: true })
+    writeFileSync(join(body, 'package.json'), JSON.stringify({ name, version }))
+    return { ok: true, text: 'added 1' }
+  })
+}
+
+/** A minimal "already archived" state a version string could damage. */
+function seedArchive(store: string): string {
+  const keep = join(store, 'archive', 'foo', '1.0.0', 'keep.txt')
+  mkdirSync(join(store, 'archive', 'foo', '1.0.0'), { recursive: true })
+  writeFileSync(keep, 'archived body')
+  mkdirSync(join(store, '.trash'), { recursive: true })
+  writeFileSync(join(store, '.trash', 'note.txt'), 'stashed body')
+  return keep
+}
+
 describe('installSource guard branches', () => {
   beforeEach(() => {
     runPnpmMock.mockReset()
@@ -43,9 +65,12 @@ describe('installSource guard branches', () => {
   it('refuses a path-escaping plugin name before touching disk or pnpm', async () => {
     const store = tmpStore()
     try {
-      for (const name of ['..', '../evil', 'a/b/../c', 'a\\b', 'C:\\x', '/abs']) {
+      // `.` and longer dot runs name an existing ancestor: a name of `.` makes
+      // `archive/<name>/<version>` collapse back to `archive/`, which the
+      // replace path would then move into `.trash` and delete recursively.
+      for (const name of ['..', '../evil', 'a/b/../c', 'a\\b', 'C:\\x', '/abs', '.', '...']) {
         const r = await installSource(store, name, 'anything')
-        expect(r.ok).toBe(false)
+        expect(r.ok, `name=${name}`).toBe(false)
       }
       expect(runPnpmMock).not.toHaveBeenCalled()
     } finally {
@@ -92,6 +117,77 @@ describe('installSource guard branches', () => {
   it('addPlugin refuses an unconfigured store dir', async () => {
     const r = await addPlugin('', 'foo@1')
     expect(r.ok).toBe(false)
+  })
+
+  it('refuses a package-declared version that would escape the version dir', async () => {
+    // A registry source is semver-enforced by the registry; a `github:`/zip/folder
+    // package declares its own version. `..` is the sharp one: with replace=true
+    // the dest is renamed into `.trash` and deleted recursively, so a
+    // package-declared version could delete a whole plugin's archive. `''`
+    // collapses `archive/foo/''` back to `archive/foo` — the plugin dir itself.
+    for (const version of ['..', '../x', '1/2', '1\\2', 'C:evil', 'a..b', '']) {
+      const store = tmpStore()
+      try {
+        const keep = seedArchive(store)
+        mockAddWithVersion(version)
+        const r = await installSource(store, 'foo', 'file:whatever')
+        expect(r.ok, `version=${version}`).toBe(false)
+        expect(r.text, `version=${version}`).toContain('版本号不可用')
+        // Nothing outside, nothing lost inside, and no staging left behind.
+        expect(existsSync(keep), `version=${version}`).toBe(true)
+        expect(existsSync(join(store, 'archive', 'x')), `version=${version}`).toBe(false)
+        expect(existsSync(join(store, '.trash', 'note.txt')), `version=${version}`).toBe(true)
+        expect(existsSync(join(store, 'archive', 'foo', '.staging')), `version=${version}`).toBe(false)
+      } finally {
+        rmSync(store, { recursive: true, force: true })
+      }
+    }
+  })
+
+  it('refuses the same escape under replace, where it would delete the archive', async () => {
+    const store = tmpStore()
+    try {
+      const keep = seedArchive(store)
+      mockAddWithVersion('..')
+      const r = await installSource(store, 'foo', 'file:whatever', undefined, { replace: true })
+      expect(r.ok).toBe(false)
+      expect(existsSync(keep)).toBe(true)
+      expect(existsSync(join(store, '.trash', 'note.txt'))).toBe(true)
+    } finally {
+      rmSync(store, { recursive: true, force: true })
+    }
+  })
+
+  it('still archives a legal version, and reports the version it archived', async () => {
+    for (const version of ['2.1.0-beta.1', '1.0.0+build.7']) {
+      const store = tmpStore()
+      try {
+        mockAddWithVersion(version)
+        const r = await installSource(store, 'foo', 'file:whatever')
+        expect(r.ok, `version=${version}`).toBe(true)
+        expect(r.version, `version=${version}`).toBe(version)
+        expect(
+          existsSync(join(store, 'archive', 'foo', version, 'node_modules', 'foo', 'package.json')),
+          `version=${version}`,
+        ).toBe(true)
+      } finally {
+        rmSync(store, { recursive: true, force: true })
+      }
+    }
+  })
+
+  it('reports the archived version on the already-present no-op too', async () => {
+    const store = tmpStore()
+    try {
+      mockAddWithVersion('1.0.0')
+      await installSource(store, 'foo', 'file:whatever')
+      const again = await installSource(store, 'foo', 'file:whatever')
+      expect(again.ok).toBe(true)
+      expect(again.text).toContain('已在该版本')
+      expect(again.version).toBe('1.0.0')
+    } finally {
+      rmSync(store, { recursive: true, force: true })
+    }
   })
 })
 

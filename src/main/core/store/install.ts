@@ -14,7 +14,7 @@ import {
   versionStagingDir, versionsRoot, type ProfileManifestShape,
 } from './layout.ts'
 import { recordPluginSource, sourceKindOf } from './sources.ts'
-import { pathIdentifierInvalid } from '../profile/name-guard.ts'
+import { pathIdentifierInvalid, versionInvalid } from '../profile/name-guard.ts'
 import { migrateLegacyStore } from './migration.ts'
 import { isLegacyPkg } from './uninstall.ts'
 import { listBundleSubdepNames } from './subdeps.ts'
@@ -66,6 +66,13 @@ export async function addPlugin(dir: string, source: string, name?: string): Pro
   return installSource(dir, name ?? packageNameFromSource(source), source)
 }
 
+/** A store install's outcome. `version` is the version actually ARCHIVED by this
+ * call, which is not always the one a caller would re-derive afterwards:
+ * `latestStoreVersion` answers "highest in store", so asking it which build a
+ * snapshot just produced silently picks a different one when a higher version is
+ * already archived. Optional only so existing `PnpmResult` callers keep working. */
+export type InstallResult = PnpmResult & { version?: string }
+
 /** Shared download path: build the source into a staging project, read the real
  * version, then hoist the whole project to `archive/<name>/<version>/`.
  *
@@ -76,7 +83,7 @@ export async function addPlugin(dir: string, source: string, name?: string): Pro
  * success while storing the previous state. */
 export async function installSource(
   storeDir: string, name: string, source: string, signal?: AbortSignal, opts?: { replace?: boolean },
-): Promise<PnpmResult> {
+): Promise<InstallResult> {
   if (name.trim() === '') return { ok: false, text: '未能确定插件包名' }
   // The name becomes an `archive/<name>/` path segment; refuse anything that
   // could escape the store tree (`..`, `\`, drive/absolute, `//`). Deliberately
@@ -127,10 +134,21 @@ export async function installSource(
     rmSync(staging, { recursive: true, force: true })
     return { ok: false, text: `未在 node_modules 中找到 ${name}（包名不匹配，或依赖解析失败）${tail !== '' ? `\n${tail}` : ''}` }
   }
+  // The version becomes an `archive/<name>/<version>/` path segment AND a `.trash`
+  // leaf name. A registry source is semver-enforced by the registry, but a
+  // `github:` / local zip / folder package declares its own version — untrusted
+  // input. `..` would build both paths outside the store: with replace=false the
+  // staging project is moved out there and `pnpm install` runs in it; with
+  // replace=true that directory is renamed aside and deleted recursively. The
+  // same guard the IPC boundary applies, applied where the path is actually built.
+  if (versionInvalid(version)) {
+    rmSync(staging, { recursive: true, force: true })
+    return { ok: false, text: `插件包声明的版本号不可用：${version}` }
+  }
   const dest = pluginVersionDir(storeDir, name, version)
   if (existsSync(dest) && opts?.replace !== true) {
     rmSync(staging, { recursive: true, force: true })
-    return { ok: true, text: `已在该版本（${name}@${version}）` }
+    return { ok: true, text: `已在该版本（${name}@${version}）`, version }
   }
   if (existsSync(dest)) {
     // A replaced version is only set aside once the new one is BUILT: the staging
@@ -161,7 +179,7 @@ export async function installSource(
     await relinkVersion(dest, join(dest, 'node_modules', name), storeDir)
     recordPluginSource(storeDir, name, version, sourceKindOf(source), source)
     logger.info(`plugin store replaced: ${name}@${version} (${source})`)
-    return { ok: true, text: `已替换归档 ${name}@${version}` }
+    return { ok: true, text: `已替换归档 ${name}@${version}`, version }
   }
   mkdirSync(dirname(dest), { recursive: true })
   try {
@@ -174,7 +192,7 @@ export async function installSource(
   await relinkVersion(dest, join(dest, 'node_modules', name), storeDir)
   recordPluginSource(storeDir, name, version, sourceKindOf(source), source)
   logger.info(`plugin store add: ${name}@${version} (${source})`)
-  return { ok: true, text: `已下载 ${name}@${version}` }
+  return { ok: true, text: `已下载 ${name}@${version}`, version }
 }
 
 /**

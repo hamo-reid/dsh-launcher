@@ -567,6 +567,33 @@ describe('snapshotDevPlugin', () => {
     expect(manifest.dependencies['@me/dsh-foo']).not.toContain('.staging')
   })
 
+  it('points profiles at the version it just archived, not at the highest in store', async () => {
+    // A released 9.9.9 already archived next to the local 0.1.0. "Highest in
+    // store" and "what this snapshot produced" are different questions; answering
+    // the first one switches the profile onto another build and reports its
+    // version, while every message says the snapshot succeeded.
+    makeMonorepo()
+    mockPackedFlow()
+    const archived = join(store(), 'archive', '@me', 'dsh-foo', '9.9.9', 'node_modules', '@me', 'dsh-foo')
+    writePkg(archived, { name: '@me/dsh-foo', version: '9.9.9' })
+    const profileDir = join(ctx().home, 'profiles', 'main')
+    writePkg(profileDir, { name: 'p', private: true, dependencies: { '@me/dsh-foo': 'link:/somewhere' } })
+
+    const r = await snapshotDevPlugin(registerDevPlugin(pkgDir()), ctx(), {
+      storeDir: store(), targets: [{ ctx: ctx(), profile: 'main' }],
+    })
+
+    expect(r.ok).toBe(true)
+    expect(r.version).toBe('0.1.0')
+    const manifest = JSON.parse(readFileSync(join(profileDir, 'package.json'), 'utf8')) as {
+      dependencies: Record<string, string>
+    }
+    expect(manifest.dependencies['@me/dsh-foo']).toContain(join('@me', 'dsh-foo', '0.1.0'))
+    expect(manifest.dependencies['@me/dsh-foo']).not.toContain('9.9.9')
+    // The other archived version is untouched — it is not this run's business.
+    expect(existsSync(join(archived, 'package.json'))).toBe(true)
+  })
+
   it('keeps the archive and says so when the profile switch fails', async () => {
     makeMonorepo()
     vi.mocked(runPnpm).mockImplementation(async (dir, args) => {

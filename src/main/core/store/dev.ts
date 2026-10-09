@@ -579,7 +579,12 @@ export async function snapshotDevPlugin(dev: DevPlugin, ctx: DshContext, opts: S
       ...(checks.warnings.length > 0 ? { warnings: checks.warnings } : {}),
     }
   }
-  const version = latestStoreVersion(opts.storeDir, dev.name)
+  // The version THIS run archived, straight from the install — asking the store
+  // for its highest version would answer a different question and, when a higher
+  // version was already archived (a released `2.0.0` next to a local `1.0.0`),
+  // would point every target profile at that other build. The fallback only
+  // covers a result that predates the field.
+  const version = archived.version ?? latestStoreVersion(opts.storeDir, dev.name)
   const installed: { profile: string; text: string }[] = []
   for (const target of opts.targets ?? []) {
     const linked = await installIntoProfile(

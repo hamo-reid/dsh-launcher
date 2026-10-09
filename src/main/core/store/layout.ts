@@ -27,11 +27,16 @@ export interface StoreManifest {
   dependencies?: Record<string, string>
 }
 
-/** Read a package.json `version` field, or `undefined`. */
+/** Read a package.json `version` field, or `undefined` when it is absent or not
+ * a string. A present-but-empty `''` is returned as-is on purpose: callers that
+ * turn this into a path must refuse it (see `versionInvalid` — `join('archive',
+ * 'foo', '')` silently collapses to `archive/foo`, the plugin dir itself), and
+ * folding it into `undefined` here would replace that accurate refusal with a
+ * misleading "package not found". */
 export function readVersion(dir: string): string | undefined {
   try {
-    const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { version?: string }
-    return pkg.version
+    const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { version?: unknown }
+    return typeof pkg.version === 'string' ? pkg.version : undefined
   } catch {
     return undefined
   }
