@@ -1,6 +1,6 @@
 # 缺陷修复计划（2026-10 代码审查）
 
-> 状态：**P0 已完成（4 条，含施工中新发现的 A7）；F1、B4、F9、B2、B10、B3、B1、A4、A5、B5、B6 已完成，并带出施工中新发现的 F10；其余 11 条未实现**。这是一份施工计划，不是规范。
+> 状态：**P0 已完成（4 条，含施工中新发现的 A7）；F1、B4、F9、B2、B10、B3、B1、A4、A5、B5、B6、B7、B8、B9 已完成，并带出施工中新发现的 F10；其余 8 条未实现**。这是一份施工计划，不是规范。
 > 来源：对 `feature/preset-management` 三块功能代码的审查（preset 功能、dev 插件 pnpm pack 快照、registry/skills 修复）。
 > 定位：每条修完后 —— 仍生效的规则上收 `docs/specs/` 或 `docs/presets.md`，测试进仓库，然后**从本文删掉该条**。本文清空即代表这批缺陷关闭。
 
@@ -12,7 +12,7 @@
 |---|---|---|
 | **P0 硬后果** ✅ | ~~A2、A1、A3~~（+ 施工中新发现的 **A7**） | 会静默把 profile 指向错误的构建，或让包/文件名可控的字符串决定写入/递归删除的路径。**已完成**，见 §1 |
 | **P1 正确性与信息丢失** ✅ | ~~F1、B4、F9、B2、B3、B1、A4、A5、B5、B6~~（+ 施工中新发现的 **F10**）、F3 | 守卫失效、功能做完却不可达、诊断被丢掉、选错版本、归档不可修复、清单先改后失败。**F1 / B4 / F10 见 §2.1，F9 / B2 见 §2.2，B3 / B1 见 §2.3，A4 / A5 见 §2.4，B5 / B6 见 §2.5** |
-| **P2 一致性与性能** | ~~B10~~ ✅（见 §2.2）、F2、F5、F6、F7、F8、B6、B7、B8、B9 | 文案/范围不一致、幻影根、缓存与 i18n 瑕疵 |
+| **P2 一致性与性能** | ~~B10~~ ✅（见 §2.2）、~~B7、B8、B9~~ ✅（见 §3.1）、F2、F5、F6、F7、F8 | 文案/范围不一致、幻影根、缓存与 i18n 瑕疵 |
 | **先确证再定方案** | F4、A6 | 取决于宿主真实行为 / 数据根搬迁是否改变大小写，先做实验再改 |
 
 **已定决策**（2026-10-02 评审）：
@@ -142,6 +142,25 @@ A5 → §4（改清单前先留原文，失败即恢复）。
 ---
 ## 3. P2
 
+## 3.1 ✅ 已完成（2026-10-09）：B7、B8、B9
+
+都是"信息层面"的小修，但三条共享一个后果：**用户拿到的答案看起来像事实，却与他的实际处境无关** ——
+旧源的更新结论、裸 code、被丢掉的 URL。仍生效的规则上收：B7 → [`specs/profile.md`](../specs/profile.md)
+§8 **P11**（缓存键必须覆盖答案依赖的输入）；B8/B9 → [`ui-guidelines.md`](../ui-guidelines.md) §4/§7
+（错误码是契约、每个 code 两种语言、拒绝要带上"是哪一次拒绝"）。
+
+| 条目 | 修法 | 测试 |
+|---|---|---|
+| **B7** | `store/updates.ts` 的 `cacheKey` 加上 `registryBase()` —— 「最新版本」来自某个 HOST，换源会同时改变每一行的答案 | `store/updates.test.ts`（新建）：两个镜像给出不同 `latest`，先 A 后 B → 第二次拿到 **B** 的结论；另一例断言同一源**仍然命中**缓存（别把缓存修没了）。反向校验：去掉 registryBase → 第二次仍报 A 的 `1.1.0`，且全程只有一次 fetch（缓存确实命中了） |
+| **B8** | 补齐 8 个缺失的 `errors.*` 键（en/zh 成对、占位一致）：`dsh.notManaged` / `dsh.upToDate` / `dsh.majorRisk` / `profile.exists` / `profile.notFound` / `npm.notFound` / `yaml.invalid` / `trash.conflict`；顺带把 `profile.notFound` 的两处调用统一到 `{ detail }`（`ipc/profile/read.ts` 原传 `profile`，会让文案里的 `{{detail}}` 渲染成占位符）。**新增全量对照测试**：`E` 的每个 code 都必须在两种语言里有 `errors.<code>` | `i18n.test.ts`：新增「每个 error code 都有两种语言文案」（全量，不留例外）+「带 `detail` 的码会把参数渲染进句子」。反向校验：两侧**同时**删掉 `errors.profile.notFound` → 对照测试点名 `zh is missing "errors.profile.notFound"`，而 key 对齐那条**不挂**（证明是这个测试在起作用） |
+| **B9** | 新增 `registry.badUrl` / `registry.badScheme` 两个专用码 + 两个 locale；`settings:setRegistryUrl` 的两处拒绝改为 `fail(code, { detail: raw })`。原来复用 `name.invalid`，而 `apiErrorText` **优先**返回本地化文案，于是「名称不合法」把"哪个 URL 被拒"彻底丢掉 | `ipc/app/settings.test.ts`（新建）：坏 URL → `registry.badUrl` 且 `params.detail` 保留原文；非 http(s) → `registry.badScheme`；合法镜像仍接受并去掉尾斜杠；空值清空不算错误。反向校验：还原 `E.nameInvalid` → code 与 params 都对不上，断言失败 |
+
+**顺带调整的落点**：错误码表从 `core/shared/errors.ts` 移到 **`src/shared/error-codes.ts`**（主侧 re-export，
+导入路径不变）。原因是 `tsconfig.web.json` 拒绝渲染层引用 `src/main/**`，而上面那条对照测试**必须**同时
+看到码表与译文 —— 错误码本来就跨进程（渲染层按 code 取文案），放 `src/shared/` 是它本来的位置。
+另外 8 个码里有 4 个（`profile.exists` / `npm.notFound` / `yaml.invalid` / `trash.conflict`）目前没有生产
+调用点，是测试里的示例码；文案照样补齐，好让"每个 code 都有文案"这条不变量**没有例外**要记。
+
 ### [ ] F2 —— home 层 declaration 在本页只读（**已定：方案 B**）
 
 **现象**：`i18n/locales/zh.ts:1196` / `en.ts:1198` 说「声明式的会从 profile 补丁里移除」；但 `index.ts:147-148` 把 home 补丁标为 `writable: true`，`:114` 用 `editable: layer !== 'bundle'` 判定，`:319-321` 写的是 `preset.sourcePath` —— home 层时即机器级 `<home>/cordis.patch.yml`，**影响所有 profile**。`saveMeta` 同理。页面标题与 `preset.desc` 又都说这是"这个 profile 的 preset"。
@@ -192,30 +211,6 @@ A5 → §4（改清单前先留原文，失败即恢复）。
 **方案**：该分支返回 `places: []`（`presets`/`grades`/`legacy`/`warnings` 已是空）。若希望仍能告诉用户"退役根在哪"，改为只列 `<home>/.agent-presets` 并带上 `exists`，但不要列未挂载包的目录。
 
 **验证**：IPC 单测：`model === 'none'` 时 `listing.places` 为空（或只含用户根），且页面显示 `noModel` 空状态。
-
-### [ ] B7 —— 插件更新缓存没有把 registry 算进键
-
-**现象**：`store/updates.ts:104-110` 的 `cacheKey` 只含 `storeDir` 与各行的 name / versions / usage，不含 registry；TTL 5 分钟（`:101`），默认路径走 `peek`（`:123`；两个调用方 `PluginsSection.tsx:328`、`PluginUpdatesModal.tsx:41` 都不传 `refresh`）。切换 `registryUrl` 后，最多 5 分钟内仍会拿到旧源的更新结论。
-
-**方案**：`cacheKey` 加上 `registryBase()`（`registry.ts:41` 本身不缓存，读一次即可），或把 registry 作为 `checkPluginUpdates` 的显式输入。
-
-**验证**：单测：同一 store 先以 A 源算一次，改 `registryUrl` 为 B 源后断言不命中旧缓存。
-
-### [ ] B8 —— `errors.profile.notFound` 两个语言都缺，用户会看到裸 profile 名
-
-**现象**：`ipc/validate.ts:36` 返回 `E.profileNotFound` 并带 `detail`，新路径由 `ipc/extensions/skills.ts:40`（`ext:skillList` 传了不存在的 profile）到达 `SkillsManagePanel.tsx:60` 的 `message.error(apiErrorText(list))`。两个 locale 都没有 `errors.profile.notFound`，`lib/ipc.ts:12-15` 于是回退到 `params.detail` —— 用户看到的"错误信息"就是 `base-wbe` 这样的裸名字。同类缺口另有 `dsh.notManaged`、`dsh.upToDate`、`dsh.majorRisk`、`profile.exists`、`npm.notFound`、`yaml.invalid`、`trash.conflict`。
-
-**方案**：补 `errors.profile.notFound`（en/zh 成对），并逐一确认其余缺口是否落在用户可见路径上；顺便加一条**全量对照测试**（`E.*` 的 code 是否都有 `errors.<code>` 键），以后新增错误码不会再漏。
-
-**验证**：i18n 覆盖测试通过；`ext:skillList` 传未知 profile 时页面出现说明而不是裸名字。
-
-### [ ] B9 —— 坏 `registryUrl` 走 `E.nameInvalid`，具体原因被丢掉
-
-**现象**：`ipc/app/settings.ts:149`、`:152` 用 `fail(E.nameInvalid, [], 'registry URL 不合法：…')`。`E.nameInvalid = 'name.invalid'` 在两个 locale 里都有，而 `apiErrorText`（`lib/ipc.ts:12-13`）**优先**返回本地化 key，仅在 key 缺失时才回退 `error` / `detail` —— 所以用户看到「名称不合法 / Invalid name」，那句真正有用的 URL 文本被丢弃。
-
-**方案**：新增专用错误码（如 `E.registryBadUrl`）并补两个 locale，或复用带插值的码（`fail(E.invalidUrl, { detail: raw })` 且文案含 `{{detail}}`）。
-
-**验证**：IPC 单测断言返回的是新专用码；渲染测试断言页面出现含 URL 的具体文案。
 
 ---
 
@@ -273,7 +268,8 @@ A5 → §4（改清单前先留原文，失败即恢复）。
 - [x] **P1 第三批（B3 / B1）**：账目在 §2.3，规则上收 `specs/extensions.md` §3.4（三种"读不出"的归属 + `problem` 可见）与 §5；顺带把渲染测试入口写进 `vitest.config.ts` 并落成约定（`docs/TESTING.md` §4），F9 的验证缺口据此回填。
 - [x] **P1 第四批（A4 / A5）**：账目在 §2.4，规则上收 `specs/profile.md` §8 **P10**（pack 按版本分层 + 版本段守卫）与 §4（改清单前先留原文，失败即恢复）。
 - [x] **P1 第五批（B5 / B6）**：账目在 §2.5，规则上收 `specs/extensions.md` §3.1（四个 config 路径字段都拒绝哨兵、空白即未配置）。
-- [x] `pnpm typecheck`、`pnpm test`、`pnpm run build` 三项全绿（**已可在此机直接跑**：2026-10-09 最新一次 = 86 files / 1096 tests 全绿，`typecheck` / `build` 亦为 0）。
+- [x] **P2 第一批（B7 / B8 / B9）**：账目在 §3.1，规则上收 `specs/profile.md` §8 **P11**（缓存键覆盖答案依赖的输入）与 `ui-guidelines.md` §4/§7（错误码是契约：每个 code 两种语言、拒绝要带原因）；顺带把错误码表移到 `src/shared/error-codes.ts`，让渲染层的对照测试成立。
+- [x] `pnpm typecheck`、`pnpm test`、`pnpm run build` 三项全绿（**已可在此机直接跑**：2026-10-09 最新一次 = 88 files / 1104 tests 全绿，`typecheck` / `build` 亦为 0）。
 - [ ] 其余每条新增的测试都进仓库，并在本文件对应条目下留一行"验证方式"。
 - [ ] 行为或口径有变化的条目（F2、F3、F5，以及 F4 的结论）已同步进 `docs/presets.md` / `docs/specs/extensions.md` / `docs/specs/launch.md`，§5 的三处修正已落地。
 - [ ] 本文所有 `[ ]` 清空后，删除本文件，并从 `docs/README.md` 的"未实现的设计"表里移除对应行。

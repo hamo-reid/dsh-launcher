@@ -146,10 +146,13 @@ export function registerSettingsIpc(): void {
       try {
         url = new URL(raw)
       } catch {
-        return fail(E.nameInvalid, [], `registry URL 不合法：${raw}`)
+        // A dedicated code, with the offending text as a PARAM: `apiErrorText`
+        // prefers the localized message, so `E.nameInvalid` would have shown
+        // "invalid name" and dropped the one useful thing — which URL was refused.
+        return fail(E.registryBadUrl, { detail: raw })
       }
       if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-        return fail(E.nameInvalid, [], `registry URL 必须是 http(s)：${raw}`)
+        return fail(E.registryBadScheme, { detail: raw })
       }
       const saved = raw.replace(/\/+$/, '')
       patchSettings({ registryUrl: saved })

@@ -1,5 +1,5 @@
 /** Reading a profile: its summary, its composed detail, its layers, its resolved patch rows, and the raw file the source editor shows. */
-
+
 
 import { shell } from 'electron'
 import { existsSync, readFileSync } from 'node:fs'
@@ -96,7 +96,7 @@ export function registerProfileReadIpc(): void {
     if (ctx === null) return fail(E.dshNotFound)
     if (invalidName(name)) return fail(E.nameInvalid)
     const dir = profileDirPath(ctx, name)
-    if (!existsSync(dir)) return fail(E.profileNotFound, { profile: name })
+    if (!existsSync(dir)) return fail(E.profileNotFound, { detail: name })
     const error = await shell.openPath(dir)
     return error === '' ? { ok: true, value: true } : fail(E.shellOpenPath, { detail: error })
   })

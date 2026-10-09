@@ -10,6 +10,7 @@
  * does not hammer the registry. `refresh: true` forces a re-check.
  */
 import { fetchPackageVersions } from './npm.ts'
+import { registryBase } from './registry.ts'
 import { buildInstalledOverview } from './overview.ts'
 import { readPluginSourceSpec } from './sources.ts'
 import { compareVersionsLoose, latestPackageVersion } from '../shared/version.ts'
@@ -100,13 +101,19 @@ async function latestGithubTag(repo: string): Promise<string | undefined> {
  * replaces the previous result rather than accumulating beside it. */
 const updateCache = createKeyedCache<PluginUpdateInfo[]>({ max: 1, ttlMs: CACHE_TTL_MS })
 
-/** A cache key capturing the exact inputs a result depends on. */
+/** A cache key capturing the exact inputs a result depends on.
+ *
+ * The registry is one of them: a version list comes from a HOST, and switching
+ * `registryUrl` (a private mirror, an air-gapped one) changes what "latest" means
+ * for every row at once. Without it in the key, the previous host's verdicts keep
+ * being served for the rest of the TTL — five minutes of "no update" that is
+ * simply about a different registry. */
 function cacheKey(storeDir: string, rows: InstalledOverviewRow[]): string {
   const sig = rows
     .map(r => `${r.name}|${r.versions.join(',')}|${r.usage.map(u => u.version ?? '').join(',')}`)
     .sort()
     .join(';')
-  return `${storeDir}\u0000${sig}`
+  return `${storeDir}\u0000${registryBase()}\u0000${sig}`
 }
 
 /** Check every store-installed plugin for an available update. Results are

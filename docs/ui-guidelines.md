@@ -132,7 +132,7 @@
 |---|---|
 | **loading** | `NavList` 传 `loading`,或用 `Loadable` 包一层骨架屏;禁止整页白屏等数据 |
 | **empty** | `EmptyState`(标题 + 一句说明 + 可选 CTA 按钮);文案要能指导下一步 |
-| **error** | 操作失败 `message.error(res.error)`,错误字符串来自主进程 `IpcResult.error`;不允许静默失败 |
+| **error** | 操作失败 `message.error(apiErrorText(res))` —— 文案由 **`errors.<code>`** 在两种语言里给出，`params` 参与插值；**绝不**把裸 code 或裸参数当文案给用户。带原因的拒绝要把原因作为 `detail` 参数传下去（见 §7）。不允许静默失败 |
 | **success** | 关键变更给 `message.success('<动词>成功')`,如「已保存」「已软删」 |
 
 ---
@@ -182,7 +182,13 @@
 - 界面文案中文;页面/区块标题用名词短语(「Profile」「插件总览」)。
 - 中文括号用全角 ``()’’``,数字与单位(如 `bundle 30`)之间保留空格。
 - 术语与包名保持原文:`bundle`、`profile`、`cordis.patch.yml`、`@deepseek-ai/dsh`。
-- 报错不是技术 dump——主进程 `IpcResult.error` 通常是可读文案,直接上浮即可,不要二次加工。
+- 报错不是技术 dump——**错误码是契约的一部分**：`core/shared/errors.ts` 的 `E` 是唯一来源（纯数据，落在
+  `src/shared/error-codes.ts`，渲染层也读它），每个 code **必须**有两个语言的 `errors.<code>` 文案，
+  否则用户看到的是裸 code 或裸参数。这条由 `i18n.test.ts` 的「每个 code 都有两种语言文案」全量对照强制。
+- **拒绝要说明是哪一次拒绝**：同一个 code 往往有多条拒绝路径，具体原因走 `params`（约定 `detail`），
+  文案里用 `{{detail}}` 插值。不要复用像 `name.invalid` 这种泛化 code —— `apiErrorText` **优先**返回
+  本地化文案，泛化 code 会把真正有用的那句（eg. 哪个 URL 不合法）丢掉。
+- 不要二次加工主进程给的文案：直接 `apiErrorText(res)` 上浮，别自己拼接。
 - 空态文案要能指导下一步,如「为当前 DSH 创建一个 Profile」。
 
 ---
