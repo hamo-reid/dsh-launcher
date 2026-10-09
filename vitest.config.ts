@@ -8,6 +8,10 @@ export default defineConfig({
       'src/main/ipc/**/*.test.ts',
       'src/renderer/src/i18n/**/*.test.ts',
       'src/renderer/src/lib/**/*.test.ts',
+      // Views are rendered through `react-dom/server` (no DOM, no test-only
+      // renderer): what these assert is the text a user reads, which is exactly
+      // what the logic-only tests above cannot see. Coverage stays core-only.
+      'src/renderer/src/views/**/*.test.tsx',
     ],
     coverage: {
       provider: 'v8',

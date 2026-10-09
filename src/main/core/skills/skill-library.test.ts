@@ -319,4 +319,38 @@ describe('drift detection (scanSkillInstalls)', () => {
     expect(rows[0]).toMatchObject({ installed: false, stale: false })
     expect(rows[0].problem).toContain('library entry cannot be read')
   })
+
+  it('reports an unreadable entry as an ISSUE, not as a failed catalog', () => {
+    // The entry that cannot be read is named where the user looks for problems,
+    // and its readable neighbours keep their verdicts. Before this, the read threw
+    // out of `listSkillLibrary`, so both library IPC routes failed and the whole
+    // page rendered nothing at all — the per-copy guard downstream never ran.
+    writeSkillLib(null, makeSkill('greeter'))
+    writeSkillLib(null, makeSkill('notes'))
+    rmSync(join(lib, 'notes', 'SKILL.md'))
+    mkdirSync(join(lib, 'notes', 'SKILL.md'), { recursive: true })
+
+    const scanned = listSkillLibrary()
+    expect(scanned.skills.map(entry => entry.name)).toEqual(['greeter'])
+    expect(scanned.issues).toHaveLength(1)
+    expect(scanned.issues[0].path).toBe(join(lib, 'notes', 'SKILL.md'))
+    expect(scanned.issues[0].reason).toContain('cannot be read')
+  })
+
+  it('still says a copy exists when only the entry went unreadable', () => {
+    // The cell's job is to describe THIS dsh. With the entry gone unreadable
+    // mid-flight, installedness is still answerable and staleness is not, so the
+    // answer is "there is a copy, and we cannot tell whether it is current" —
+    // never "not installed" for a dsh that visibly has the skill.
+    const entry = writeSkillLib(null, makeSkill('notes'))
+    const target = writableSkillRoot(contextForEntry(ENTRY()))
+    installSkillToDsh(target, entry, false)
+    rmSync(join(lib, 'notes', 'SKILL.md'))
+    mkdirSync(join(lib, 'notes', 'SKILL.md'), { recursive: true })
+
+    const rows = scanSkillInstalls(entry)
+    expect(rows[0]).toMatchObject({ installed: true, stale: true })
+    expect(rows[0].entry?.name).toBe('notes')
+    expect(rows[0].problem).toContain('library entry cannot be read')
+  })
 })

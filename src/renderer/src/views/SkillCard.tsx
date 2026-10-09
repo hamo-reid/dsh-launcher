@@ -7,12 +7,14 @@ import { useState } from 'react'
 import { Button, Tag, Tooltip, theme } from 'antd'
 import { useTranslation } from 'react-i18next'
 import ConfirmMenu, { type MenuAction } from '../components/ConfirmMenu.tsx'
-import type { SkillLibEntry } from '../../../shared/types.ts'
+import { installCellColour, installProblems } from '../lib/skillInstallState.ts'
+import type { SkillLibEntry, SkillLibInstall } from '../../../shared/types.ts'
 
 interface SkillCardProps {
   entry: SkillLibEntry
-  /** Per-dsh install states (installed / stale). */
-  installs: Array<{ installed: boolean; stale: boolean }>
+  /** Per-dsh install states (installed / stale), each possibly carrying the reason
+   * it cannot be read at all. */
+  installs: SkillLibInstall[]
   /** The edit (read the file) is in flight. */
   editBusy: boolean
   onOpen: () => void
@@ -37,6 +39,7 @@ export default function SkillCard(p: SkillCardProps): JSX.Element {
 
   const installedCount = p.installs.filter(install => install.installed).length
   const staleCount = p.installs.filter(install => install.installed && install.stale).length
+  const problems = installProblems(p.installs)
 
   return (
     <div
@@ -65,7 +68,7 @@ export default function SkillCard(p: SkillCardProps): JSX.Element {
         }}
         style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8, cursor: 'pointer', outline: 'none' }}
       >
-        <CardBody entry={entry} installedCount={installedCount} staleCount={staleCount} />
+        <CardBody entry={entry} installedCount={installedCount} staleCount={staleCount} problems={problems} />
       </div>
 
       {/* Footer — "install to dsh…" is the primary action; kebab carries edit /
@@ -88,7 +91,13 @@ export default function SkillCard(p: SkillCardProps): JSX.Element {
 }
 
 /** The always-static part of the card: title, tags, description, usage, path. */
-function CardBody(props: { entry: SkillLibEntry; installedCount: number; staleCount: number }): JSX.Element {
+function CardBody(props: {
+  entry: SkillLibEntry
+  installedCount: number
+  staleCount: number
+  /** One line per dsh whose cell cannot be read, with the reason. */
+  problems: string[]
+}): JSX.Element {
   const { t } = useTranslation()
   const { token } = theme.useToken()
   const { entry } = props
@@ -109,6 +118,16 @@ function CardBody(props: { entry: SkillLibEntry; installedCount: number; staleCo
         {props.installedCount > 0
           ? <Tag color={props.staleCount > 0 ? 'warning' : 'success'}>{t('ext.skills.installedCount', { count: props.installedCount })}</Tag>
           : <Tag color="default">{t('ext.skills.notInstalled')}</Tag>}
+        {/* The reason is the whole point of this tag: without it a copy that cannot
+            be read looks like a copy that needs reinstalling, and reinstalling
+            cannot fix it. */}
+        {props.problems.length > 0 && (
+          <Tooltip title={props.problems.join('\n')}>
+            <Tag color={installCellColour('problem')}>
+              {t('ext.skills.problemTag', { count: props.problems.length })}
+            </Tag>
+          </Tooltip>
+        )}
       </div>
 
       <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>

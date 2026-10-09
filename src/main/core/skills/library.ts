@@ -52,7 +52,12 @@ function toEntry(skill: ParsedSkill, path: string, dir: string): SkillLibEntry {
 
 /** Scan the library the way the dsh-root scan does: a directory contributes
  * `<name>/SKILL.md`, a `.md` file contributes itself; unparseable files are
- * surfaced as issues instead of being dropped. */
+ * surfaced as issues instead of being dropped.
+ *
+ * A read that FAILS (a directory where the file is claimed, a permission change,
+ * a half-removed bundle) is an issue too — this scan feeds every library view, so
+ * one unreadable path must not throw the whole catalog away and leave the page
+ * blank. */
 export function listSkillLibrary(): { skills: SkillLibEntry[]; issues: SkillLibIssue[] } {
   const skills: SkillLibEntry[] = []
   const issues: SkillLibIssue[] = []
@@ -68,12 +73,22 @@ export function listSkillLibrary(): { skills: SkillLibEntry[]; issues: SkillLibI
     if (entry.isDirectory()) {
       const file = join(base, entry.name, 'SKILL.md')
       if (!existsSync(file)) continue
-      const parsed = parseSkillText(readFileSync(file, 'utf8'))
+      const read = readSkillText(file)
+      if (!read.ok) {
+        issues.push({ path: file, reason: `cannot be read: ${read.reason}` })
+        continue
+      }
+      const parsed = parseSkillText(read.text)
       if (parsed.ok) skills.push(toEntry(parsed.skill, file, join(base, entry.name)))
       else issues.push({ path: file, reason: parsed.reason })
     } else if (entry.isFile() && entry.name.endsWith('.md')) {
       const file = join(base, entry.name)
-      const parsed = parseSkillText(readFileSync(file, 'utf8'))
+      const read = readSkillText(file)
+      if (!read.ok) {
+        issues.push({ path: file, reason: `cannot be read: ${read.reason}` })
+        continue
+      }
+      const parsed = parseSkillText(read.text)
       if (parsed.ok) skills.push(toEntry(parsed.skill, file, base))
       else issues.push({ path: file, reason: parsed.reason })
     }
@@ -219,54 +234,66 @@ export function skillLibTextOf(lib: SkillLibEntry): string {
  * never refresh. With no editable copy, any same-named entry counts (even one
  * that did not originally come from the library).
  *
- * Every read is per-dsh and per-skill guarded: this maps the WHOLE library across
- * EVERY dsh, so one unreadable file — a half-removed copy, a permission change, a
- * root that vanished between the scan and the read — would otherwise fail the
- * entire overview and hide every other skill on every other dsh. An unreadable
- * copy is reported as stale WITH its reason, because "we cannot tell" and "it is
- * current" are different answers and only one of them justifies a reinstall. */
+ * Every read is per-dsh and per-skill guarded, including the entry's own file:
+ * this maps the WHOLE library across EVERY dsh, so one unreadable file — a
+ * half-removed copy, a permission change, a root that vanished between the scan
+ * and the read — would otherwise fail the entire overview and hide every other
+ * skill on every other dsh. An unreadable copy is reported as stale WITH its
+ * reason, because "we cannot tell" and "it is current" are different answers and
+ * only one of them justifies a reinstall. */
 export function scanSkillInstalls(lib: SkillLibEntry): SkillLibInstall[] {
-  const libText = safeText(lib.path)
-  if (libText === undefined) {
-    return readDshState().dshes.map(dsh => ({
-      dshId: dsh.id, dshName: dsh.name, installed: false, stale: false,
-      problem: `the library entry cannot be read: ${lib.path}`,
-    }))
-  }
+  const libRead = readSkillText(lib.path)
+  const libText = libRead.ok ? libRead.text : undefined
+  // The entry's own file can become unreadable between the scan that produced
+  // `lib` and this read (deleted, replaced by a directory, permissions). Whether a
+  // copy is INSTALLED is still answerable, so it is answered; whether it is current
+  // is not, so the cell says so instead of reporting "not installed" for a dsh that
+  // has the skill. The entry-level case is also an ISSUE on the primary path
+  // (`listSkillLibrary`), which is where the user sees it named; here it only has
+  // to keep the cells honest.
+  const libProblem = libRead.ok ? undefined : `the library entry cannot be read: ${lib.path} (${libRead.reason})`
   return readDshState().dshes.map((dsh) => {
     const ctx = contextForEntry(dsh)
     const named = listSkills(ctx).skills.filter(skill => skill.name === lib.name)
     const found = named.find(skill => skill.editable) ?? named[0]
     if (found === undefined) {
-      return { dshId: dsh.id, dshName: dsh.name, installed: false, stale: false }
+      return {
+        dshId: dsh.id,
+        dshName: dsh.name,
+        installed: false,
+        stale: false,
+        ...(libProblem !== undefined ? { problem: libProblem } : {}),
+      }
     }
-    const installedText = safeText(found.path)
-    if (installedText === undefined) {
+    const installedRead = readSkillText(found.path)
+    if (!installedRead.ok) {
       return {
         dshId: dsh.id,
         dshName: dsh.name,
         installed: true,
         stale: true,
         entry: found,
-        problem: `the installed copy cannot be read: ${found.path}`,
+        problem: `the installed copy cannot be read: ${found.path} (${installedRead.reason})`,
       }
     }
     return {
       dshId: dsh.id,
       dshName: dsh.name,
       installed: true,
-      stale: installedText !== libText,
+      stale: libText === undefined || installedRead.text !== libText,
       entry: found,
+      ...(libProblem !== undefined ? { problem: libProblem } : {}),
     }
   })
 }
 
-/** One file's text with CRLF normalized, or `undefined` when it cannot be read. */
-function safeText(path: string): string | undefined {
+/** One file's text with CRLF normalized, or the reason it cannot be read. */
+function readSkillText(path: string): { ok: true; text: string } | { ok: false; reason: string } {
   try {
-    return readFileSync(path, 'utf8').replaceAll('\r\n', '\n')
+    return { ok: true, text: readFileSync(path, 'utf8').replaceAll('\r\n', '\n') }
   } catch (error) {
-    logger.warn(`skills: cannot read ${path}: ${error instanceof Error ? error.message : String(error)}`)
-    return undefined
+    const reason = error instanceof Error ? error.message : String(error)
+    logger.warn(`skills: cannot read ${path}: ${reason}`)
+    return { ok: false, reason }
   }
 }

@@ -136,10 +136,22 @@ config 行（`- id: … / name: '@deepseek-ai/dsh-skill-filesystem'`）从 **hom
 
 ### 3.4 库总览的降级
 
-`scanSkillInstalls` 把技能库映射到**每一个 dsh**，所以逐 dsh、逐条目保护地读：库条目自身读不出，
-或某个副本读不出（半删、权限变化、扫描与读取之间根消失），只把该条标为 `stale` 并带上理由
-（`problem`），**绝不失败整张总览** —— 一个坏路径不该让其它 dsh 上的所有技能一起从页面上消失。
-「读不出」与「是最新的」是两个答案，只有后者不该重装。
+`scanSkillInstalls` 把技能库映射到**每一个 dsh**，逐 dsh、逐条目保护地读，任何一条读不出都
+**绝不失败整张总览** —— 一个坏路径不该让其它 dsh 上的所有技能一起从页面上消失。三种"读不出"
+各有归属，别混为一谈：
+
+| 读不出的东西 | 归属 | 为什么 |
+|---|---|---|
+| **库条目自己**（`<lib>/<name>/SKILL.md` 是目录、权限、半删） | `listSkillLibrary` 的 **issue**（带路径与错误文本），该条不进 `skills` | 两条库路由都**先**扫目录：这里一抛，`ext:libSkillList` / `ext:libSkillOverview` 一起失败，页面只剩一条错误 —— 下游那些逐副本守卫根本没机会跑。读取守卫必须在**最外层**，与 `scanRoot` 的做法一致 |
+| **某个 dsh 上的副本** | 该单元格 `installed: true` + `stale: true` + `problem` | 副本确实在，只是读不出；"说不清"与"是最新的"是两个答案，只有后者不该重装 |
+| **条目在扫描与比较之间**变得不可读（竞态） | 同上：单元格仍如实报告 `installed`，`stale: true` + `problem` | 是否**装着**仍然答得出，是否**最新**答不出 —— 不能因此对每个 dsh 都说"未安装" |
+
+**`problem` 必须在页面上可见**，并且该单元格**不得**被呈现成"库有更新 + 重新安装"：重装修不好
+一个读不出的东西，那个措辞是把两种状态混成一种。落点（`renderer/src/lib/skillInstallState.ts`
+是唯一的状态判定）：库卡片的问题标签（tooltip 带理由）、安装弹窗的 `Alert`（理由原文）+ 主按钮改
+「仍要重装」、dsh 面板行上的问题标签。
+
+判定优先级是规格的一部分：**`problem` 压过一切**（`installed` / `stale` 的结论都不作数）。
 
 ## 4. 明确不做
 
@@ -162,6 +174,17 @@ config 行（`- id: … / name: '@deepseek-ai/dsh-skill-filesystem'`）从 **hom
   zip 导入落进可写根、非 zip 路径的拒绝码）。
 - `renderer/src/lib/profileScope.test.ts`：页面作用域的 profile 选择规则（记住仍在的、否则首个、
   没有 profile 时是 `undefined` 这个**有意义**的答案）。
+- `renderer/src/lib/skillInstallState.test.ts`：单元格状态判定 —— `problem` 压过 `installed`/`stale`
+  的一切结论（"读不出"不是"有更新"），以及状态 → 标签/颜色的映射。
+- `renderer/src/views/skillInstallRender.test.tsx`、`dshSkillsPanelRender.test.tsx`：**渲染断言**
+  （`react-dom/server`，无 DOM、无新依赖）：问题标签出现在库卡片上且**不**出现"库有更新"这类结论、
+  安装弹窗里出现理由原文与「仍要重装」、未选 profile 的技能面板**明说** preset 根不列出、创作入口
+  与拖放块在位。渲染层测试由 `vitest.config.ts` 的 `src/renderer/src/views/**/*.test.tsx` 纳入
+  （coverage 仍只统计 `core`）。
+  - 边界：antd 的 `Modal` 走 portal，SSR 下内容为空，所以弹窗的**主体**单独成组件
+    （`InstallSkillFields`）以便断言；tooltip 内容同理只在悬停时渲染，不做断言。
+  - 仍未断言：需要 effect 的行为（例如"传入 profile 时确实以它调用了 `ext:skillList`"）——
+    SSR 不跑 effect，那一半由 `core/skills/preset-roots.test.ts` 与读码覆盖。
 - `core/skills/preset-roots.test.ts`：preset 贡献根 —— 目录模型的 `skills/`、声明模型走自己的解析
   链、自身不带 skill 的 preset 跳过；无 profile / profile 不挂 preset 模型 / preset 包未安装均不
   产出根；rank 300 且永不 writable；profile 组合声明模型时不再认已退役的目录模型。

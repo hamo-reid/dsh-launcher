@@ -15,10 +15,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import AdmZip from 'adm-zip'
-import { openDatabase } from '../../core/settings/settings.ts'
-import { updateDshState } from '../../core/profile/appState.ts'
+import { openDatabase, updateSettings } from '../../core/settings/settings.ts'
+import { configureAppState, updateDshState } from '../../core/profile/appState.ts'
+import { skillLibraryDir } from '../../core/skills/library.ts'
 import { registerExtensionsIpc } from './extensions.ts'
-import type { IpcResult, McpServerInput, SkillEntry } from '../../../shared/types.ts'
+import type { IpcResult, McpServerInput, SkillEntry, SkillLibIssue, SkillLibOverviewRow } from '../../../shared/types.ts'
 
 /** Every registered channel, so a test can invoke one without ipcMain. */
 const channels = vi.hoisted(() => new Map<string, (event: unknown, ...args: unknown[]) => unknown>())
@@ -73,6 +74,10 @@ function mkProfile(name: string): void {
 beforeAll(async () => {
   root = mkdtempSync(join(tmpdir(), 'pm-ext-ipc-'))
   await openDatabase(join(root, 'app.sqlite'))
+  // The library lives under the data root, so rooting both at the temp tree puts
+  // it beside the homes this file already builds.
+  configureAppState(root)
+  updateSettings(draft => { draft.dataRoot = root })
   mkdirSync(home(), { recursive: true })
   updateDshState(() => [{ id: 'a', name: 'dsh@a', execPath: '/fake/a', version: 'a', home: home() }])
   registerExtensionsIpc()
@@ -84,6 +89,7 @@ beforeEach(() => {
   rmSync(join(home(), 'cordis.patch.yml'), { force: true })
   rmSync(join(home(), 'profiles'), { recursive: true, force: true })
   rmSync(join(home(), 'skills'), { recursive: true, force: true })
+  rmSync(skillLibraryDir(), { recursive: true, force: true })
   mkProfile('default')
 })
 
@@ -184,5 +190,23 @@ describe('the dsh-side skill channels', () => {
     writeFileSync(notes, 'x')
     expect(await call('ext:skillImportZip', 'a', notes))
       .toMatchObject({ ok: false, code: 'ext.skillZipNotZip' })
+  })
+})
+
+describe('the library channels', () => {
+  it('stay ok when one library entry cannot be read', async () => {
+    // Both library routes scan the catalog FIRST, so an unguarded read there threw
+    // before any per-copy guard could run: the page got one error and rendered
+    // nothing, losing every other skill with it. The unreadable entry belongs in
+    // the issue list, which is where the page looks for problems.
+    const broken = join(skillLibraryDir(), 'notes', 'SKILL.md')
+    mkdirSync(broken, { recursive: true })
+
+    const list = await call<{ issues: SkillLibIssue[] }>('ext:libSkillList')
+    expect(list.ok).toBe(true)
+    expect(list.ok && list.value.issues.map(issue => issue.path)).toEqual([broken])
+
+    const overview = await call<SkillLibOverviewRow[]>('ext:libSkillOverview')
+    expect(overview.ok).toBe(true)
   })
 })

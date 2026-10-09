@@ -9,6 +9,7 @@ import { Alert, Checkbox, Modal, Radio, Select, Space, Tag, theme, Typography } 
 import { useTranslation } from 'react-i18next'
 import FieldLabel from '../components/FieldLabel.tsx'
 import EmptyState from '../components/EmptyState.tsx'
+import { installCellState } from '../lib/skillInstallState.ts'
 import type {
   McpApplyTarget, McpLibEntry, SkillLibEntry, SkillLibInstall, SkillLibOverviewRow,
 } from '../../../shared/types.ts'
@@ -243,6 +244,70 @@ export function PickLibSkillModal(props: {
   )
 }
 
+/**
+ * The install modal's body: which dsh, whether to overwrite, and WHY the copy is
+ * in the state it is in.
+ *
+ * Separate from the modal because a `Modal` renders through a portal — its content
+ * does not exist in a server render, so "the reason is visible" could not be
+ * asserted anywhere but in a browser. This part is presentational and pure, and
+ * the state it renders comes from the one shared rule in `lib/skillInstallState`.
+ */
+export function InstallSkillFields(props: {
+  scopes: DshScope[]
+  dshId: string | undefined
+  onPickDsh: (id: string) => void
+  /** This entry's cell on the selected dsh, if there is one. */
+  current: SkillLibInstall | undefined
+  overwrite: boolean
+  onOverwrite: (next: boolean) => void
+}): JSX.Element {
+  const { t } = useTranslation()
+  const { token } = theme.useToken()
+  const state = props.current === undefined ? undefined : installCellState(props.current)
+  const installed = props.current?.installed === true
+  const hint = state === undefined || state === 'notInstalled'
+    ? t('ext.skills.installHint')
+    : state === 'stale'
+      ? t('ext.skills.installStaleHint')
+      : state === 'problem'
+        ? t('ext.skills.installProblemHint')
+        : t('ext.skills.installUpToDateHint')
+
+  return (
+    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      <div>
+        <FieldLabel>{t('ext.target.dsh')}</FieldLabel>
+        <Select
+          style={{ width: '100%' }}
+          showSearch
+          optionFilterProp="label"
+          value={props.dshId}
+          onChange={props.onPickDsh}
+          options={props.scopes.map(scope => ({ value: scope.id, label: scope.name }))}
+        />
+      </div>
+      {installed && state !== 'problem' && (
+        <Checkbox checked={props.overwrite} onChange={e => props.onOverwrite(e.target.checked)}>
+          {t('ext.skills.overwrite')}
+        </Checkbox>
+      )}
+      {props.current?.problem !== undefined && (
+        <Alert
+          type="error"
+          showIcon
+          title={t('ext.skills.installProblem', { reason: props.current.problem })}
+          description={t('ext.skills.installProblemHint')}
+        />
+      )}
+      <div style={{ color: token.colorTextTertiary, fontSize: token.fontSizeSM }}>{hint}</div>
+      <Typography.Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
+        {t('ext.skills.installTargetHint')}
+      </Typography.Text>
+    </Space>
+  )
+}
+
 /** Pick a dsh and install a library skill into its writable root. */
 export function InstallSkillModal(props: {
   open: boolean
@@ -254,7 +319,6 @@ export function InstallSkillModal(props: {
   onInstall: (dshId: string, overwrite: boolean) => void
 }): JSX.Element {
   const { t } = useTranslation()
-  const { token } = theme.useToken()
   const [dshId, setDshId] = useState<string>()
   const [overwrite, setOverwrite] = useState(false)
 
@@ -264,27 +328,23 @@ export function InstallSkillModal(props: {
     setOverwrite(false)
   }, [props.open, props.scopes])
 
-  // The install state of the selected entry on the selected dsh decides
-  // whether the copy is a plain install or needs an explicit overwrite.
+  // The install state of the selected entry on the selected dsh decides whether
+  // the copy is a plain install, needs an explicit overwrite, or cannot be read at
+  // all — and the last one is not a reinstall problem, so the action says
+  // "reinstall anyway" instead of pretending a plain install is the answer.
   const current = props.installs.find(install => install.dshId === dshId)
+  const state = current === undefined ? undefined : installCellState(current)
   const installed = current?.installed === true
-  const stale = current?.stale === true
-  // An up-to-date copy is only replaced after the explicit overwrite consent;
-  // a stale one (or an absent one) installs straight away.
-  const okDisabled = dshId === undefined || (installed && !stale && !overwrite)
-  const hint = current === undefined
-    ? t('ext.skills.installHint')
-    : !installed
-      ? t('ext.skills.installHint')
-      : stale
-        ? t('ext.skills.installStaleHint')
-        : t('ext.skills.installUpToDateHint')
+  // An up-to-date copy is only replaced after the explicit overwrite consent; a
+  // stale one, an absent one, or an unreadable one installs straight away.
+  const okDisabled = dshId === undefined
+    || (state === 'upToDate' && !overwrite)
 
   return (
     <Modal
       open={props.open}
       title={t('ext.skills.installTitle', { name: props.entry?.name ?? '' })}
-      okText={t('ext.skills.install')}
+      okText={state === 'problem' ? t('ext.skills.reinstallAnyway') : t('ext.skills.install')}
       cancelText={t('common.cancel')}
       confirmLoading={props.busy}
       onOk={() => { if (dshId !== undefined) props.onInstall(dshId, installed) }}
@@ -292,32 +352,18 @@ export function InstallSkillModal(props: {
       okButtonProps={{ disabled: okDisabled }}
       destroyOnHidden
     >
-      {props.scopes.length === 0 ? (
-        <EmptyState title={t('ext.target.noDsh')} />
-      ) : (
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
-          <div>
-            <FieldLabel>{t('ext.target.dsh')}</FieldLabel>
-            <Select
-              style={{ width: '100%' }}
-              showSearch
-              optionFilterProp="label"
-              value={dshId}
-              onChange={setDshId}
-              options={props.scopes.map(scope => ({ value: scope.id, label: scope.name }))}
-            />
-          </div>
-          {installed && (
-            <Checkbox checked={overwrite} onChange={e => setOverwrite(e.target.checked)}>
-              {t('ext.skills.overwrite')}
-            </Checkbox>
+      {props.scopes.length === 0
+        ? <EmptyState title={t('ext.target.noDsh')} />
+        : (
+          <InstallSkillFields
+            scopes={props.scopes}
+            dshId={dshId}
+            onPickDsh={setDshId}
+            current={current}
+            overwrite={overwrite}
+            onOverwrite={setOverwrite}
+          />
           )}
-          <div style={{ color: token.colorTextTertiary, fontSize: token.fontSizeSM }}>{hint}</div>
-          <Typography.Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
-            {t('ext.skills.installTargetHint')}
-          </Typography.Text>
-        </Space>
-      )}
     </Modal>
   )
 }

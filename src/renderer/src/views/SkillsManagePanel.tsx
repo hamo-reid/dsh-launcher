@@ -11,18 +11,19 @@
  * machine-level answer — and it says so, rather than quietly omitting those rows.
  */
 import { useCallback, useEffect, useState } from 'react'
-import { Alert, Button, Empty, Select, Space, Tag, theme, message } from 'antd'
+import { Alert, Button, Empty, Select, Space, Tag, Tooltip, theme, message } from 'antd'
 import { PlusOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
 import { nextProfileChoice } from '../lib/profileScope.ts'
+import { installCellColour, installCellState } from '../lib/skillInstallState.ts'
 import Panel from '../components/Panel.tsx'
 import ConfirmMenu, { type MenuAction } from '../components/ConfirmMenu.tsx'
 import DropZone, { useFileDrop } from '../components/DropZone.tsx'
 import { SkillEditorModal, SkillNameModal } from './ExtensionsModals.tsx'
 import { PickLibSkillModal } from './LibraryModals.tsx'
 import type {
-  SkillEntry, SkillLibOverviewRow, SkillListing,
+  SkillEntry, SkillLibInstall, SkillLibOverviewRow, SkillListing,
 } from '../../../shared/types.ts'
 
 /** Tag colour per root origin (mirrors the dsh-side listing). */
@@ -102,9 +103,10 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
 
   useEffect(() => { void load() }, [load])
 
-  const staleFor = (name: string): boolean =>
-    overview.find(row => row.entry.name === name)?.installs
-      .find(install => install.dshId === p.dshId)?.stale === true
+  /** This skill's cell on THIS dsh: the library's verdict, or the reason the copy
+   * (or the library entry) cannot be read at all. */
+  const cellFor = (name: string): SkillLibInstall | undefined =>
+    overview.find(row => row.entry.name === name)?.installs.find(install => install.dshId === p.dshId)
 
   const remove = async (entry: SkillEntry): Promise<void> => {
     setBusy(`remove:${entry.name}`)
@@ -293,10 +295,12 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
               <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('dsh.skillsEmpty')} />
             )}
             {skills.map(entry => {
-              const stale = staleFor(entry.name)
+              const cell = cellFor(entry.name)
+              const state = cell === undefined ? undefined : installCellState(cell)
+              const stale = state === 'stale'
               const actions: MenuAction[] = [
                 ...(entry.editable ? [{ key: 'edit', label: t('common.edit') } as MenuAction] : []),
-                ...(stale ? [{ key: 'reinstall', label: t('ext.skills.reinstall') } as MenuAction] : []),
+                ...(stale || state === 'problem' ? [{ key: 'reinstall', label: t('ext.skills.reinstall') } as MenuAction] : []),
                 ...(entry.editable
                   ? [{ key: 'delete', label: t('common.delete'), danger: true, confirmText: t('ext.skills.deleteConfirm', { name: entry.name }) } as MenuAction]
                   : []),
@@ -308,7 +312,13 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
                       {entry.name}
                     </span>
                     <Tag color={SOURCE_COLOUR[entry.source]}>{t(`ext.skills.source.${SOURCE_KEY[entry.source]}`)}</Tag>
-                    {stale && <Tag color="warning">{t('ext.skills.staleTag')}</Tag>}
+                    {state === 'problem'
+                      ? (
+                        <Tooltip title={cell?.problem}>
+                          <Tag color={installCellColour('problem')}>{t('ext.skills.problemTag', { count: 1 })}</Tag>
+                        </Tooltip>
+                        )
+                      : stale && <Tag color={installCellColour('stale')}>{t('ext.skills.staleTag')}</Tag>}
                     {actions.length > 0 && (
                       <ConfirmMenu
                         actions={actions}

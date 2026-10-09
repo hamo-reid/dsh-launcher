@@ -1,6 +1,6 @@
 # 缺陷修复计划（2026-10 代码审查）
 
-> 状态：**P0 已完成（4 条，含施工中新发现的 A7）；F1、B4、F9、B2、B10 已完成，并带出施工中新发现的 F10；其余 17 条未实现**。这是一份施工计划，不是规范。
+> 状态：**P0 已完成（4 条，含施工中新发现的 A7）；F1、B4、F9、B2、B10、B3、B1 已完成，并带出施工中新发现的 F10；其余 15 条未实现**。这是一份施工计划，不是规范。
 > 来源：对 `feature/preset-management` 三块功能代码的审查（preset 功能、dev 插件 pnpm pack 快照、registry/skills 修复）。
 > 定位：每条修完后 —— 仍生效的规则上收 `docs/specs/` 或 `docs/presets.md`，测试进仓库，然后**从本文删掉该条**。本文清空即代表这批缺陷关闭。
 
@@ -11,7 +11,7 @@
 | 批次 | 条目 | 为什么是这个顺序 |
 |---|---|---|
 | **P0 硬后果** ✅ | ~~A2、A1、A3~~（+ 施工中新发现的 **A7**） | 会静默把 profile 指向错误的构建，或让包/文件名可控的字符串决定写入/递归删除的路径。**已完成**，见 §1 |
-| **P1 正确性与信息丢失** ✅ | ~~F1、B4、F9、B2~~（+ 施工中新发现的 **F10**）、F3、A4、A5、B1、B3、B5 | 守卫失效、功能做完却不可达、诊断被丢掉、选错版本、归档不可修复、清单先改后失败。**F1 / B4 / F10 见 §2.1，F9 / B2 见 §2.2** |
+| **P1 正确性与信息丢失** ✅ | ~~F1、B4、F9、B2、B3、B1~~（+ 施工中新发现的 **F10**）、F3、A4、A5、B5 | 守卫失效、功能做完却不可达、诊断被丢掉、选错版本、归档不可修复、清单先改后失败。**F1 / B4 / F10 见 §2.1，F9 / B2 见 §2.2，B3 / B1 见 §2.3** |
 | **P2 一致性与性能** | ~~B10~~ ✅（见 §2.2）、F2、F5、F6、F7、F8、B6、B7、B8、B9 | 文案/范围不一致、幻影根、缓存与 i18n 瑕疵 |
 | **先确证再定方案** | F4、A6 | 取决于宿主真实行为 / 数据根搬迁是否改变大小写，先做实验再改 |
 
@@ -83,9 +83,25 @@
 
 | 条目 | 修法 | 测试 |
 |---|---|---|
-| **F9** | `SkillsManagePanel` 自己管 profile 选择（`dsh.profiles` + `Select`，可清空）；`DshSection` 不再写死 `profile={null}`；未选 profile 时页面用 `Alert` 明说 preset 根不列出。选择规则抽成 `renderer/src/lib/profileScope.ts` 的 `nextProfileChoice`，与 `PresetsSection` 共用（消掉两处重复） | `renderer/src/lib/profileScope.test.ts`：记住仍在的 profile / 否则取首个 / 无 profile 时为 `undefined`（这个"机器级视图"是有意义的答案）。**页面那半没有渲染测试** —— 仓库没有组件测试基建（`@testing-library/react` 未装，逻辑一律抽到 `lib/`），所以这里用"抽出的纯函数 + 核心侧既有的 `preset-roots.test.ts`（有 profile 才产出 preset 根）"钉住，页面接线本身靠读码与构建验证 |
+| **F9** | `SkillsManagePanel` 自己管 profile 选择（`dsh.profiles` + `Select`，可清空）；`DshSection` 不再写死 `profile={null}`；未选 profile 时页面用 `Alert` 明说 preset 根不列出。选择规则抽成 `renderer/src/lib/profileScope.ts` 的 `nextProfileChoice`，与 `PresetsSection` 共用（消掉两处重复） | `renderer/src/lib/profileScope.test.ts`：记住仍在的 profile / 否则取首个 / 无 profile 时为 `undefined`（这个"机器级视图"是有意义的答案）。页面那半由 **B3/B1 那批补上的渲染断言**回填（`dshSkillsPanelRender.test.tsx`：Profile 选择器在位、未选时明说 preset 根不列出、创作入口与拖放块在位）—— 做 F9 时仓库还没有 views 测试入口，那时只能靠读码与构建；唯一仍未断言的是需要 effect 的行为（"选了 profile 后确实以它调用 `ext:skillList`"），由核心侧 `preset-roots.test.ts` 与读码覆盖 |
 | **B2** | `installZipSkills` 第 2 趟复制前**再查一次** `exists(name)`（命中即 `extSkillExists`），并把 `cpSync` 改为 `errorOnExist: true, force: false` | `skills.test.ts`：探针第一次说空闲、第二次说占用 → `ext.skillExists` 且目标根没多出目录；探针**恒**说空闲但目标已存在 → 文件系统拒绝且既有 SKILL.md 未被改写。反向校验：还原任一半都返回 `(no throw)`（静默覆盖） |
 | **B10** | 接通 dsh 侧创作面：core 补**新建拒绝覆盖**守卫；IPC 加 `ext:skillRead` / `ext:skillSave` / `ext:skillImportZip`（外加 `ext:skillScaffold`，让 dsh 流程不必借用库命名空间）；`shared/api.ts` + preload 各补 4 个方法；面板动作行补「新建 Skill / 从 ZIP 导入」、可写行补「编辑」、底部加可拖放的 `DropZone`（复用现成的 `SkillEditorModal` / `SkillNameModal` / `DropZone`）。顺带把可写根之外的读 / 写 / 删从 `internal` 改成 `ext.skillReadOnly` | `skills.test.ts`：新建撞既有 bundle 目录 / 既有扁平文件都拒绝且原文件未被改写；`extensions.test.ts`：scaffold→save→read 回读、frontmatter 改名、新建撞名返回 `ext.skillExists`、`../escape` 与 300 KB 文本被拒、zip 导入落进可写根、非 zip 路径返回 `ext.skillZipNotZip`。反向校验：还原守卫后 IPC 那级返回 `ok:true`（**静默覆盖**），核心两例同时挂 |
+
+## 2.3 ✅ 已完成（2026-10-09）：B3、B1
+
+这两条是同一条链：库扫描的**降级**（B3）决定"读不出"是一个状态，页面的**可见性**（B1）决定那个状态
+能不能被用户认出来。仍生效的规则已上收 [`specs/extensions.md`](../specs/extensions.md) §3.4（三种"读不出"
+的归属 + `problem` 必须可见），测试锚点见该文件 §5。
+
+| 条目 | 修法 | 测试 |
+|---|---|---|
+| **B3** | `listSkillLibrary` 的两处读取统一走新的 `readSkillText`（返回 `{ok,text}` / `{ok:false,reason}`）：读不出即 push 一条 issue（路径 + 错误文本），**不再抛**。`scanSkillInstalls` 同时改为**如实报告 `installed`**：条目在扫描与比较之间变得不可读时，仍回答"装没装"，只把 `stale` 置真并带上 `problem`（旧代码对每个 dsh 都说"未安装"） | `skill-library.test.ts`：不可读条目出现在 **issues**（`listSkillLibrary()` 本身，不是绕过它调 `scanSkillInstalls`）、可读邻居保住结论；只有条目不可读而副本还在时 → `installed:true, stale:true, problem`。`extensions.test.ts` 新增「the library channels」：条目不可读时 `ext:libSkillList` / `ext:libSkillOverview` **仍 `ok:true`**。反向校验：还原守卫 → core 抛 `EISDIR`、IPC 返回 `ok:false`（整页死掉） |
+| **B1** | `problem` 在三个落点可见：库卡片加问题标签（tooltip 带 `dsh: 理由`，且**不再**显示"库有更新/已是最新"这类结论）、安装弹窗用 `Alert` 给理由原文并把主按钮改成「仍要重装」、dsh 面板行上同样带问题标签。状态判定收敛到 `renderer/src/lib/skillInstallState.ts`（`problem` 压过一切），三个组件共用 | `skillInstallState.test.ts`：`problem` 压过 `installed`/`stale` 的一切组合；状态 → 标签/颜色映射。**渲染断言**（本批新开的基建）：`skillInstallRender.test.tsx` 断言卡片出现 `Unreadable (1)` 且**不**出现 `Library has updates`、弹窗出现理由原文与「仍要重装」；`dshSkillsPanelRender.test.tsx` 断言未选 profile 时面板明说 preset 根不列出、创作入口与拖放块在位。反向校验：还原优先级 → 单元格变回 `notInstalled`、弹窗显示陈旧提示；去掉卡片的问题标签 → 渲染断言失败（证明确实钉住了组件接线，不只是纯函数） |
+
+**顺带补上的基建**：`vitest.config.ts` 的白名单加入 `src/renderer/src/views/**/*.test.tsx`，渲染断言用
+`react-dom/server`（`react-dom` 已是运行时依赖，**没有新依赖、没有 DOM**），coverage 仍只统计 `core`。
+约定与三条边界（`Modal` 走 portal → 拆出 `InstallSkillFields`；tooltip 悬停才渲染；effect 不跑）写进了
+[`docs/TESTING.md`](../TESTING.md) §4。这条基建也**回填了 F9 的验证**（见 §2.2 那一行）。
 
 ### [ ] F3 —— 同一 loader 行 id 被两次 insert 时静默折叠，页面显示成健康名册
 
@@ -106,18 +122,6 @@
 
 **验证**：`store/pack`（或 dev 快照）单测：先对 `1.0.0` 快照，再改 package.json 为 `1.1.0` 快照，断言 `1.0.0` 的 tgz 仍在、且 `1.0.0` 归档仍可 `reinstallVersion` 成功（或至少其记录的 `file:` 目标存在）。
 
-### [ ] B1 —— `f652479` 加的 `problem` 理由在界面上从未被渲染
-
-**现象**：`skills/library.ts:233` 把"这个副本读不出来"的理由写进 `SkillLibInstall.problem`（类型见 `shared/types.ts:1324-1343`），但全 `src/renderer/**/*.tsx` 没有任何消费者读它。用户只看到「库有更新 + 重新安装」，看不到原因 —— 而**重装修不好一个读不出来的副本**，正是这条修复要区分的两种状态。
-
-**方案**：
-1. 在 `views/LibraryModals.tsx:271-280` 的提示分支里接入 `problem`：`problem !== undefined` 时优先显示它（用 `Alert` 或 `Tooltip`，与 `PresetsSection.tsx:364-366` 处理 `preset.legacyItem.problem` 的方式保持一致）。
-2. `views/SkillCard.tsx` 与 `views/SkillsManagePanel.tsx:162-176` 的 stale 标签加 tooltip 承载同一理由。
-3. 新增 i18n 键（`en.ts` / `zh.ts` 成对）：`ext.skills.installProblem`（"该 dsh 上的副本读不出来：{{reason}}"），并在 `problem` 存在时改掉主按钮的语义 —— 提示"重新安装可能无法修复"或把动作换成"查看/移除该副本"。
-4. `docs/specs/extensions.md` §3.4 补一句：降级单元格的 `problem` **必须在页面上可见**，否则"读不出"会被当成"是最新的"。
-
-**验证**：`LibraryModals` 的渲染测试（或 `SkillsManagePanel` 快照）加一例：给一个 `problem` 非空的 install，断言页面出现理由文本而不是仅 stale 标签。
-
 ### [ ] A5 —— `installIntoProfile` 先改 manifest 再 install，失败不回滚
 
 **现象**：`install.ts:347` 写 manifest（依赖、清理旧 sub-bundle 依赖），`:349` 才 `pnpm install`；`:350-353` 失败只返回错误。快照部分成功时（`dev.ts:590-598`）前面的 profile 已切换、失败那个的 manifest 也已改写，而归档路径是有 stash/restore 的。
@@ -128,19 +132,6 @@
 3. bundle 层那次 manifest 写入（`:370`）同样包在恢复范围内。
 
 **验证**：`store/install` 单测：mock `runPnpm` 失败，断言 profile 的 package.json 与调用前逐字节相同（含原来就不存在的场景）。
-
-### [ ] B3 —— `listSkillLibrary` 的读取仍未保护，`f652479` 的目标只达成一半
-
-**现象**：`skills/library.ts:71`、`:76` 的 `parseSkillText(readFileSync(file, 'utf8'))` 没有 try/catch。`<lib>/<name>/SKILL.md` 是**目录**（或权限 / 占用问题）时 EISDIR 抛出 `listSkillLibrary`。而两条 IPC 路线（`ipc/extensions/skills.ts:65` 的 `ext:libSkillList`、`:76` 的 `ext:libSkillOverview`）都**先**调 `listSkillLibrary`，所以 `scanSkillInstalls` 里新加的库侧守卫（`library.ts:229-235`）在 IPC 路径上**不可达** —— 抛出发生在它前一步，整张库页面渲染不出来（`SkillsView.tsx:67` 直接 `message.error` 后返回）。
-
-**根因**：修复加在"副本读不出"，没加在"库条目自身读不出"；单测 `skill-library.test.ts:312-321` 构造了那个状态却直接调 `scanSkillInstalls(entry)`，绕过了真正会抛的入口。函数自己的文档（`library.ts:53-55`"不可解析的文件作为 issue 出现而不是被丢掉"）也没覆盖"读不出"。
-
-**方案**：
-1. `listSkillLibrary` 的两次读取按 `scanRoot` 的方式保护：读不到就 push 一条 issue（理由带路径与错误文本），而不是让整个调用抛出 —— 与它的文档承诺对齐，`SkillLibIssue` 天然能承载。
-2. 若确实要保留"条目存在但读不出"这一态，则改为把条目连同 `problem` 一起返回，让 `scanSkillInstalls` 的库侧分支真正可达。
-3. 决策后同步 `docs/specs/extensions.md` §3.4 的措辞：规范现在说库条目读不出要标 `stale` 并带理由，而 `library.ts:232` 给的是 `installed:false, stale:false` —— 二者必居其一。
-
-**验证**：`skill-library` 单测：`mkdirSync(join(lib,'notes','SKILL.md'))` 后调 **`listSkillLibrary()`**（不是 `scanSkillInstalls`），断言不抛、其余条目仍在、该路径出现在 issues 里；再加一条 IPC 级测试断言 `ext:libSkillOverview` 仍 `ok:true`。
 
 ### [ ] B5 —— `!!js` 只过滤了 `customSkillDirs`，三个兄弟字段仍会把哨兵当路径
 
@@ -273,7 +264,7 @@
 审查同时发现三处「文档说的和代码做的不一致」。它们不改变代码行为，但会让下一个人按错的规范施工：
 
 1. ✅ **已改（F9 / B2 / B10 那批）** —— `docs/specs/extensions.md` §3.3 原写 ZIP 导入的入口是 `importSkillZip`（只有库侧可达），"写 / 重命名"根本没有入口。现在该段按两侧同形的入口重写：dsh 可写根走 `ext:skill*`（含 `ext:skillImportZip`）、库走 `ext:libSkill*`，并补上"新建拒绝覆盖既有 skill"、256 KB 上限、可写根之外以 `ext.skillReadOnly` 拒绝、以及两趟之间由 `errorOnExist` 兜住。
-2. **`docs/specs/extensions.md` §3.4** 说"库条目自身读不出…标为 `stale` 并带上理由"，而 `library.ts:232` 给的是 `installed:false, stale:false`。按 **B3** 的结论二选一（**仍待办**）。
+2. ✅ **已改（B3 / B1 那批）** —— `docs/specs/extensions.md` §3.4 原写"库条目自身读不出…标为 `stale` 并带上理由"，而代码给的是 `installed:false, stale:false`。定案：**三种"读不出"各有归属**（库条目 → issue；副本 → `stale` + `problem`；竞态 → 如实报 `installed` + `stale` + `problem`），并写明 `problem` **必须在页面上可见**、不得被呈现成"库有更新"。
 3. ✅ **已改（本次）** —— `docs/design/assembly.md:58` 原写 preset 贡献的根"在静态上不可枚举"，与 `preset-roots.ts` 的约定枚举（`specs/extensions.md` §3.1）相反：改为"字面量不可枚举、只能按随包布局约定枚举"。同文件的 **P0 验收行**先被标注"未达成"指向 F9，F9 修完后已恢复为达成并写明前提（**选定 profile 后**可见）。
 
 > 这三处里有两条是本次写作规范时新写/保留下来的（§3.4 的措辞、assembly 的 P0 验收行），所以它们同时也是写作侧的欠账，不是历史遗留。第 3 条的 P0 验收行经历了一次「标未达成 → 修复后恢复」，正好是这条规范（设计稿的验收行必须与实现同步）的自我演示。
@@ -291,7 +282,8 @@
 - [x] **P0（含 A7）**：测试进仓库、三闸全绿、规则上收 `specs/profile.md` §8（P7 / P8），账目留在 §1。
 - [x] **P1 第一批（F1 / F10 / B4）**：同上；账目在 §2.1，规则上收 `specs/profile.md` §4（CRLF）、§5（占用判定同源）、§8 **P9**（registry 最新版本）。
 - [x] **P1 第二批（F9 / B2 / B10）**：账目在 §2.2，规则上收 `specs/extensions.md` §3.3 与 §5 的测试锚点（§3.4 仍待 **B3**）。**唯一缺口**：F9 的页面接线没有渲染测试（仓库无组件测试基建），该行已写明替代钉法与理由。
-- [x] `pnpm typecheck`、`pnpm test`、`pnpm run build` 三项全绿（**已可在此机直接跑**：2026-10-09 最新一次 = 83 files / 1072 tests 全绿，`typecheck` / `build` 亦为 0）。
+- [x] **P1 第三批（B3 / B1）**：账目在 §2.3，规则上收 `specs/extensions.md` §3.4（三种"读不出"的归属 + `problem` 可见）与 §5；顺带把渲染测试入口写进 `vitest.config.ts` 并落成约定（`docs/TESTING.md` §4），F9 的验证缺口据此回填。
+- [x] `pnpm typecheck`、`pnpm test`、`pnpm run build` 三项全绿（**已可在此机直接跑**：2026-10-09 最新一次 = 86 files / 1085 tests 全绿，`typecheck` / `build` 亦为 0）。
 - [ ] 其余每条新增的测试都进仓库，并在本文件对应条目下留一行"验证方式"。
-- [ ] 行为或口径有变化的条目（F2、F3、F5、B1、B3，以及 F4 的结论）已同步进 `docs/presets.md` / `docs/specs/extensions.md` / `docs/specs/launch.md`，§5 的三处修正已落地。
+- [ ] 行为或口径有变化的条目（F2、F3、F5，以及 F4 的结论）已同步进 `docs/presets.md` / `docs/specs/extensions.md` / `docs/specs/launch.md`，§5 的三处修正已落地。
 - [ ] 本文所有 `[ ]` 清空后，删除本文件，并从 `docs/README.md` 的"未实现的设计"表里移除对应行。
