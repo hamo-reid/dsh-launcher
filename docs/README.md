@@ -23,7 +23,14 @@
 |---|---|
 | [`design/assembly.md`](./design/assembly.md) | 组装面（Assembly）：让 preset 真的能被组装 |
 | [`design/egress.md`](./design/egress.md) | 出网策略（Egress）：自部署 registry / 代理 / 私有 CA |
-| [`design/fixes.md`](./design/fixes.md) | 缺陷修复计划：2026-10 审查发现的 preset / 快照 / registry-skills 问题（修完即删） |
 
 > 2026-08 的一次性代码审计报告（原 `docs/audit/`）已删除：它的结论已全部落地，
 > 剩下的只是过时的文件路径与行号。需要追溯当时的分析过程，看 git 历史。
+>
+> 2026-10 的缺陷修复计划（原 `docs/design/fixes.md`，27 条）同样已删除：**每条都已修完或已确证不必改**，
+> 仍生效的规则按性质上收 —— profile 侧进 [`specs/profile.md`](./specs/profile.md)（§4 CRLF、§5 占用判定同源、
+> §8 **P7–P12**），扩展侧进 [`specs/extensions.md`](./specs/extensions.md)（§3.1 / §3.3 / §3.4），
+> preset 判定口径进 [`presets.md`](./presets.md)，错误码契约进 [`ui-guidelines.md`](./ui-guidelines.md) §4/§7，
+> 测试约定进 [`TESTING.md`](./TESTING.md) §4。计划本身连同各批的账目表在历史里：
+> `git log --diff-filter=D --oneline -- docs/design/fixes.md` 找到删除它的那次提交，
+> 再 `git show <该提交>^:docs/design/fixes.md` 读全文；每条修复的提交信息里都写着它关掉的是哪个编号。
