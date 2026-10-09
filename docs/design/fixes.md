@@ -1,6 +1,6 @@
 # 缺陷修复计划（2026-10 代码审查）
 
-> 状态：**P0 已完成（4 条，含施工中新发现的 A7）；F1、B4、F9、B2、B10、B3、B1 已完成，并带出施工中新发现的 F10；其余 15 条未实现**。这是一份施工计划，不是规范。
+> 状态：**P0 已完成（4 条，含施工中新发现的 A7）；F1、B4、F9、B2、B10、B3、B1、A4、A5 已完成，并带出施工中新发现的 F10；其余 13 条未实现**。这是一份施工计划，不是规范。
 > 来源：对 `feature/preset-management` 三块功能代码的审查（preset 功能、dev 插件 pnpm pack 快照、registry/skills 修复）。
 > 定位：每条修完后 —— 仍生效的规则上收 `docs/specs/` 或 `docs/presets.md`，测试进仓库，然后**从本文删掉该条**。本文清空即代表这批缺陷关闭。
 
@@ -11,7 +11,7 @@
 | 批次 | 条目 | 为什么是这个顺序 |
 |---|---|---|
 | **P0 硬后果** ✅ | ~~A2、A1、A3~~（+ 施工中新发现的 **A7**） | 会静默把 profile 指向错误的构建，或让包/文件名可控的字符串决定写入/递归删除的路径。**已完成**，见 §1 |
-| **P1 正确性与信息丢失** ✅ | ~~F1、B4、F9、B2、B3、B1~~（+ 施工中新发现的 **F10**）、F3、A4、A5、B5 | 守卫失效、功能做完却不可达、诊断被丢掉、选错版本、归档不可修复、清单先改后失败。**F1 / B4 / F10 见 §2.1，F9 / B2 见 §2.2，B3 / B1 见 §2.3** |
+| **P1 正确性与信息丢失** ✅ | ~~F1、B4、F9、B2、B3、B1、A4、A5~~（+ 施工中新发现的 **F10**）、F3、B5 | 守卫失效、功能做完却不可达、诊断被丢掉、选错版本、归档不可修复、清单先改后失败。**F1 / B4 / F10 见 §2.1，F9 / B2 见 §2.2，B3 / B1 见 §2.3，A4 / A5 见 §2.4** |
 | **P2 一致性与性能** | ~~B10~~ ✅（见 §2.2）、F2、F5、F6、F7、F8、B6、B7、B8、B9 | 文案/范围不一致、幻影根、缓存与 i18n 瑕疵 |
 | **先确证再定方案** | F4、A6 | 取决于宿主真实行为 / 数据根搬迁是否改变大小写，先做实验再改 |
 
@@ -103,6 +103,21 @@
 约定与三条边界（`Modal` 走 portal → 拆出 `InstallSkillFields`；tooltip 悬停才渲染；effect 不跑）写进了
 [`docs/TESTING.md`](../TESTING.md) §4。这条基建也**回填了 F9 的验证**（见 §2.2 那一行）。
 
+## 2.4 ✅ 已完成（2026-10-09）：A4、A5
+
+两条都在 store 的"先动盘、再验证"上：A4 是**产物被下一次操作删掉**（旧归档从此修不好），
+A5 是**清单被写坏而没人放回**（profile 之后每次装不干净）。仍生效的规则上收
+[`specs/profile.md`](../specs/profile.md)：A4 → §8 **P10**（pack 按版本分层 + 版本段守卫），
+A5 → §4（改清单前先留原文，失败即恢复）。
+
+| 条目 | 修法 | 测试 |
+|---|---|---|
+| **A4** | `packDir(storeDir, name, version)` → `<store>/.pack/<name>/<version>/`，`packDevPackage` 只清理该版本自己的目录；顶部注释写明「同版本=有意替换、跨版本=各自留存」。**顺带把版本也守住**：版本从此是路径段且该目录被递归删除，而它来自 dev 包自己的 manifest —— 与 A3/A7 同一类，`versionInvalid` 一并拒绝（空串会让路径塌回"所有版本"那层） | `pack.test.ts`：两个版本各 pack 一次 → `1.0.0` 的 tgz 仍在；同版本重复 pack 仍替换自己那份；版本 `..` / `../evil` / `1/2` / `''` 全部拒绝且不调用 pnpm、`.pack/@me` 与"所有版本"目录都没被碰。反向校验：还原成分版本前的目录 → 5 例挂（含 `ENOENT …/1.0.0`）；去掉版本守卫 → pack"成功"写进了 `.pack/@me\x.tgz`（版本段越出包目录，而 `rmSync` 已清掉该 scope 的家） |
+| **A5** | `installIntoProfile` 进函数即留 `originalManifestText`，`restoreManifest()` 把原文逐字节写回；`pnpm install` 失败与"改写之后的任何异常"（含 bundle 层那次追加）都恢复，文案里说明「清单已恢复原样」 | `plugins.test.ts`：install 失败后 `package.json` 与调用前**逐字节相同**（原来有 `link:` 依赖的也恢复成 `link:`，不是删掉了事）；profile 不存在时目录不会被创建；成功路径**不会**误恢复（依赖照旧写入）。反向校验：注释掉恢复 → 失败后清单里留着 `"pkg-a": "file:…"`（指向不存在的包） |
+
+> A5 的 catch 分支（改写之后的异常）是**防御网**：两次写入同一路径，第二次失败需要磁盘级故障才触发，
+> 单测里造不出来 —— 这里如实记下，不假装它被覆盖。
+
 ### [ ] F3 —— 同一 loader 行 id 被两次 insert 时静默折叠，页面显示成健康名册
 
 **现象**：`declaration.ts:155-177` 的 fold 以 row id 为键、后者覆盖前者，`order` 只压栈一次 → 两层各 insert 一次同一 row id，只得到**一条**名册记录、**零**警告。而那是硬性启动失败（`store/combo.ts:255` 的 `findInsertConflicts`，接在 `ipc/dsh/run.ts:222` 与 `ipc/profile/read.ts:73`）。重复 preset id 的警告只在"两个不同 row id 共用同一 `config.id`"时触发。
@@ -110,28 +125,6 @@
 **方案**：不要在 `readDeclarations` 里另写一套规则 —— 让页面复用权威判定。在 `presetListing`（`index.ts:171`）拿到 `ctx`/`profile` 之后调一次 `findInsertConflicts(ctx, profile)`，把其中涉及 declaration row id（即 fold 里出现过的 row id）的冲突转成 `warnings`，用宿主自己的措辞（duplicate loader entry id）。若希望 `readDeclarations` 保持纯函数，退路是在它内部按层记录 `collectInsertIds`，第二次出现同一 id 时推 warning。
 
 **验证**：`presets/index` 单测：构造两层同时 insert `- id: preset-x`（同一 preset id），断言 `warnings` 非空、且文案点到冲突双方；再断言"后层只写 `- id: preset-x` + `disabled:`（合法的 id 覆盖）"**不**产生 warning。
-
-### [ ] A4 —— 每次 pack 清空 `.pack/<name>`，让旧归档的 `file:<tarball>` 依赖悬空
-
-**现象**：归档记录的依赖是 `file:<store>/.pack/<name>/<name>-<version>.tgz`（`install.ts:110` 的 `pnpm add file:<tgz>`），而 `pack.ts:102` 每次 pack 前清空整个 `.pack/<name>`。同版本重跑无妨（文件名稳定），**版本号一变**旧归档的依赖就指向已删除的 tgz —— 该版本再也无法重建/修复（`install.ts:204-215` 的 repair ladder 必然失败）。profile 侧不受影响，它指向归档内解出的包体。
-
-**方案**：让 pack 目的地按版本分目录，并且只清理该版本自己的目录：
-1. `packDir(storeDir, name, version?)` → `<store>/.pack/<name>/<version>`；`packIdentity` 已在 pack 前拿到 version，直接可用（`pnpm pack` 不会改包自己的 version）。
-2. `packDevPackage` 的 `rmSync` 只作用于这个版本子目录，不再动 `<name>` 这一层 —— 于是版本升级不会带走旧 tarball。
-3. 在 `pack.ts` 顶部注释里写明：**同版本**重复快照是有意替换（源码动了、版本没动），**跨版本**必须各自留存。
-
-**验证**：`store/pack`（或 dev 快照）单测：先对 `1.0.0` 快照，再改 package.json 为 `1.1.0` 快照，断言 `1.0.0` 的 tgz 仍在、且 `1.0.0` 归档仍可 `reinstallVersion` 成功（或至少其记录的 `file:` 目标存在）。
-
-### [ ] A5 —— `installIntoProfile` 先改 manifest 再 install，失败不回滚
-
-**现象**：`install.ts:347` 写 manifest（依赖、清理旧 sub-bundle 依赖），`:349` 才 `pnpm install`；`:350-353` 失败只返回错误。快照部分成功时（`dev.ts:590-598`）前面的 profile 已切换、失败那个的 manifest 也已改写，而归档路径是有 stash/restore 的。
-
-**方案**：局部快照 + 恢复，与归档路径同构：
-1. 进函数时记下 `originalManifestText`（不存在则记 `undefined`）。
-2. `pnpm install` 失败时：若原来有文件则写回原文，否则删除刚创建的文件；然后再返回错误，文案里说明"清单已恢复"。
-3. bundle 层那次 manifest 写入（`:370`）同样包在恢复范围内。
-
-**验证**：`store/install` 单测：mock `runPnpm` 失败，断言 profile 的 package.json 与调用前逐字节相同（含原来就不存在的场景）。
 
 ### [ ] B5 —— `!!js` 只过滤了 `customSkillDirs`，三个兄弟字段仍会把哨兵当路径
 
@@ -283,7 +276,8 @@
 - [x] **P1 第一批（F1 / F10 / B4）**：同上；账目在 §2.1，规则上收 `specs/profile.md` §4（CRLF）、§5（占用判定同源）、§8 **P9**（registry 最新版本）。
 - [x] **P1 第二批（F9 / B2 / B10）**：账目在 §2.2，规则上收 `specs/extensions.md` §3.3 与 §5 的测试锚点（§3.4 仍待 **B3**）。**唯一缺口**：F9 的页面接线没有渲染测试（仓库无组件测试基建），该行已写明替代钉法与理由。
 - [x] **P1 第三批（B3 / B1）**：账目在 §2.3，规则上收 `specs/extensions.md` §3.4（三种"读不出"的归属 + `problem` 可见）与 §5；顺带把渲染测试入口写进 `vitest.config.ts` 并落成约定（`docs/TESTING.md` §4），F9 的验证缺口据此回填。
-- [x] `pnpm typecheck`、`pnpm test`、`pnpm run build` 三项全绿（**已可在此机直接跑**：2026-10-09 最新一次 = 86 files / 1085 tests 全绿，`typecheck` / `build` 亦为 0）。
+- [x] **P1 第四批（A4 / A5）**：账目在 §2.4，规则上收 `specs/profile.md` §8 **P10**（pack 按版本分层 + 版本段守卫）与 §4（改清单前先留原文，失败即恢复）。
+- [x] `pnpm typecheck`、`pnpm test`、`pnpm run build` 三项全绿（**已可在此机直接跑**：2026-10-09 最新一次 = 86 files / 1091 tests 全绿，`typecheck` / `build` 亦为 0）。
 - [ ] 其余每条新增的测试都进仓库，并在本文件对应条目下留一行"验证方式"。
 - [ ] 行为或口径有变化的条目（F2、F3、F5，以及 F4 的结论）已同步进 `docs/presets.md` / `docs/specs/extensions.md` / `docs/specs/launch.md`，§5 的三处修正已落地。
 - [ ] 本文所有 `[ ]` 清空后，删除本文件，并从 `docs/README.md` 的"未实现的设计"表里移除对应行。

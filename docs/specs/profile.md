@@ -71,6 +71,11 @@
 - **跨 profile 复制 / 移动 patch**：按行 id 合并到目标 profile，写前复验；移动则清空源行。
 - **依赖编辑**：改 `package.json` → `pnpm install` → `reconcileBundles`（声明
   `dsh.bundle.patch` 的依赖自动激活为层）。
+- **改清单前先留原文，失败即恢复**：`installIntoProfile` 先写依赖再 `pnpm install`（bundle 层那次追加
+  在其后），**清单被改写之后的任何失败**都要把原文逐字节写回，并在文案里说明「清单已恢复原样」。
+  否则 profile 会留下一条指向不存在包的依赖 —— 之后每次都装不干净，再失败时也看不出原因。归档路径早有
+  stash/restore，清单与它同构。只覆盖「改写之后」的失败：读不出来或 JSON 解析失败发生在改写之前，
+  不在此列，也不该被说成「已恢复」。（与 `store/install.ts` 的 `restoreManifest` 对应）
 - **重命名**：禁止对运行中的 profile 执行；保留名不可用。
 
 ## 5. 启动前预检（重复 insert id）
@@ -124,7 +129,7 @@ SectionHeading（全宽，只放全局操作）
 |---|---|---|---|
 | `archive/<name>/<version>/` | name / version | IPC 入参；`github:` / 本地 zip / 文件夹包的 `package.json`；dev 包 | `pathIdentifierInvalid` / `versionInvalid`（`store/install.ts`） |
 | `.trash/<name>@<version>` | name / version | 同上 | 同上（与 `dest` 同一变量、同一处校验） |
-| `.pack/<name>` | name | dev 包自己的 `package.json`（`packDevPackage`） | `pathIdentifierInvalid` |
+| `.pack/<name>/<version>/` | name / version | dev 包自己的 `package.json`（`packDevPackage`） | `pathIdentifierInvalid` / `versionInvalid` |
 | `.import/<stem>` | stem | 用户所选 zip 的**文件名**去掉 `.zip` 后缀（`addLocalPlugin`） | `pathIdentifierInvalid` |
 
 判据不是「含 `/` 就危险」，而是**这一段能不能让路径塌回某个已存在的祖先**：`.`、`..` 以及任意长度的
@@ -145,3 +150,10 @@ SectionHeading（全宽，只放全局操作）
 给出 `0.0.3`，而 `dist-tags.latest` 是 `1.3.0`。踩到的后果不是显示错一个号：以它为 fallback 的
 更新检查会把最老版本拿去和当前版本比，于是**永远不提示更新**。显式版本（`pkg@1.2.3`）与存档版本
 的选择不受此约束 —— 存档列表由 `storeVersions` 按 semver 升序给出，末位即最高。
+
+**P10** 打包产物（`.pack/<name>/<version>/<tgz>`）按**版本**分层留存，不得按包名共用一个目录：
+归档把自己对 tarball 的依赖记成 `file:<tgz>`，**修复或重建一个旧版本时要按这个路径重新解析** —— 一个
+包一个目录意味着版本号一变就删掉了旧归档仍指着的 tgz，那个版本从此无法重建。**同一个版本**重复打包
+仍然替换它自己那份（源码动了、号没动，留着旧的会"报成功却存着上一版"），**跨版本**各自留存。
+因为版本成了路径段而该目录随后被递归删除，版本**同样**必须过 `versionInvalid`（空串会让路径塌回
+"所有版本"那层，`..` 会走出去 —— 与 P7 同一条判据、同一个理由）。

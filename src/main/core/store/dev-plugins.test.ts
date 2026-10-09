@@ -495,7 +495,7 @@ describe('snapshotDevPlugin', () => {
   /** pnpm answers the pack and the archive add; the tarball the add expects. */
   function packedFlow(dir: string, args: readonly string[]): { ok: boolean; text: string } {
     if (args[0] === 'pack') {
-      writeFileSync(join(packDir(store(), '@me/dsh-foo'), 'foo-0.1.0.tgz'), '')
+      writeFileSync(join(packDir(store(), '@me/dsh-foo', '0.1.0'), 'foo-0.1.0.tgz'), '')
       return { ok: true, text: 'packed' }
     }
     if (args[0] === 'add') {

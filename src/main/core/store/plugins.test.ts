@@ -622,15 +622,51 @@ describe('installIntoProfile', () => {
     expect(r2.ok).toBe(false)
   })
 
-  it('adds a file dependency and reports a failed pnpm install', async () => {
+  it('reports a failed pnpm install and puts the manifest back byte for byte', async () => {
     const base = join(root, 'profs-1')
     seedVersion('pkg-a', '1.0.0')
     mkProfile(base, 'prof', {})
+    const before = readFileSync(join(base, 'prof', 'package.json'), 'utf8')
     vi.mocked(runPnpm).mockResolvedValueOnce({ ok: false, text: 'boom' })
     const r = await installIntoProfile(base, 'prof', 'pkg-a', store())
     expect(r.ok).toBe(false)
     expect(r.text).toContain('pnpm install 失败')
-    const m = JSON.parse(readFileSync(join(base, 'prof', 'package.json'), 'utf8'))
+    expect(r.text).toContain('清单已恢复原样')
+    // The dependency the install would have added is gone, and nothing else moved.
+    // A profile left pointing at a package that is not there installs dirty from
+    // then on, and the next failure says nothing about why.
+    expect(readFileSync(join(base, 'prof', 'package.json'), 'utf8')).toBe(before)
+  })
+
+  it('restores a pre-existing dependency entry, not only an absent one', async () => {
+    const base = join(root, 'profs-1b')
+    seedVersion('pkg-a', '1.0.0')
+    mkProfile(base, 'prof', { dependencies: { 'pkg-a': 'link:/elsewhere' } })
+    const before = readFileSync(join(base, 'prof', 'package.json'), 'utf8')
+    vi.mocked(runPnpm).mockResolvedValueOnce({ ok: false, text: 'boom' })
+    expect((await installIntoProfile(base, 'prof', 'pkg-a', store())).ok).toBe(false)
+    // Rewritten to `file:`, then put back to `link:` — the user's own state.
+    expect(readFileSync(join(base, 'prof', 'package.json'), 'utf8')).toBe(before)
+  })
+
+  it('leaves a missing profile uncreated, so there is nothing to restore', async () => {
+    const base = join(root, 'profs-1c')
+    seedVersion('pkg-a', '1.0.0')
+    const r = await installIntoProfile(base, 'ghost', 'pkg-a', store())
+    expect(r.ok).toBe(false)
+    expect(r.text).toContain('不存在')
+    expect(existsSync(join(base, 'ghost'))).toBe(false)
+  })
+
+  it('keeps the install when it succeeds, dependency and all', async () => {
+    // The restore must not fire on the happy path — the simplest way to get that
+    // wrong is to restore after every exit.
+    const base = join(root, 'profs-1d')
+    seedVersion('pkg-a', '1.0.0')
+    mkProfile(base, 'prof', {})
+    const r = await installIntoProfile(base, 'prof', 'pkg-a', store())
+    expect(r.ok).toBe(true)
+    const m = JSON.parse(readFileSync(join(base, 'prof', 'package.json'), 'utf8')) as { dependencies: Record<string, string> }
     expect(m.dependencies['pkg-a']).toBe(`file:${join(store(), 'archive', 'pkg-a', '1.0.0', 'node_modules', 'pkg-a')}`)
   })
 

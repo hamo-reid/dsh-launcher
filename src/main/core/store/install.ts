@@ -351,7 +351,27 @@ export async function installIntoProfile(
   const manifestPath = join(dir, 'package.json')
   if (!existsSync(manifestPath)) return { ok: false, text: `profile "${profile}" 不存在`, activated: false }
 
-  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as ProfileManifestShape
+  const originalManifestText = readFileSync(manifestPath, 'utf8')
+  const manifest = JSON.parse(originalManifestText) as ProfileManifestShape
+  /** Put the manifest back exactly as it was.
+   *
+   * The profile's own state is written BEFORE the install that makes it true, and
+   * this is the one place the launcher edits a profile for a reason the user did
+   * not ask for directly. The archive path has had stash/restore discipline all
+   * along; the manifest had none, so a failed install left a dependency on a
+   * package that is not there — a profile that no longer installs cleanly and says
+   * nothing about why. (The file is required here — the guard above refuses a
+   * profile without one — so restoring the text is the whole of it.) */
+  const restoreManifest = (): void => {
+    try {
+      writeFileSync(manifestPath, originalManifestText)
+      logger.warn('plugin install: restored the profile manifest', { profile, pkg })
+    } catch (error) {
+      logger.error('plugin install: could not restore the profile manifest', {
+        profile, pkg, error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
   manifest.dependencies = manifest.dependencies ?? {}
   // Depend on the archived copy via `file:` so pnpm INSTALLS it into the profile's
   // node_modules (real package bodies, not a junction to the store). dsh loads
@@ -371,31 +391,43 @@ export async function installIntoProfile(
       manifestChanged = true
     }
   }
-  if (manifestChanged) writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
-
-  const install = await runPnpm(dir, ['install', '--config.confirmModulesPurge=false'], undefined, { storeDir })
-  if (!install.ok) {
-    logger.warn('plugin install into profile failed', { profile, pkg, text: install.text })
-    return { ok: false, text: `pnpm install 失败：${install.text}`, activated: false }
-  }
-
-  // Bundle reconcile: a dependency that declares `dsh.bundle` joins the layer.
-  const storeManifestPath = join(pkgDir, 'package.json')
-  if (!existsSync(storeManifestPath)) return { ok: true, text: `已作为 file 依赖安装（${pkg}）`, activated: false }
-  let installed: ProfileManifestShape
   try {
-    installed = JSON.parse(readFileSync(storeManifestPath, 'utf8')) as ProfileManifestShape
-  } catch {
-    return { ok: true, text: `已作为 file 依赖安装（${pkg}）`, activated: false }
+    if (manifestChanged) writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
+
+    const install = await runPnpm(dir, ['install', '--config.confirmModulesPurge=false'], undefined, { storeDir })
+    if (!install.ok) {
+      restoreManifest()
+      logger.warn('plugin install into profile failed', { profile, pkg, text: install.text })
+      return { ok: false, text: `pnpm install 失败：${install.text}（profile 清单已恢复原样）`, activated: false }
+    }
+
+    // Bundle reconcile: a dependency that declares `dsh.bundle` joins the layer.
+    const storeManifestPath = join(pkgDir, 'package.json')
+    if (!existsSync(storeManifestPath)) return { ok: true, text: `已作为 file 依赖安装（${pkg}）`, activated: false }
+    let installed: ProfileManifestShape
+    try {
+      installed = JSON.parse(readFileSync(storeManifestPath, 'utf8')) as ProfileManifestShape
+    } catch {
+      return { ok: true, text: `已作为 file 依赖安装（${pkg}）`, activated: false }
+    }
+    if (installed.dsh?.bundle?.patch === undefined) {
+      return { ok: true, text: `已作为普通 file 依赖安装（${pkg}，声明无 dsh.bundle）`, activated: false }
+    }
+    const bundles = manifest.dsh?.profile?.bundles ?? []
+    if (!bundles.includes(pkg)) {
+      manifest.dsh = { ...manifest.dsh, profile: { ...manifest.dsh?.profile, bundles: [...bundles, pkg] } }
+      writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
+      return { ok: true, text: `已激活：${pkg} 声明了 dsh.bundle，已加入 bundle 层`, activated: true }
+    }
+    return { ok: true, text: `已在 bundle 层（${pkg}）`, activated: true }
+  } catch (error) {
+    // A write that failed partway, or the bundle-layer write at the end: either way
+    // the manifest is not what the caller promised, so it goes back to what the
+    // user had. The plugin body may already sit in the profile's node_modules,
+    // where it is inert without the dependency line pointing at it.
+    restoreManifest()
+    const text = error instanceof Error ? error.message : String(error)
+    logger.warn('plugin install into profile threw', { profile, pkg, text })
+    return { ok: false, text: `安装失败：${text}（profile 清单已恢复原样）`, activated: false }
   }
-  if (installed.dsh?.bundle?.patch === undefined) {
-    return { ok: true, text: `已作为普通 file 依赖安装（${pkg}，声明无 dsh.bundle）`, activated: false }
-  }
-  const bundles = manifest.dsh?.profile?.bundles ?? []
-  if (!bundles.includes(pkg)) {
-    manifest.dsh = { ...manifest.dsh, profile: { ...manifest.dsh?.profile, bundles: [...bundles, pkg] } }
-    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
-    return { ok: true, text: `已激活：${pkg} 声明了 dsh.bundle，已加入 bundle 层`, activated: true }
-  }
-  return { ok: true, text: `已在 bundle 层（${pkg}）`, activated: true }
 }

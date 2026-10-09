@@ -25,7 +25,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:f
 import { join } from 'node:path'
 import { runPnpm } from '../dsh/pnpm.ts'
 import { logger } from '../shared/logger.ts'
-import { pathIdentifierInvalid } from '../profile/name-guard.ts'
+import { pathIdentifierInvalid, versionInvalid } from '../profile/name-guard.ts'
 import type { DevPlugin, DevRunResult } from '../../../shared/types.ts'
 
 /** pnpm's error when a workspace/catalog protocol cannot be resolved because the
@@ -53,11 +53,20 @@ export function explainArchiveFailure(text: string): string | undefined {
     + tail
 }
 
-/** Where packed tarballs are kept, per package. They must survive: the archive
- * records `file:<tarball>` as its dependency, so its own `pnpm install` re-resolves
- * through them. */
-export function packDir(storeDir: string, name: string): string {
-  return join(storeDir, '.pack', name)
+/**
+ * Where packed tarballs are kept: `<storeDir>/.pack/<name>/<version>/`.
+ *
+ * Per VERSION, not per package, and that is load-bearing. The archive records
+ * `file:<tarball>` as its own dependency, so its `pnpm install` re-resolves
+ * through this path for as long as that archive exists — a repair or a rebuild of
+ * an OLD archived version reads it. One directory per package meant a version bump
+ * deleted the tarball the previous archive still points at, and that version could
+ * never be rebuilt again. The dev package's own `version` decides the segment, so
+ * a re-snapshot of the SAME version still replaces its own tarball (deliberate:
+ * the source moved, the number did not), while a different version keeps its own.
+ */
+export function packDir(storeDir: string, name: string, version: string): string {
+  return join(storeDir, '.pack', name, version)
 }
 
 /** A pack run: pnpm's own output plus where the tarball landed. */
@@ -88,8 +97,10 @@ function packedTarball(dir: string): string | undefined {
 }
 
 /**
- * Pack `dev` into `<storeDir>/.pack/<name>/`, replacing whatever was there so a
- * stale tarball can never be mistaken for this run's output.
+ * Pack `dev` into `<storeDir>/.pack/<name>/<version>/`, replacing whatever was in
+ * THAT version's directory so a stale tarball can never be mistaken for this run's
+ * output — while every other version's tarball stays where the archives that
+ * depend on it expect to find it.
  */
 export async function packDevPackage(dev: DevPlugin, storeDir: string): Promise<PackResult> {
   if (storeDir === '') {
@@ -106,7 +117,15 @@ export async function packDevPackage(dev: DevPlugin, storeDir: string): Promise<
   if (pathIdentifierInvalid(id.name)) {
     return { ok: false, text: `插件包名不合法：${id.name}`, command: '', cwd: dev.dir }
   }
-  const dest = packDir(storeDir, id.name)
+  // The version is a path segment now too (see `packDir`), from the same manifest,
+  // and that directory is recursively removed below: `..` there would step out of
+  // `.pack` — or out of the store — and delete what it found. `versionInvalid` also
+  // rejects the empty string, which would collapse the path back to the
+  // all-versions directory this exists to avoid.
+  if (versionInvalid(id.version)) {
+    return { ok: false, text: `插件包声明的版本号不可用：${id.version}`, command: '', cwd: dev.dir }
+  }
+  const dest = packDir(storeDir, id.name, id.version)
   rmSync(dest, { recursive: true, force: true })
   mkdirSync(dest, { recursive: true })
 
