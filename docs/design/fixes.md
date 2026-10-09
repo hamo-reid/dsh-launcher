@@ -1,6 +1,6 @@
 # 缺陷修复计划（2026-10 代码审查）
 
-> 状态：**P0 已完成（4 条，含施工中新发现的 A7）；F1、B4 已完成，并带出施工中新发现的 F10；其余 20 条未实现**。这是一份施工计划，不是规范。
+> 状态：**P0 已完成（4 条，含施工中新发现的 A7）；F1、B4、F9、B2、B10 已完成，并带出施工中新发现的 F10；其余 17 条未实现**。这是一份施工计划，不是规范。
 > 来源：对 `feature/preset-management` 三块功能代码的审查（preset 功能、dev 插件 pnpm pack 快照、registry/skills 修复）。
 > 定位：每条修完后 —— 仍生效的规则上收 `docs/specs/` 或 `docs/presets.md`，测试进仓库，然后**从本文删掉该条**。本文清空即代表这批缺陷关闭。
 
@@ -11,8 +11,8 @@
 | 批次 | 条目 | 为什么是这个顺序 |
 |---|---|---|
 | **P0 硬后果** ✅ | ~~A2、A1、A3~~（+ 施工中新发现的 **A7**） | 会静默把 profile 指向错误的构建，或让包/文件名可控的字符串决定写入/递归删除的路径。**已完成**，见 §1 |
-| **P1 正确性与信息丢失** | ~~F1、B4~~ ✅（+ 施工中新发现的 **F10**）、F3、F9、A4、A5、B1、B2、B3、B5 | 守卫失效、功能做完却不可达、诊断被丢掉、选错版本、归档不可修复、清单先改后失败。**F1 / B4 / F10 已完成**，见 §2.1 |
-| **P2 一致性与性能** | F2、F5、F6、F7、F8、B6、B7、B8、B9、B10 | 文案/范围不一致、幻影根、缓存与 i18n 瑕疵、接线未完成的创作面 |
+| **P1 正确性与信息丢失** ✅ | ~~F1、B4、F9、B2~~（+ 施工中新发现的 **F10**）、F3、A4、A5、B1、B3、B5 | 守卫失效、功能做完却不可达、诊断被丢掉、选错版本、归档不可修复、清单先改后失败。**F1 / B4 / F10 见 §2.1，F9 / B2 见 §2.2** |
+| **P2 一致性与性能** | ~~B10~~ ✅（见 §2.2）、F2、F5、F6、F7、F8、B6、B7、B8、B9 | 文案/范围不一致、幻影根、缓存与 i18n 瑕疵 |
 | **先确证再定方案** | F4、A6 | 取决于宿主真实行为 / 数据根搬迁是否改变大小写，先做实验再改 |
 
 **已定决策**（2026-10-02 评审）：
@@ -76,6 +76,17 @@
 同样什么都看不见。两条必须同一批做（这就是它们同一个提交的原因）。触发条件是常规操作：Windows 编辑器把 LF 文件
 存成 CRLF（本机 `core.autocrlf=true` 也在放大这个面），而 Launcher 自己写的补丁是 LF。
 
+## 2.2 ✅ 已完成（2026-10-09）：F9、B2、B10
+
+这三条是一件事的三面：技能页上"看得见"（F9）、"做得成"（B10）、"不覆盖别人的东西"（B2）。
+仍生效的规则已上收 [`specs/extensions.md`](../specs/extensions.md) §3.3，测试锚点见该文件 §5。
+
+| 条目 | 修法 | 测试 |
+|---|---|---|
+| **F9** | `SkillsManagePanel` 自己管 profile 选择（`dsh.profiles` + `Select`，可清空）；`DshSection` 不再写死 `profile={null}`；未选 profile 时页面用 `Alert` 明说 preset 根不列出。选择规则抽成 `renderer/src/lib/profileScope.ts` 的 `nextProfileChoice`，与 `PresetsSection` 共用（消掉两处重复） | `renderer/src/lib/profileScope.test.ts`：记住仍在的 profile / 否则取首个 / 无 profile 时为 `undefined`（这个"机器级视图"是有意义的答案）。**页面那半没有渲染测试** —— 仓库没有组件测试基建（`@testing-library/react` 未装，逻辑一律抽到 `lib/`），所以这里用"抽出的纯函数 + 核心侧既有的 `preset-roots.test.ts`（有 profile 才产出 preset 根）"钉住，页面接线本身靠读码与构建验证 |
+| **B2** | `installZipSkills` 第 2 趟复制前**再查一次** `exists(name)`（命中即 `extSkillExists`），并把 `cpSync` 改为 `errorOnExist: true, force: false` | `skills.test.ts`：探针第一次说空闲、第二次说占用 → `ext.skillExists` 且目标根没多出目录；探针**恒**说空闲但目标已存在 → 文件系统拒绝且既有 SKILL.md 未被改写。反向校验：还原任一半都返回 `(no throw)`（静默覆盖） |
+| **B10** | 接通 dsh 侧创作面：core 补**新建拒绝覆盖**守卫；IPC 加 `ext:skillRead` / `ext:skillSave` / `ext:skillImportZip`（外加 `ext:skillScaffold`，让 dsh 流程不必借用库命名空间）；`shared/api.ts` + preload 各补 4 个方法；面板动作行补「新建 Skill / 从 ZIP 导入」、可写行补「编辑」、底部加可拖放的 `DropZone`（复用现成的 `SkillEditorModal` / `SkillNameModal` / `DropZone`）。顺带把可写根之外的读 / 写 / 删从 `internal` 改成 `ext.skillReadOnly` | `skills.test.ts`：新建撞既有 bundle 目录 / 既有扁平文件都拒绝且原文件未被改写；`extensions.test.ts`：scaffold→save→read 回读、frontmatter 改名、新建撞名返回 `ext.skillExists`、`../escape` 与 300 KB 文本被拒、zip 导入落进可写根、非 zip 路径返回 `ext.skillZipNotZip`。反向校验：还原守卫后 IPC 那级返回 `ok:true`（**静默覆盖**），核心两例同时挂 |
+
 ### [ ] F3 —— 同一 loader 行 id 被两次 insert 时静默折叠，页面显示成健康名册
 
 **现象**：`declaration.ts:155-177` 的 fold 以 row id 为键、后者覆盖前者，`order` 只压栈一次 → 两层各 insert 一次同一 row id，只得到**一条**名册记录、**零**警告。而那是硬性启动失败（`store/combo.ts:255` 的 `findInsertConflicts`，接在 `ipc/dsh/run.ts:222` 与 `ipc/profile/read.ts:73`）。重复 preset id 的警告只在"两个不同 row id 共用同一 `config.id`"时触发。
@@ -107,16 +118,6 @@
 
 **验证**：`LibraryModals` 的渲染测试（或 `SkillsManagePanel` 快照）加一例：给一个 `problem` 非空的 install，断言页面出现理由文本而不是仅 stale 标签。
 
-### [ ] B2 —— zip 导入的"不覆盖"依赖调用方探针
-
-**现象**：`skills/zip.ts:104` 用调用方传入的 `exists(name)` 查重，`:118` 的 `cpSync(from, dir, { recursive: true })` 没有 `errorOnExist`，两趟之间新出现的同名 skill 会被静默覆盖（对比 `presets/authoring.ts:86` 的 `cpSync(..., { errorOnExist: true })`）。all-or-nothing 成立，"不覆盖"不成立。
-
-**方案**：
-1. 第 2 趟复制时加 `errorOnExist: true, force: false`，让文件系统自己兜住 TOCTOU。
-2. 同一循环里在复制前再查一次 `exists(name)`，命中就 `throwE(E.extSkillExists, ...)` —— 保持已有的错误码与回滚语义（`:122-126` 的 `landed` 回滚不动）。
-
-**验证**：`skills` 的 zip 导入单测加一例：`exists` 探针第一次返回 false、第二次（复制前）返回 true，断言抛 `extSkillExists` 且目标根没有多出目录。
-
 ### [ ] A5 —— `installIntoProfile` 先改 manifest 再 install，失败不回滚
 
 **现象**：`install.ts:347` 写 manifest（依赖、清理旧 sub-bundle 依赖），`:349` 才 `pnpm install`；`:350-353` 失败只返回错误。快照部分成功时（`dev.ts:590-598`）前面的 profile 已切换、失败那个的 manifest 也已改写，而归档路径是有 stash/restore 的。
@@ -127,16 +128,6 @@
 3. bundle 层那次 manifest 写入（`:370`）同样包在恢复范围内。
 
 **验证**：`store/install` 单测：mock `runPnpm` 失败，断言 profile 的 package.json 与调用前逐字节相同（含原来就不存在的场景）。
-
-### [ ] F9 —— preset 贡献的 skill 根在界面上不可达（这条新功能的用户可见效果为零）
-
-**现象**：`6b80b84` 让 `skillRoots` 能报告 preset 贡献的根，渲染层也备好了 `ext.skills.source.preset` / `rootRuntime` / `rootFromPreset` 三个标签 —— 但唯一的挂载点 `src/renderer/src/views/DshSection.tsx:313` 写死 `<SkillsManagePanel dshId={selected.id} profile={null} />`，于是 `SkillsManagePanel.tsx:56` 永远调 `ext.skillList(dshId, undefined)` → `profileTarget` 返回 `null` → `skillRoots` 跳过 preset 分支（`skills.ts:133`）。那些行永远不会出现。
-
-**根因**：profile 参数在 IPC 与 core 两端都做对了（可选、校验、没有 profile 就不产出 preset 根 —— `ipc/extensions/skills.ts:36-46`、`skills.ts:133`），但页面这一端没接上：技能页当时只有"选 dsh"一个维度。
-
-**方案**：给 `SkillsManagePanel` 加 profile 选择（复用 `PresetsSection` 的 `dsh.profiles` + `Select` 的做法），或在 Dsh 页为该 dsh 默认选第一个 profile（`listProfileInfos` 已经能列出）。`undefined` 仍是合法状态（"这个 dsh 的机器级视图"），但界面必须能表达"当前没选 profile，所以 preset 根不列出"，而不是静默少几行。同步修正 `docs/design/assembly.md` 的 P0 验收行（见 §5）。
-
-**验证**：渲染测试：传 profile 时断言调用了 `skillList(dshId, profile)` 且 `preset:{owner}` 行可见；不传时断言出现"未选 profile"的说明。
 
 ### [ ] B3 —— `listSkillLibrary` 的读取仍未保护，`f652479` 的目标只达成一半
 
@@ -247,23 +238,6 @@
 
 **验证**：IPC 单测断言返回的是新专用码；渲染测试断言页面出现含 URL 的具体文案。
 
-### [ ] B10 —— 接通 dsh 侧 skill 创作面（**已定：接线**）
-
-**现象**：`writeSkill`（`skills/skills.ts:288`）、`readSkillFile`（`:273`）、`importSkillZip`（`:334`）只被 `skills.test.ts` 调用 —— `ipc/extensions/skills.ts` 只暴露了 `ext:skillList` / `ext:skillDelete` 与库侧通道，`shared/api.ts`、preload 里也没有对应方法。**注意创作 UI 其实全都存在**，只是挂在**库**侧：`SkillEditorModal` / `SkillNameModal` / `components/DropZone.tsx` 与 i18n 键 `ext.skills.add` / `ext.skills.import` / `ext.skills.dropHint` / `ext.skills.editorTitle*` 都由 `SkillsView.tsx:201,207,275,278,320,326` 使用，并接到 `libSkillSave` / `libSkillImportZip`（`SkillsView.tsx:92,111`）。dsh 侧面板 `SkillsManagePanel.tsx` 只有"列出 / 删除 / 从库安装"。另外 `writeSkill` 的新建分支（`previousName === null`）只对**重命名**查重（`:298`），新建时目标已存在会直接 `writeFileSync` 覆盖既有 `SKILL.md` —— 与 `specs/extensions.md` §3.3 的"拒绝覆盖既有 skill"冲突。
-
-**方案（已定：接线；UI 复用现成组件，所以工作量主要在 IPC 与守卫上）**：
-1. **core 先修覆盖**：`writeSkill` 的新建分支加存在性检查 —— `previousName === null` 时若可写根已存在 `<name>/SKILL.md` 或 `<name>.md`，抛 `E.extSkillExists`；"原地编辑"（`previousName === name`）与重命名分支保持现状。
-2. **IPC 三通道**（`ipc/extensions/skills.ts`，与库侧同形，`ctxOf` + 名称校验 + try/catch → `failFromError`）：
-   - `ext:skillRead (dshId, name)` → `SKILL_NAME_RE` 校验 → `readSkillFile(ctx, name)`
-   - `ext:skillSave (dshId, previousName|null, text)` → `previousName` 走 `SKILL_NAME_RE`；`text` 必须是字符串且设一个上限（建议 256 KB，超限 `E.nameInvalid` 之类）→ `writeSkill(ctx, previousName, text)`
-   - `ext:skillImportZip (dshId, zipPath?)` → 无 `zipPath` 时 `dialog.showOpenDialog` → `zipImportProblem` → `importSkillZip(ctx, zipPath)`；取消返回 `null`（与 `ext:libSkillImportZip` 同口径）
-3. **api / preload**：`shared/api.ts` 与 `preload/index.ts` 各补 `skillRead` / `skillSave` / `skillImportZip`。
-4. **渲染侧**：`SkillsManagePanel` 的动作行补「新建 Skill」与「从 ZIP 导入」（键已存在），新建走 `scaffoldSkill(name)` 取初始文本，复用 `SkillEditorModal` / `SkillNameModal` / `DropZone`（都是纯回调组件，与库侧无耦合）；编辑 / 删除只对 `entry.editable` 为真的行显示。**顺带把 F9 一起做**：同一次改动里给这个面板接上 profile 选择（同一批用户的技能页改动，避免改两遍）。
-5. **同时把 B2 做掉**：zip 导入第 2 趟 `cpSync` 加 `errorOnExist` + 复制前复检 —— 接线后这条路径从"不可达"变成"可达"，必须在同一次改动里修。
-6. **文档**：`specs/extensions.md` §3.3 的函数名与入口改成与实现一致（dsh 可写根走 `ext:skillImportZip`；库走 `ext:libSkillImportZip`），并补上"新建拒绝覆盖既有 skill"的契约。
-
-**验证**：IPC 级测试：新建同名 skill → `extSkillExists` 且文件字节不变；`ext:skillSave` 改名后旧目录消失、新目录可读；`ext:skillImportZip` 传非法 zip → 对应错误码且可写根无变化。渲染测试：非 editable 行不出现编辑 / 删除。
-
 ---
 
 ## 4. 先确证，再定方案
@@ -298,11 +272,11 @@
 
 审查同时发现三处「文档说的和代码做的不一致」。它们不改变代码行为，但会让下一个人按错的规范施工：
 
-1. **`docs/specs/extensions.md` §3.3** 的 ZIP 导入段写成 `importSkillZip` → dsh 可写根，而真实入口是 `ext:libSkillImportZip` → **库**；同段"写 / 重命名"的能力目前没有入口。**已定接线**（B10）：补入口后把该段的函数名与入口改成与实现一致，并补上"新建拒绝覆盖既有 skill"。
-2. **`docs/specs/extensions.md` §3.4** 说"库条目自身读不出…标为 `stale` 并带上理由"，而 `library.ts:232` 给的是 `installed:false, stale:false`。按 **B3** 的结论二选一。
-3. ✅ **已改（本次）** —— `docs/design/assembly.md:58` 原写 preset 贡献的根"在静态上不可枚举"，与 `preset-roots.ts` 的约定枚举（`specs/extensions.md` §3.1）相反：改为"字面量不可枚举、只能按随包布局约定枚举"。同文件的 **P0 验收行**原写"四个 preset 自带 skill 在技能页可见"，已标注**未达成**并指向本文件的 **F9**。
+1. ✅ **已改（F9 / B2 / B10 那批）** —— `docs/specs/extensions.md` §3.3 原写 ZIP 导入的入口是 `importSkillZip`（只有库侧可达），"写 / 重命名"根本没有入口。现在该段按两侧同形的入口重写：dsh 可写根走 `ext:skill*`（含 `ext:skillImportZip`）、库走 `ext:libSkill*`，并补上"新建拒绝覆盖既有 skill"、256 KB 上限、可写根之外以 `ext.skillReadOnly` 拒绝、以及两趟之间由 `errorOnExist` 兜住。
+2. **`docs/specs/extensions.md` §3.4** 说"库条目自身读不出…标为 `stale` 并带上理由"，而 `library.ts:232` 给的是 `installed:false, stale:false`。按 **B3** 的结论二选一（**仍待办**）。
+3. ✅ **已改（本次）** —— `docs/design/assembly.md:58` 原写 preset 贡献的根"在静态上不可枚举"，与 `preset-roots.ts` 的约定枚举（`specs/extensions.md` §3.1）相反：改为"字面量不可枚举、只能按随包布局约定枚举"。同文件的 **P0 验收行**先被标注"未达成"指向 F9，F9 修完后已恢复为达成并写明前提（**选定 profile 后**可见）。
 
-> 这三处里有两条是本次写作规范时新写/保留下来的（§3.4 的措辞、assembly 的 P0 验收行），所以它们同时也是写作侧的欠账，不是历史遗留。
+> 这三处里有两条是本次写作规范时新写/保留下来的（§3.4 的措辞、assembly 的 P0 验收行），所以它们同时也是写作侧的欠账，不是历史遗留。第 3 条的 P0 验收行经历了一次「标未达成 → 修复后恢复」，正好是这条规范（设计稿的验收行必须与实现同步）的自我演示。
 
 ## 6. 明确不做（本批）
 
@@ -316,8 +290,8 @@
 
 - [x] **P0（含 A7）**：测试进仓库、三闸全绿、规则上收 `specs/profile.md` §8（P7 / P8），账目留在 §1。
 - [x] **P1 第一批（F1 / F10 / B4）**：同上；账目在 §2.1，规则上收 `specs/profile.md` §4（CRLF）、§5（占用判定同源）、§8 **P9**（registry 最新版本）。
+- [x] **P1 第二批（F9 / B2 / B10）**：账目在 §2.2，规则上收 `specs/extensions.md` §3.3 与 §5 的测试锚点（§3.4 仍待 **B3**）。**唯一缺口**：F9 的页面接线没有渲染测试（仓库无组件测试基建），该行已写明替代钉法与理由。
+- [x] `pnpm typecheck`、`pnpm test`、`pnpm run build` 三项全绿（**已可在此机直接跑**：2026-10-09 最新一次 = 83 files / 1072 tests 全绿，`typecheck` / `build` 亦为 0）。
 - [ ] 其余每条新增的测试都进仓库，并在本文件对应条目下留一行"验证方式"。
-- [ ] `pnpm typecheck`、`pnpm test`、`pnpm run build` 三项全绿（**已可在此机直接跑**：2026-10-09 验证 `pnpm test` = 82 files / 1050 tests 全绿，`typecheck` / `build` 亦为 0）。
-- [ ] 行为或口径有变化的条目（F2、F3、F5、F9、B1、B3、B10，以及 F4 的结论）已同步进 `docs/presets.md` / `docs/specs/extensions.md` / `docs/specs/launch.md`，§5 的三处修正已落地。
-- [ ] B10 已按「接线」完成：三个通道 + api/preload + 面板入口 + `writeSkill` 新建覆盖守卫 + `cpSync errorOnExist`（B2）+ F9 的 profile 选择；`specs/extensions.md` §3.3 已与实现对齐。
+- [ ] 行为或口径有变化的条目（F2、F3、F5、B1、B3，以及 F4 的结论）已同步进 `docs/presets.md` / `docs/specs/extensions.md` / `docs/specs/launch.md`，§5 的三处修正已落地。
 - [ ] 本文所有 `[ ]` 清空后，删除本文件，并从 `docs/README.md` 的"未实现的设计"表里移除对应行。

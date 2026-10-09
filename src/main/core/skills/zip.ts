@@ -5,8 +5,8 @@
  * Takes the target root and an `exists` probe rather than a context, so it does not
  * depend on the module that resolves those.
  */
-
-
+
+
 
 import AdmZip from 'adm-zip'
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
@@ -115,7 +115,13 @@ export function installZipSkills(
     try {
       return installs.map(({ skill, from }) => {
         const dir = join(targetRoot, skill.name)
-        cpSync(from, dir, { recursive: true })
+        // Pass 1's probe is a courtesy to the caller (it can answer without the
+        // filesystem); THIS is the check that holds. A name that appeared between
+        // the two passes would otherwise be silently overwritten, and
+        // `errorOnExist` is what makes the filesystem itself refuse rather than
+        // trust the gap. It only takes effect with `force: false`.
+        if (exists(skill.name)) throwE(E.extSkillExists, { detail: skill.name })
+        cpSync(from, dir, { recursive: true, errorOnExist: true, force: false })
         landed.push(dir)
         return { skill, dir }
       })

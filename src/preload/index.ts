@@ -199,6 +199,14 @@ const api = {
       ipcRenderer.invoke('ext:skillList', dshId, profile),
     skillDelete: (dshId: string, name: string): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('ext:skillDelete', dshId, name),
+    skillScaffold: (name: string): Promise<IpcResult<string>> =>
+      ipcRenderer.invoke('ext:skillScaffold', name),
+    skillRead: (dshId: string, name: string): Promise<IpcResult<string>> =>
+      ipcRenderer.invoke('ext:skillRead', dshId, name),
+    skillSave: (dshId: string, previousName: string | null, text: string): Promise<IpcResult<SkillEntry>> =>
+      ipcRenderer.invoke('ext:skillSave', dshId, previousName, text),
+    skillImportZip: (dshId: string, zipPath?: string): Promise<IpcResult<SkillEntry[] | null>> =>
+      ipcRenderer.invoke('ext:skillImportZip', dshId, zipPath),
     libMcpOverview: (): Promise<IpcResult<McpLibOverviewRow[]>> =>
       ipcRenderer.invoke('ext:libMcpOverview'),
     libMcpSave: (previousServerName: string | null, input: McpServerInput): Promise<IpcResult<boolean>> =>

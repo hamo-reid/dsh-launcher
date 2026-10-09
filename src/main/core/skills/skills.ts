@@ -24,6 +24,7 @@ import { readHomePatch } from '../profile/home.ts'
 import { extractKeyValue, parseNamedRows } from '../patch/patch.ts'
 import { loadYaml, isJsExpr, jsExprText } from '../patch/yaml.ts'
 import { logger } from '../shared/logger.ts'
+import { E, throwE } from '../shared/errors.ts'
 import { presetSkillRoots } from './preset-roots.ts'
 import { installZipSkills } from './zip.ts'
 import { parseSkillText } from './frontmatter.ts'
@@ -272,7 +273,9 @@ function targetPaths(ctx: DshContext, name: string): { dir: string; file: string
 /** Read the full text of an editable skill (for the editor modal). */
 export function readSkillFile(ctx: DshContext, name: string): string {
   const found = findEditableSkill(ctx, name)
-  if (found === undefined) throw new Error(`skill "${name}" is not editable (not in the writable root)`)
+  // A business refusal, not an internal error: the name may be perfectly real and
+  // simply live in a read-only root (project / custom / agents / bundled).
+  if (found === undefined) throwE(E.extSkillReadOnly, { detail: name })
   return readFileSync(found.entry.path, 'utf8')
 }
 
@@ -292,11 +295,24 @@ export function writeSkill(ctx: DshContext, previousName: string | null, text: s
   const { dir, file } = targetPaths(ctx, name)
   const previous = previousName !== null ? findEditableSkill(ctx, previousName) : undefined
   if (previousName !== null && previous === undefined) {
-    throw new Error(`skill "${previousName}" is not editable (not in the writable root)`)
+    throwE(E.extSkillReadOnly, { detail: previousName })
   }
   const renaming = previousName !== null && previousName !== name
   if (renaming && findEditableSkill(ctx, name) !== undefined) {
     throw new Error(`skill "${name}" already exists in the writable root`)
+  }
+  // A FRESH create must not land on top of a skill that is already in the writable
+  // root. The editor cannot see it — there is nothing to read yet, so the caller
+  // has no name to pass as `previousName` — and without this check the new text
+  // silently replaced an existing SKILL.md. A flat `<name>.md` needs the same
+  // refusal: a bundle beside it would be two skills under one name, and dsh takes
+  // whichever it scans first. An in-place edit (the entry that IS there) and a
+  // rename (refused above) are the only ways past this.
+  if (previousName === null) {
+    const root = writableSkillRoot(ctx)
+    if (existsSync(join(root, name)) || existsSync(join(root, `${name}.md`))) {
+      throwE(E.extSkillExists, { detail: name })
+    }
   }
   if (previous !== undefined && renaming && previous.entry.shape === 'bundle') {
     // Plain rename within the same root; the destination must not exist.
@@ -323,7 +339,7 @@ export function writeSkill(ctx: DshContext, previousName: string | null, text: s
  * the caller can never trash a path outside the writable root. */
 export async function deleteSkill(ctx: DshContext, name: string): Promise<void> {
   const found = findEditableSkill(ctx, name)
-  if (found === undefined) throw new Error(`skill "${name}" is not editable (not in the writable root)`)
+  if (found === undefined) throwE(E.extSkillReadOnly, { detail: name })
   if (trash === null) throw new Error('skill trash mover is not wired')
   const target = found.entry.shape === 'bundle' ? found.entry.dir : found.entry.path
   await trash(target)

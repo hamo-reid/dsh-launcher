@@ -9,8 +9,8 @@ import { handle } from '../handle.ts'
 import { profileRefused, profileTarget } from '../validate.ts'
 import { logger } from '../../core/shared/logger.ts'
 import {
-  deleteSkill, installedEntry, installZipSkills, listSkills, parseSkillText, scaffoldSkill, writableSkillRoot,
-  zipImportProblem,
+  deleteSkill, importSkillZip, installedEntry, installZipSkills, listSkills, parseSkillText, readSkillFile,
+  scaffoldSkill, writableSkillRoot, writeSkill, zipImportProblem,
 } from '../../core/skills/skills.ts'
 import {
   deleteSkillLib, installSkillToDsh, listSkillLibrary, readSkillLibFile, scanSkillInstalls, skillLibraryDir,
@@ -23,6 +23,10 @@ import type { IpcResult, SkillEntry, SkillLibEntry, SkillLibOverviewRow, SkillLi
 
 
 /** A layer the extensions surface may write. `bundle` is read-only (shipped). */
+
+/** Largest skill file text the editor may send (a SKILL.md plus resources are
+ * separate files; the edited document itself is prose). */
+const MAX_SKILL_TEXT = 256 * 1024
 
 export function registerSkillsExtIpc(): void {
   // Every root dsh scans, the discovered catalog (rank order), and every
@@ -54,6 +58,75 @@ export function registerSkillsExtIpc(): void {
     try {
       await deleteSkill(ctx, name)
       return { ok: true, value: true }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Scaffold text for a new skill, rendered by the same renderer that writes it.
+  // The template is dsh-independent, but the dsh-side flow gets its own channel so
+  // creating a skill on a dsh never has to call a library-namespaced method.
+  handle('ext:skillScaffold', (_event, name: string): IpcResult<string> => {
+    if (!SKILL_NAME_RE.test(name)) return fail(E.extBadSkill, { detail: name })
+    return { ok: true, value: scaffoldSkill(name) }
+  })
+
+  // Full text of one editable skill on this dsh, for the editor modal.
+  handle('ext:skillRead', (_event, dshId: string, name: string): IpcResult<string> => {
+    const ctx = ctxOf(dshId)
+    if (ctx === null) return fail(E.dshNotFound)
+    if (!SKILL_NAME_RE.test(name)) return fail(E.extBadSkill, { detail: name })
+    try {
+      return { ok: true, value: readSkillFile(ctx, name) }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Create (`previousName === null`) or update one skill in the dsh's writable
+  // root; the frontmatter `name` is authoritative and renames the bundle dir. A
+  // create over a name already in that root is refused by core.
+  handle('ext:skillSave', (_event, dshId: string, previousName: string | null, text: string): IpcResult<SkillEntry> => {
+    const ctx = ctxOf(dshId)
+    if (ctx === null) return fail(E.dshNotFound)
+    if (previousName !== null && !SKILL_NAME_RE.test(previousName)) return fail(E.extBadSkill, { detail: previousName })
+    // A skill is text-sized: refuse an absurd payload before it is parsed or
+    // written, and say which limit it broke.
+    if (typeof text !== 'string') return fail(E.extBadSkill, { detail: typeof text })
+    if (text.length > MAX_SKILL_TEXT) {
+      return fail(E.extBadSkill, { detail: `${Math.ceil(text.length / 1024)} KB > ${MAX_SKILL_TEXT / 1024} KB` })
+    }
+    try {
+      return { ok: true, value: writeSkill(ctx, previousName, text) }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Install a zip's skills into this dsh's writable root (all-or-nothing). With no
+  // `zipPath` a file dialog picks the archive; a drag & drop passes its resolved
+  // path. Cancel returns `null` (not an error), like the library entry.
+  handle('ext:skillImportZip', async (_event, dshId: string, zipPath?: string): Promise<IpcResult<SkillEntry[] | null>> => {
+    const ctx = ctxOf(dshId)
+    if (ctx === null) return fail(E.dshNotFound)
+    let picked: string
+    if (typeof zipPath === 'string' && zipPath !== '') {
+      picked = zipPath
+    } else {
+      const dialoged = await dialog.showOpenDialog({
+        title: '选择要导入的 skill 压缩包',
+        properties: ['openFile'],
+        filters: [{ name: 'Skill 压缩包', extensions: ['zip'] }],
+      })
+      if (dialoged.canceled || dialoged.filePaths.length === 0) return { ok: true, value: null }
+      picked = dialoged.filePaths[0]
+    }
+    const problem = zipImportProblem(picked)
+    if (problem !== null) return fail(problem.code, { detail: problem.detail })
+    try {
+      const installed = importSkillZip(ctx, picked)
+      logger.info(`skills: imported ${installed.length} skill(s) into ${dshId} from ${picked}`)
+      return { ok: true, value: installed }
     } catch (error) {
       return failFromError(error)
     }

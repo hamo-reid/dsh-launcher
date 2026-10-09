@@ -104,20 +104,33 @@ config 行（`- id: … / name: '@deepseek-ai/dsh-skill-filesystem'`）从 **hom
 
 ### 3.3 写入 / 重命名 / 删除
 
-- **写**（`writeSkill`）：整文件文本编辑，frontmatter `name` 是权威名称；改名时先在同根内
-  rename bundle 目录，**拒绝覆盖**既有 skill；写后校验回读。
+写入口在 **dsh 可写根**（`ext:skill*`）与 **库**（`ext:libSkill*`）两侧同形：一侧管「这个 dsh 上的副本」，
+一侧管「launcher 全局的库」，页面**成对使用，不互相借用**（脚手架也不例外：`ext:skillScaffold` /
+`ext:libSkillScaffold`）。
+
+- **写**（`writeSkill` / `ext:skillSave`）：整文件文本编辑，frontmatter `name` 是权威名称；改名时先在
+  同根内 rename bundle 目录；写后校验回读。文本必须是字符串且不超过 **256 KB**，超出在 IPC 边界拒绝。
+- **拒绝覆盖**：**新建**（`previousName === null`）时可写根里已有 `<name>/` 或 `<name>.md` 即拒绝
+  （`ext.skillExists`）—— 编辑器此刻手上没有任何可读的旧内容，没有这道守卫就会静默替换既有
+  `SKILL.md`（或在一个名字下留下两份）。改名撞名同样拒绝；只有「原地编辑」（`previousName === name`）
+  才允许落在既有目录上，且那条路径会顺手删掉同名的扁平文件。
+- **读**（`readSkillFile` / `ext:skillRead`）：只读可写根内的条目。名字存在但不在可写根（project /
+  custom / agents / bundled）时以 `ext.skillReadOnly` 拒绝，而不是 `internal` —— 那是业务答案，不是异常。
 - **新建**：先取名字（slug 校验走 `shared/skill.ts` 的 `SKILL_NAME_RE`），主进程用与写入
   相同的渲染器生成脚手架（占位描述可解析，直接保存即合法）。
 - **删除**（`deleteSkill`）：主进程**自行解析条目**（调用方无法把可写根之外的路径传进
   来），经注入的 `shell.trashItem` 移入系统回收站。
-- **ZIP 导入**（`importSkillZip`）：文件对话框选 zip → 解压到临时 staging → 校验 → 统一
-  改名落入可写根。
+- **ZIP 导入**（`importSkillZip` / `ext:skillImportZip`，库侧 `ext:libSkillImportZip`）：文件对话框选
+  zip → 解压到临时 staging → 校验 → 统一改名落入目标根。
   - 识别规则：zip 根带 `SKILL.md` 即整个压缩包是一个 bundle；否则**任意深度**的每个
     `SKILL.md` 各是一个 skill（兼容 GitHub `repo-main/` 包装层）；嵌套在别的 skill 目录内
     的 `SKILL.md` 视为资源，不单独安装。
   - 安装目录名取 frontmatter `name`，skill 自带的资源文件整体随迁。
-  - **All-or-nothing**：先解析、查重（zip 内重名 + 与可写根冲突），全部通过后才动可写根，
+  - **All-or-nothing**：先解析、查重（zip 内重名 + 与目标根冲突），全部通过后才动目标根，
     任何失败不落一个文件。
+  - **两趟之间的竞态由文件系统兜住**：第 2 趟复制**之前**再查一次同名（命中即 `ext.skillExists`），
+    复制本身再用 `errorOnExist`（配 `force: false`）。调用方传进来的 `exists` 探针只是它自己的一次
+    查询 —— 判据必须落在真正落盘的那一步，否则探针与复制之间新出现的同名条目会被静默覆盖。
   - 入口名先过 **zip-slip 守卫**（绝对路径 / 盘符 / `..` 段，含反斜杠归一化）—— adm-zip
     在写入侧会归一化恶意名，第三方包的读取路径仍需自己的守卫，故守卫单独导出做单测。
 
@@ -140,8 +153,15 @@ config 行（`- id: … / name: '@deepseek-ai/dsh-skill-filesystem'`）从 **hom
 - `core/mcp/mcp-secrets.test.ts`：存取 / 清除、cipher 往返、`plain:` 兜底、非法名、导出剥离。
 - `core/skills/skills.test.ts`：根解析（config 行 + 默认根 + `includeDefaultRoots` + `!!js`
   运行时根不被 `resolve` / 不被扫描）、frontmatter 接受规则（含旧键拒绝与布尔容错）、列表 +
-  issue、创建 / 改名冲突 / 回收站删除（仅可写根）、ZIP 导入（单包 / 根包 / 多包 / 包装层、
-  无 `SKILL.md`、zip-slip 守卫、重名冲突、all-or-nothing）。
+  issue、创建 / 改名冲突 / **新建拒绝覆盖（bundle 目录与扁平文件两种形态）** / 可写根之外的名字
+  以 `ext.skillReadOnly` 拒绝、回收站删除（仅可写根）、ZIP 导入（单包 / 根包 / 多包 / 包装层、
+  无 `SKILL.md`、zip-slip 守卫、重名冲突、all-or-nothing、**探针与复制之间出现同名条目**、
+  **探针恒说"空闲"时由文件系统拒绝覆盖**）。
+- `ipc/extensions/extensions.test.ts`：`ext:mcpSave` 的 id 守卫；`ext:skill*` 的端到端契约
+  （scaffold → save → read 回读、frontmatter 改名、新建拒绝覆盖、非可写名与超长文本的拒绝码、
+  zip 导入落进可写根、非 zip 路径的拒绝码）。
+- `renderer/src/lib/profileScope.test.ts`：页面作用域的 profile 选择规则（记住仍在的、否则首个、
+  没有 profile 时是 `undefined` 这个**有意义**的答案）。
 - `core/skills/preset-roots.test.ts`：preset 贡献根 —— 目录模型的 `skills/`、声明模型走自己的解析
   链、自身不带 skill 的 preset 跳过；无 profile / profile 不挂 preset 模型 / preset 包未安装均不
   产出根；rank 300 且永不 writable；profile 组合声明模型时不再认已退役的目录模型。

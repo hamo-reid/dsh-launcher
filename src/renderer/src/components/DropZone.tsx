@@ -88,6 +88,10 @@ interface DropZoneProps {
   /** Click (or Enter/Space) falls back to the button flow. */
   onPick: () => void
   style?: CSSProperties
+  /** Overrides for the default wording — a host that is not the library card
+   * grid needs its own second line (the default one names that grid). */
+  hint?: string
+  subHint?: string
 }
 
 /** The always-visible dashed block. Clickable — a drop hint that cannot be
@@ -131,11 +135,11 @@ export default function DropZone(p: DropZoneProps): JSX.Element {
     >
       {p.busy === true ? <Spin size="small" /> : <InboxOutlined style={{ fontSize: 22 }} />}
       <Typography.Text style={{ color: 'inherit', fontWeight: 600 }}>
-        {p.busy === true ? t('ext.skills.dropImporting') : t('ext.skills.dropHint')}
+        {p.busy === true ? t('ext.skills.dropImporting') : (p.hint ?? t('ext.skills.dropHint'))}
       </Typography.Text>
       {p.busy !== true && (
         <Typography.Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
-          {t('ext.skills.dropSubHint')}
+          {p.subHint ?? t('ext.skills.dropSubHint')}
         </Typography.Text>
       )}
     </div>

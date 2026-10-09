@@ -196,6 +196,18 @@ export interface WindowApi {
     skillList: (dshId: string, profile?: string) => Promise<IpcResult<SkillListing>>
     /** Move an editable skill to the OS recycle bin. */
     skillDelete: (dshId: string, name: string) => Promise<IpcResult<boolean>>
+    /** Scaffold text for a new skill, rendered by the same renderer that writes it. */
+    skillScaffold: (name: string) => Promise<IpcResult<string>>
+    /** Full text of one editable skill on this dsh, for the editor modal. */
+    skillRead: (dshId: string, name: string) => Promise<IpcResult<string>>
+    /** Create (`previousName === null`) or update one skill in this dsh's writable
+     * root; the frontmatter `name` is authoritative and renames the bundle dir.
+     * A create over a name already in that root is refused. */
+    skillSave: (dshId: string, previousName: string | null, text: string) => Promise<IpcResult<SkillEntry>>
+    /** Install a zip's skills into this dsh's writable root (all-or-nothing). With
+     * no `zipPath` a file dialog picks the archive; a drag & drop passes its
+     * resolved path. `null` when the dialog was cancelled. */
+    skillImportZip: (dshId: string, zipPath?: string) => Promise<IpcResult<SkillEntry[] | null>>
     // ── MCP library (launcher-global definitions; applied rows are copies) ──
     /** Every library entry with where it is applied and drift counts. */
     libMcpOverview: () => Promise<IpcResult<McpLibOverviewRow[]>>

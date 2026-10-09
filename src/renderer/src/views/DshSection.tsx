@@ -310,7 +310,10 @@ export default function DshSection() {
                 <Button onClick={() => setMirrorOpen(true)}>{t('data.mirror')}</Button>
               </Space>
             </Panel>
-            <SkillsManagePanel dshId={selected.id} profile={null} />
+            {/* The skills panel picks its own profile: preset-contributed roots
+                only exist inside a profile's composition, so a hardcoded null
+                here made those rows unreachable. */}
+            <SkillsManagePanel dshId={selected.id} />
             <McpManagePanel dshId={selected.id} profile={null} withPanel />
           </Space>
         )

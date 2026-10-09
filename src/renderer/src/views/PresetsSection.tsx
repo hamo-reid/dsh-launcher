@@ -26,6 +26,7 @@ import {
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
+import { nextProfileChoice } from '../lib/profileScope.ts'
 import AppShell from '../components/AppShell.tsx'
 import ConfirmMenu, { type MenuAction } from '../components/ConfirmMenu.tsx'
 import EmptyState from '../components/EmptyState.tsx'
@@ -107,7 +108,7 @@ export default function PresetsSection(): JSX.Element {
       if (!r.ok) { void message.error(apiErrorText(r)); return }
       const names = r.value.map(p => p.name)
       setProfiles(names)
-      setProfile(prev => (prev !== undefined && names.includes(prev) ? prev : names[0]))
+      setProfile(prev => nextProfileChoice(prev, names))
     })()
     return () => { cancelled = true }
   }, [selectedId])

@@ -326,6 +326,36 @@ describe('write / rename / delete (writable root only)', () => {
     expect(() => writeSkill(ctx(), 'collide-a', makeSkill('collide-b'))).toThrow(/already exists/)
   })
 
+  it('refuses a fresh create over a name the writable root already holds', () => {
+    // A create passes `previousName: null` — the editor has nothing to read yet, so
+    // it cannot know the name is taken. Without this guard the new text silently
+    // replaced the existing SKILL.md and the caller saw a plain success.
+    writeSkill(ctx(), null, makeSkill('taken-bundle', 'the original'))
+    expect(() => writeSkill(ctx(), null, makeSkill('taken-bundle', 'the impostor')))
+      .toThrow(/ext\.skillExists/)
+    expect(readSkillFile(ctx(), 'taken-bundle')).toContain('the original')
+  })
+
+  it('refuses a fresh create beside a flat file of the same name', () => {
+    // A bundle next to `<name>.md` is two skills under one name, and dsh takes
+    // whichever it scans first.
+    skill('taken-flat', makeSkill('taken-flat'), true)
+    expect(() => writeSkill(ctx(), null, makeSkill('taken-flat'))).toThrow(/ext\.skillExists/)
+    expect(existsSync(join(USER_DSH(), 'taken-flat'))).toBe(false)
+    expect(existsSync(join(USER_DSH(), 'taken-flat.md'))).toBe(true)
+  })
+
+  it('reports a name outside the writable root as read-only, not as an internal error', async () => {
+    // The refusal is a business answer (`ext.skillReadOnly`, localized) rather than
+    // an `internal` one: the name can be perfectly real and simply live in a
+    // read-only root — or, as here, have been moved out of the writable one.
+    skill('moved-out', makeSkill('moved-out'))
+    renameSync(join(USER_DSH(), 'moved-out'), join(root, 'elsewhere-moved-out'))
+    expect(() => readSkillFile(ctx(), 'moved-out')).toThrow(/ext\.skillReadOnly/)
+    expect(() => writeSkill(ctx(), 'moved-out', makeSkill('moved-out'))).toThrow(/ext\.skillReadOnly/)
+    await expect(deleteSkill(ctx(), 'moved-out')).rejects.toThrow(/ext\.skillReadOnly/)
+  })
+
   it('moves the bundle to the injected recycle bin on delete', async () => {
     writeSkill(ctx(), null, makeSkill('doomed'))
     expect(findEditableSkill(ctx(), 'doomed')).toBeDefined()
@@ -365,9 +395,10 @@ describe('zip import', () => {
   }
 
   /** The code an import throws, or a marker when it threw something else. */
-  function codeOf(zipPath: string): string {
+  function codeOf(zipPath: string, probe?: (name: string) => boolean): string {
     try {
-      importSkillZip(ctx(), zipPath)
+      if (probe === undefined) importSkillZip(ctx(), zipPath)
+      else installZipSkills(USER_DSH(), zipPath, probe)
       return '(no throw)'
     } catch (error) {
       return error instanceof AppError ? error.code : `not-app:${String(error)}`
@@ -433,6 +464,30 @@ describe('zip import', () => {
     const zip = writeZip('collide.zip', { 'taken/SKILL.md': makeSkill('taken') })
     expect(codeOf(zip)).toBe('ext.skillExists')
     expect(existsSync(join(USER_DSH(), 'taken'))).toBe(before)
+  })
+
+  it('refuses a name that appeared between the two passes, and lands nothing', () => {
+    // Pass 1's probe is a courtesy to the caller; the pre-copy re-check is what
+    // holds, because a name can appear in between (another import, or a person
+    // creating the skill while the dialog was open). A probe that answers "free"
+    // once and "taken" the second time is exactly that window.
+    const zip = writeZip('race.zip', { 'race/SKILL.md': makeSkill('race-skill') })
+    let probes = 0
+    const code = codeOf(zip, () => { probes += 1; return probes > 1 })
+    expect(code).toBe('ext.skillExists')
+    expect(probes).toBe(2)
+    // All-or-nothing still holds: the refused copy never landed.
+    expect(existsSync(join(USER_DSH(), 'race-skill'))).toBe(false)
+  })
+
+  it('lets the filesystem refuse a destination that exists, not just the probe', () => {
+    // The re-check and `errorOnExist` are two halves of one guarantee: even a probe
+    // that always says "free" must not overwrite an existing directory.
+    const zip = writeZip('occupied.zip', { 'occupied/SKILL.md': makeSkill('occupied-skill') })
+    mkdirSync(join(USER_DSH(), 'occupied-skill'), { recursive: true })
+    writeFileSync(join(USER_DSH(), 'occupied-skill', 'SKILL.md'), makeSkill('occupied-skill', 'the original'))
+    expect(codeOf(zip, () => false)).not.toBe('(no throw)')
+    expect(readFileSync(join(USER_DSH(), 'occupied-skill', 'SKILL.md'), 'utf8')).toContain('the original')
   })
 
   it('is all-or-nothing: one bad skill fails the whole zip', () => {
