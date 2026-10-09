@@ -115,7 +115,7 @@ export function dshScopes(): DshScope[] {
 //
 // One configured root owns the three launcher-private directories. It never
 // covers profiles: those stay at `<home>/profiles`, derived from `DshContext.home`
-// alone (docs/design/profile-layout.md §7). The settings database and the logs
+// alone (docs/specs/profile.md P1/P5). The settings database and the logs
 // are not covered either — they stay under `userData`.
 
 /** Whitespace-only counts as unset, matching the settings-store coercion. */

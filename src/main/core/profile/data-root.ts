@@ -9,7 +9,7 @@
  * a failed run leaves the app exactly where it started.
  *
  * Profiles are deliberately out of scope. They stay at `<home>/profiles`,
- * derived from `DshContext.home` alone (docs/design/profile-layout.md §7).
+ * derived from `DshContext.home` alone (docs/specs/profile.md P1).
  */
 import { cp, mkdir, rename } from 'node:fs/promises'
 import { existsSync, lstatSync, readdirSync, statSync } from 'node:fs'

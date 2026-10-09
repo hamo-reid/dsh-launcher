@@ -15,7 +15,7 @@ export interface AppSettings {
    * `<dataRoot>/dsh/versions` — and `pluginDir` / `dshVersionDir` no longer
    * apply. Unset falls back to the Electron `userData` dir, which is the
    * layout every build before this field used. Never covers profiles: those
-   * stay at `<home>/profiles` (see docs/design/profile-layout.md §7). */
+   * stay at `<home>/profiles` (see docs/specs/profile.md P5). */
   dataRoot?: string
   /** Directory where downloaded/installed plugins are kept. Superseded by
    * `dataRoot` when that is set; retained as the pre-`dataRoot` value so a

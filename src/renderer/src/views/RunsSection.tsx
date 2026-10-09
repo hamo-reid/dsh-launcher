@@ -5,7 +5,7 @@
  *   - 进程管理 (Processes): a two-pane view (process rail + console) for every
  *     live run, plus runs that ended this session.
  *
- * Concurrency model (see docs/design/multi-run.md): different (dsh, profile)
+ * Concurrency model (see docs/specs/launch.md §5): different (dsh, profile)
  * pairs run in parallel; the same pair is limited to one live process. */
 
 import { useEffect, useState, type ReactNode } from 'react'

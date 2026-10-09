@@ -188,6 +188,7 @@ dsh `0.2.0-rc.1` 删掉了目录 preset，没有兼容读取：`packages/preset/
 ## 7. 不做的部分
 
 - 不写 `plugins` 列表：没有行级编辑，也没有组装/骨架/素材挑选。插件列表就是 preset，交给外部编辑器。
+  - **例外（尚未实现）**：[`design/assembly.md`](./design/assembly.md) 计划引入独立的「组装面」，届时本条收窄为「组装面只落地零件，不替用户挑 preset」。**组装本身一行未实现** —— 已经发货的只有四个与组装解耦的 skill 侧缺陷（`6b80b84` / `db83573` / `f652479` / `4fe1e65`，规则见 [`specs/extensions.md`](./specs/extensions.md) §3.1、§3.4）—— 所以**本条现在仍然有效**。
 - 不装组合包（`plugin_manager install_bundle`）—— 那条路是 Creator 模式在对话里做的；launcher 只声明在 profile 补丁里的行。
 - 不做 launcher 全局 preset 库、商店、跨 dsh 汇总。
 - 不改 `<home>/settings.yaml` 里的默认 preset（`agent-preset-registry` 的 `selectedDefault` / 旧的 `agent-presets.default`）。

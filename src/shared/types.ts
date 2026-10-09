@@ -604,7 +604,7 @@ export interface DshEntry {
 
 /** A launcher-owned directory that a data-root change relocates. Profiles are
  * deliberately absent: they stay at `<home>/profiles` and are never derived
- * from the data root (see `docs/design/profile-layout.md` §7). */
+ * from the data root (see `docs/specs/profile.md` P5). */
 export type DataRootItemKey = 'plugins' | 'skillLibrary' | 'dshVersions'
 
 /** The live state the settings page renders. */
