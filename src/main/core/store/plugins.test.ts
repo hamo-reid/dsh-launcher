@@ -517,6 +517,24 @@ describe('removeArchivedVersion', () => {
     expect(res.blockedBy).toBeUndefined()
     expect(storeVersions(store(), 'freeplug')).toEqual([])
   })
+
+  it.runIf(process.platform === 'win32')('still finds the profile when the spec spells the store in another case', async () => {
+    // The spelling in a manifest comes from whenever it was written — an earlier
+    // store setting, another machine, a hand edit — while the path being deleted
+    // comes from the setting now. On Windows the two name the same DIRECTORY, and
+    // a string-prefix comparison answered "nobody references this" and deleted the
+    // version out from under a profile whose file: spec still resolved to it.
+    const homeD = join(root, 'home-case')
+    const verDir = join(store(), 'archive', 'cased', '1.0.0')
+    seedVersion('cased', '1.0.0')
+    const body = join(verDir, 'node_modules', 'cased').toUpperCase()
+    mkProfile(join(homeD, 'profiles'), 'p1', { dependencies: { cased: `file:${body}` } })
+
+    const res = await removeArchivedVersion([scope('g', homeD)], store(), 'cased', '1.0.0')
+    expect(res.ok).toBe(false)
+    expect(res.blockedBy?.map(u => u.profile)).toEqual(['p1'])
+    expect(storeVersions(store(), 'cased')).toEqual(['1.0.0'])
+  })
 })
 
 describe('removePluginFromProfiles', () => {

@@ -163,3 +163,21 @@ HOST，换源（私有镜像 / 内网源）会同时改变每一行的答案，�
 少了这一项，切源之后的整个 TTL 里都在拿**旧源**的结论回答新源的问题 —— 错的方向还偏偏是"没有更新"
 这种看起来像事实的答案。落点：`store/updates.ts` 的 `cacheKey` 含 `registryBase()`（该函数不缓存，
 读一次即可）。
+
+**P12** **"这个路径在不在那个路径里面"必须用平台的路径语义判定，不能用字符串前缀**（`startsWith(root + sep)`）。
+两侧的拼写来源不同：被比较的一方是**清单里写下的**（上一次的设置、另一台机器、手工编辑），另一方是
+**当前设置**算出来的；Windows 上 `C:\Data\plugins` 与 `c:\data\plugins\x` 是同一个目录，而前缀比较说不是 ——
+它把"仍然有人引用"答成"没人引用"，于是 `removeArchivedVersion` 的拒绝**静默失效**，版本被删掉，而那个
+profile 的 `file:` 仍然指向它（`refstate.ts` 解析得出的悬空引用连 UI 都看不出来）。反过来，同一个前缀比较
+用在**包围**守卫上时，会把根内的路径误判成根外。
+
+唯一的判据是 `core/profile/name-guard.ts` 的 `pathWithin(root, target)`，实现走 `path.relative`：它按平台
+自己比较（win32 大小写不敏感、POSIX 敏感 —— POSIX 上两种拼写**真的**是两个目录），并且不会被"名字刚好
+以同一段开头"的邻居骗到（`C:\Data` vs `C:\Database`）。`pathOutsideRoot` 是它的取反，所以两个方向不可能漂移。
+落点：`store/uninstall.ts` 的 `profilesPointingAt`、`profile/bundles.ts` 与 `profile/export.ts` 的 store/local
+判定、`ipc/profile/transfer.ts` 的导入路径包围。
+
+> 触发条件与数据根搬迁**无关**（已核对）：`data-root` 迁移只动 `plugins` / `skill-library` /
+> `dsh/versions` 三个目录与 dsh 注册表条目，**profile 清单不在范围内**（迁移是复制，旧库原地保留，
+> 所以清单里的旧路径仍然有效），也不改变任何路径的大小写。真正的触发点是**存储位置被重新拼写**
+> 之后（设置里选了同一目录的另一种写法），或者清单来自另一台机器 / 手工编辑。

@@ -1,6 +1,6 @@
 # 缺陷修复计划（2026-10 代码审查）
 
-> 状态：**P0 已完成（4 条，含施工中新发现的 A7）；P1、P2 全部完成（F1、B4、F9、B2、B10、B3、B1、A4、A5、B5、B6、B7、B8、B9、F3、F2、F5、F6、F7、F8），并带出施工中新发现的 F10；F4 已确证（结论：不改代码，见 §4.1）；仅剩 A6**。这是一份施工计划，不是规范。
+> 状态：**本计划已清空 —— 27 条全部关闭**（原审查 25 条 + 施工中新发现的 A7、F10）；P0、P1、P2 各批账目在 §1–§3，两条"先确证"的结论在 §4（F4 = 不改代码，A6 = 换共享原语）。这是一份施工计划的收尾记录，不是规范。
 > 来源：对 `feature/preset-management` 三块功能代码的审查（preset 功能、dev 插件 pnpm pack 快照、registry/skills 修复）。
 > 定位：每条修完后 —— 仍生效的规则上收 `docs/specs/` 或 `docs/presets.md`，测试进仓库，然后**从本文删掉该条**。本文清空即代表这批缺陷关闭。
 
@@ -13,7 +13,7 @@
 | **P0 硬后果** ✅ | ~~A2、A1、A3~~（+ 施工中新发现的 **A7**） | 会静默把 profile 指向错误的构建，或让包/文件名可控的字符串决定写入/递归删除的路径。**已完成**，见 §1 |
 | **P1 正确性与信息丢失** ✅ | ~~F1、B4、F9、B2、B3、B1、A4、A5、B5、B6~~（+ 施工中新发现的 **F10**）、~~F3~~ | 守卫失效、功能做完却不可达、诊断被丢掉、选错版本、归档不可修复、清单先改后失败。**F1 / B4 / F10 见 §2.1，F9 / B2 见 §2.2，B3 / B1 见 §2.3，A4 / A5 见 §2.4，B5 / B6 见 §2.5，F3 见 §3.2** |
 | **P2 一致性与性能** ✅ | ~~B10~~（见 §2.2）、~~B7、B8、B9~~（见 §3.1）、~~F2、F5、F6、F7、F8~~（见 §3.2） | 文案/范围不一致、幻影根、缓存与 i18n 瑕疵 |
-| **先确证再定方案** | ~~F4~~ ✅（见 §4.1）、A6 | 取决于宿主真实行为 / 数据根搬迁是否改变大小写，先做实验再改 |
+| **先确证再定方案** ✅ | ~~F4~~（见 §4.1）、~~A6~~（见 §4.2） | 取决于宿主真实行为 / 数据根搬迁是否改变大小写，先做实验再改 |
 
 **已定决策**（2026-10-02 评审）：
 - **F2 → 方案 B**：home 层 declaration 在预设页**只读**，写入一律走 profile 层。连带效果是现有删除确认文案自动变正确（方案 A 才需要新增层级文案）。
@@ -217,17 +217,23 @@ A5 → §4（改清单前先留原文，失败即恢复）。
 > （**带** base，`dsh-app-boot/lib/index.js:2024`）。只看那一处会以为"宿主按 base 解析 `file:`"，
 > 但那一处只是查 `package.json` 用的宽松路径；真正决定能否挂载的是 import，而 import 拒绝它。
 
-### [ ] A6 —— `profilesPointingAt` 字符串前缀比较未做大小写归一
+## 4.2 ✅ 已确证并修复（2026-10-09）：A6
 
-**现象**：`uninstall.ts:178,191` 用 `ref.target === wanted || ref.target.startsWith(wanted + sep)`。两侧都过了 `resolve`（`refstate.ts:75`，分隔符与 `..` 已归一），`+ sep` 也避免了 `1.0.0` 误配 `1.0.0-beta`；但 Windows 路径大小写不敏感而字符串比较不是 —— 若 spec 记录的大小写与当前 storeDir 不同，25af010 加的"删版本前先拒绝"会静默失效。
+**实验结论**：数据根搬迁**不是**触发条件 —— `core/profile/data-root.ts` 的迁移只动 `plugins` /
+`skill-library` / `dsh/versions` 三个目录与 dsh 注册表条目，**profile 清单不在范围内**（它自己的文件头就写着
+"Profiles are deliberately out of scope"），而且迁移是**复制**（旧库原地保留），所以清单里的旧路径仍然有效、
+大小写也没被改。真正的触发点是**存储位置被重新拼写**（设置里选了同一目录的另一种写法）、清单来自另一台
+机器、或手工编辑 —— 那时 `wanted`（当前设置算出来的）与 `ref.target`（清单里写下的）在 Windows 上指同一个
+目录、字节却不同。
 
-**先做的事**：确认数据根搬迁（`dataRoot` 迁移）是否会重写 profile 里的 `file:` spec、以及是否会改变路径大小写。
+**方案**（按计划落地，且收敛成一个原语而不是两处各补 `toLowerCase()`）：`name-guard.ts` 新增
+`pathWithin(root, target)`（判据是 `path.relative`，按**平台自己**的语义比较），`pathOutsideRoot` 改为它的
+取反。规则上收 [`docs/specs/profile.md`](../specs/profile.md) §8 **P12**。
 
-**方案**：不要在两处各自补 `toLowerCase()`，而是把比较收敛成一个共享原语：
-1. 在 `core/profile/name-guard.ts` 增加 `pathWithin(root, target): boolean`，内部用 `path.relative(root, target)`（win32 实现本身大小写不敏感）判是否越出，替代 `pathOutsideRoot` 里同样大小写敏感的 `startsWith`。
-2. `profilesPointingAt` 用它判断"target 是不是 wanted 本身或其后代"，`pathOutsideRoot` 改为它的薄封装（保留现有导出与语义）。
+| 条目 | 修法 | 测试 |
+|---|---|---|
+| **A6** | `profilesPointingAt` 的引用判定从 `ref.target === wanted \|\| ref.target.startsWith(wanted + sep)` 改为 `pathWithin(wanted, ref.target)`；`pathOutsideRoot` 从自己的 `startsWith` 改为 `!pathWithin`，于是**三个调用点**（`bundles.ts` / `export.ts` 的 store-local 判定、`transfer.ts` 的导入包围）一起按平台语义判定 —— 都是同一个方向上的修正（大小写变体本来就是同一个目录） | 新建 `core/profile/name-guard.test.ts`：root 自身 / 后代 / `a/..` 算在内；爬出、邻居（`<root>-evil`）、另一个根算在外；`..cache` 这种"以点开头的子目录"仍算在内；win32 下大小写变体算**同一个目录**、同时**不能**吞掉真邻居；`pathOutsideRoot` 与 `pathWithin` 互为取反（同一组用例双向断言）。`store/plugins.test.ts` 新增：清单里的 spec 用**全大写**拼 store 路径（仅 win32 跑）→ `removeArchivedVersion` 仍拒绝、点名该 profile、版本还在。反向校验：把 `pathWithin` 换回前缀比较 → **两例同时挂**，其中 `removeArchivedVersion` 那例报 `expected true to be false`，即**删除真的执行了**（版本被删、profile 留下悬空 `file:`） |
 
-**验证**：`name-guard` 单测：在 win32 上大小写不同的同一路径判为"在内"；`uninstall` 单测：spec 大小写与 storeDir 不同时仍能拒绝删除。
 
 ---
 
@@ -259,8 +265,13 @@ A5 → §4（改清单前先留原文，失败即恢复）。
 - [x] **P1 第五批（B5 / B6）**：账目在 §2.5，规则上收 `specs/extensions.md` §3.1（四个 config 路径字段都拒绝哨兵、空白即未配置）。
 - [x] **P2 第一批（B7 / B8 / B9）**：账目在 §3.1，规则上收 `specs/profile.md` §8 **P11**（缓存键覆盖答案依赖的输入）与 `ui-guidelines.md` §4/§7（错误码是契约：每个 code 两种语言、拒绝要带原因）；顺带把错误码表移到 `src/shared/error-codes.ts`，让渲染层的对照测试成立。
 - [x] **P2 第二批（F3 / F2 / F5 / F6 / F7 / F8）**：账目在 §3.2，规则上收 `docs/presets.md` §1/§3.2/§3.3/§6（`none` 模型不列来源、折叠与借来的 id、重复 insert、本页只写 profile 层）与 `docs/TESTING.md` §4（Dropdown/Tooltip/Modal footer 的 SSR 边界 + "调用次数"断言手法）。四处与计划原文不同的判定写在 §3.2 末尾。**仍未断言**：`PresetsSection` 递 `takenIds` 那一步的接线（同类缺口见 §2.2）。
-- [x] `pnpm typecheck`、`pnpm test`、`pnpm run build` 三项全绿（**已可在此机直接跑**：2026-10-09 本批最新一次 = 91 files / 1130 tests 全绿，`typecheck` / `build` 亦为 0）。
-- [ ] 其余每条新增的测试都进仓库，并在本文件对应条目下留一行"验证方式"。
+- [x] **先确证的两条（F4 / A6）**：实验记录在 §4.1 / §4.2；F4 的结论上收 `docs/presets.md` §4.3 与 §9（`file:` 是绝对 URL，评级与宿主一致地不按 base 解析），A6 的规则上收 `specs/profile.md` §8 **P12**（包含关系用平台路径语义，不用字符串前缀），测试分别落在 `rating.test.ts` / `name-guard.test.ts` + `store/plugins.test.ts`。
+- [x] `pnpm typecheck`、`pnpm test`、`pnpm run build` 三项全绿（**已可在此机直接跑**：2026-10-09 最后一次 = 92 files / 1136 passed + 1 skipped，`typecheck` / `build` 亦为 0）。
+- [x] 其余每条新增的测试都进仓库，并在本文件对应条目下留一行"验证方式"：**全部带反向校验**（把修复临时还原，确认测试真的会挂）。
 - [x] 行为或口径有变化的条目（F2、F3、F5）已同步进 [`docs/presets.md`](../presets.md) §1/§3.2/§3.3/§6，§5 的三处修正已落地。
 - [x] **F4 的结论**（§4.1）已同步进 [`docs/presets.md`](../presets.md) §4.3（preset 行判定口径）与 §9（实测记录）。
-- [ ] 本文所有 `[ ]` 清空后，删除本文件，并从 `docs/README.md` 的"未实现的设计"表里移除对应行。
+- [ ] 本文所有 `[ ]` 已清空：**删除本文件，并从 `docs/README.md` 的"未实现的设计"表里移除对应行** —— 待用户确认后执行（见 §7 备注）。
+
+> **§7 备注**：最后一条按本文开头"本文清空即代表这批缺陷关闭"的字面要求是**删除整个文件**。本批按既有做法保留
+> 了各批的账目表（§1–§4），因为这些表是"为什么这么改"的唯一集中记录，而每条提交信息只带 `docs/design/fixes.md <id>`
+> 的指针。删或留由用户定；若不删，本节标题宜从"施工计划"改为"已关闭批次的账目"。

@@ -4,7 +4,7 @@
  * id from escaping its tree via `..`/`\`/absolute/drive paths, and a version
  * from stepping out of its version dir. Pure — no Electron, no I/O.
  */
-import { resolve, sep } from 'node:path'
+import { isAbsolute, relative, resolve, sep } from 'node:path'
 
 /** True when `v` is not a safe path-identifier token. Refuses `..`, `\`, a
  * leading/trailing/doubled `/`, a drive-letter prefix, `:` (drive / NTFS ADS),
@@ -35,11 +35,35 @@ export function versionInvalid(v: string): boolean {
   return !/^[0-9A-Za-z.+-]+$/.test(v)
 }
 
+/**
+ * Whether `target` is `root` itself or a descendant of it, under the PLATFORM's
+ * own path semantics.
+ *
+ * `path.relative` is the primitive rather than a string prefix, because the
+ * question is about directories and not about text: on Windows `C:\Data` and
+ * `c:\data\x` are the same place, and a prefix test says they are not, silently
+ * turning "still referenced" into "nobody references it" and "inside the allowed
+ * root" into "outside it". `relative` compares the way the platform does —
+ * case-insensitively on win32, case-sensitively on POSIX (where two spellings
+ * really are two directories) — and it cannot be fooled by a sibling whose name
+ * merely starts the same way (`C:\Data` vs `C:\Database`).
+ * @param root - the container directory.
+ * @param target - the path to test; resolved first, like the prefix version did.
+ * @returns true when `target` is `root` or inside it.
+ */
+export function pathWithin(root: string, target: string): boolean {
+  const rel = relative(resolve(root), resolve(target))
+  // `''` is the root itself; a leading `..` (as a whole segment) climbs out; an
+  // absolute result means a different root entirely (another drive on Windows).
+  return rel === '' || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`))
+}
+
 /** True when `target` resolves outside `root`. Exact equality counts as inside.
  * Used to confine destructive cleanup (e.g. temp-dir removal) to a known parent,
- * so a compromised renderer can't point it at an arbitrary directory. */
+ * so a compromised renderer can't point it at an arbitrary directory.
+ *
+ * The negation of {@link pathWithin}, so this shares its platform semantics: a
+ * differently-cased spelling of a path inside the root is inside it. */
 export function pathOutsideRoot(root: string, target: string): boolean {
-  const r = resolve(root)
-  const t = resolve(target)
-  return t !== r && !t.startsWith(r + sep)
+  return !pathWithin(root, target)
 }

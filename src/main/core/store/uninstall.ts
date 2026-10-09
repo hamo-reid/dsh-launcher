@@ -4,9 +4,10 @@
  * from every profile that links into it, so the archive can actually be freed.
  */
 import { existsSync, lstatSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
-import { basename, dirname, join, resolve, sep } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { runPnpm } from '../dsh/pnpm.ts'
 import { logger } from '../shared/logger.ts'
+import { pathWithin } from '../profile/name-guard.ts'
 import { pluginVersionDir, versionsRoot, type ProfileManifestShape } from './layout.ts'
 import { readDeps, readRef } from './refstate.ts'
 import { listBundleSubdepNames } from './subdeps.ts'
@@ -173,6 +174,13 @@ export async function detachProfiles(
  * The reference is only findable by comparing the DECLARED spec against the path
  * about to be deleted — the profile side cannot see it by itself, because a
  * dangling junction reads exactly like a package that was never installed.
+ *
+ * The comparison is a containment question, so it goes through
+ * {@link pathWithin} rather than a string prefix: the spec's spelling comes from
+ * whatever wrote the manifest (an earlier store setting, another machine, a hand
+ * edit) while `target` comes from the setting now, and on Windows those may
+ * differ in case while naming the same directory. A prefix test answered "nobody
+ * references this" and let the delete through.
  */
 export function profilesPointingAt(dshes: DshScope[], pkg: string, target: string): PluginUsagePoint[] {
   const wanted = resolve(target)
@@ -188,7 +196,7 @@ export function profilesPointingAt(dshes: DshScope[], pkg: string, target: strin
       const ref = readRef(pkg, profileDirPath, readDeps(manifestPath)[pkg])
       // A spec names the package BODY (`file:<version>/node_modules/<pkg>`), not the
       // version dir, so match the dir or anything inside it.
-      if (ref.target !== undefined && (ref.target === wanted || ref.target.startsWith(wanted + sep))) {
+      if (ref.target !== undefined && pathWithin(wanted, ref.target)) {
         found.push({ dsh: dsh.name, dshVersion: dsh.version, profile: entry.name, ...(ref.spec !== undefined ? { spec: ref.spec } : {}) })
       }
     }
