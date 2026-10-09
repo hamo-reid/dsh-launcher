@@ -83,11 +83,19 @@ config 行（`- id: … / name: '@deepseek-ai/dsh-skill-filesystem'`）从 **hom
 没有 profile 就没有 preset 根。preset 把根指到别处时落在 Launcher 视野之外 —— 这是该模块注释里
 明示的取舍，不是漏做。
 
-**`!!js` 根**：`customSkillDirs` 里写成 `!!js` 的项由 dsh 在加载该行时求值，Launcher 求不了，因此按
-「由运行时解析」上报（`runtime: true` / `exists: false`，`path` 是表达式源码而非文件路径），
-**不参与 `resolve`，也不进任何扫描**。它在 `loadYaml` 之后仍是**带哨兵前缀的字符串**，所以
-`typeof value === 'string'` 过滤不住它 —— 必须显式过 `isJsExpr`（标签本身见 §2.2）。
-随包 preset 写的正是这一形式，所以这是常态而非边角。
+**`!!js` 根**：`!!js` 在 `loadYaml` 之后仍是**带哨兵前缀的字符串**，所以 `typeof value === 'string'`
+过滤不住它 —— 必须显式过 `isJsExpr`（标签本身见 §2.2）。这条**对四个 config 路径字段一视同仁**
+（`dshHome` / `agentsHome` / `customSkillDirs` 的每一项 / `bundledSkillDir`）：Launcher 求不了就**当作
+未配置**，绝不 `resolve` 它。其中 `customSkillDirs` 的 `!!js` 项额外上报成「由运行时解析」
+（`runtime: true` / `exists: false`，`path` 是表达式源码而非文件路径），**不参与 `resolve`，也不进任何
+扫描**；另外三个字段则直接退回默认值 —— 对 `dshHome` 尤其要紧：它**替换**真实可写根，被哨兵顶掉后
+`user-dsh`（`<home>/skills`）会从列表里消失，同时报出一个 writable 的幻影根。随包 preset 写的正是这一
+形式，所以这是常态而非边角。
+
+**空白值同样等于未配置**，config 与环境变量两侧一致：`resolve('')` 是**当前工作目录**，而它存在 ——
+扫描器会走进 Launcher 自己的工作目录，把那里的 `SKILL.md` / `*.md` 当成这个 dsh 的技能。`??` 不吃 `''`，
+所以 env 覆盖必须显式判空；`pathOverride` 是唯一判据，同时管四个字段与两处 env（`DSH_AGENTS_HOME` /
+`DSH_BUNDLED_SKILL_DIR`）。只有**决定**按去空白后的形式做，路径本身的字节不改写。
 
 ### 3.2 接受规则（与 dsh 逐条一致）
 
@@ -163,7 +171,9 @@ config 行（`- id: … / name: '@deepseek-ai/dsh-skill-filesystem'`）从 **hom
 
 - `core/mcp/mcp.test.ts`：行读写的回归锁定（含缩进感知 `blockEnd`、嵌套列表行）。
 - `core/mcp/mcp-secrets.test.ts`：存取 / 清除、cipher 往返、`plain:` 兜底、非法名、导出剥离。
-- `core/skills/skills.test.ts`：根解析（config 行 + 默认根 + `includeDefaultRoots` + `!!js`
+- `core/skills/skills.test.ts`：根解析（config 行 + 默认根 + `includeDefaultRoots` +
+  **四个路径字段都拒绝 `!!js` 哨兵**（`dshHome` 尤其：可写根必须还在）、**空白字段/空白 env 一律等于未配置**
+  （否则 `resolve('')` 会把扫描带进 cwd）、`!!js`
   运行时根不被 `resolve` / 不被扫描）、frontmatter 接受规则（含旧键拒绝与布尔容错）、列表 +
   issue、创建 / 改名冲突 / **新建拒绝覆盖（bundle 目录与扁平文件两种形态）** / 可写根之外的名字
   以 `ext.skillReadOnly` 拒绝、回收站删除（仅可写根）、ZIP 导入（单包 / 根包 / 多包 / 包装层、

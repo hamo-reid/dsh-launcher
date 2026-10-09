@@ -154,6 +154,96 @@ describe('root resolution', () => {
     expect(roots[0].path).toBe(custom)
   })
 
+  it('drops a !!js dshHome instead of resolving JavaScript into the writable root', () => {
+    // `dshHome` is the worst of the four fields to get wrong: it REPLACES the real
+    // writable root, so `user-dsh` (`<home>/skills`) disappeared from the list
+    // while a root nothing can write was reported as writable.
+    writeFileSync(join(home, 'cordis.patch.yml'), [
+      '- id: skills',
+      `  name: '@deepseek-ai/dsh-skill-filesystem'`,
+      '  config:',
+      '    dshHome: !!js "process.env.SOMEWHERE"',
+      '',
+    ].join('\n'))
+    const roots = skillRoots(ctx())
+    expect(roots.map(r => r.root)).toEqual(['user-dsh', 'user-agents'])
+    const userDsh = roots.find(r => r.root === 'user-dsh')
+    expect(userDsh).toMatchObject({ path: USER_DSH(), writable: true })
+    expect(roots.some(r => r.path.includes('\u0000'))).toBe(false)
+  })
+
+  it('drops !!js agentsHome and bundledSkillDir too', () => {
+    writeFileSync(join(home, 'cordis.patch.yml'), [
+      '- id: skills',
+      `  name: '@deepseek-ai/dsh-skill-filesystem'`,
+      '  config:',
+      '    agentsHome: !!js "process.env.SOMEWHERE"',
+      '    bundledSkillDir: !!js "process.env.OTHER"',
+      '',
+    ].join('\n'))
+    // Neither becomes a root of its own: the defaults stand.
+    const roots = skillRoots(ctx())
+    expect(roots.map(r => r.root)).toEqual(['user-dsh', 'user-agents'])
+    expect(roots.find(r => r.root === 'user-agents')?.path).toBe(join(agents, 'skills'))
+    expect(roots.some(r => r.root === 'bundled')).toBe(false)
+  })
+
+  it('treats a blank path field as unset, not as the working directory', () => {
+    // `resolve('')` is the process cwd, which EXISTS — and a quoted space is the
+    // easy way to write that by accident.
+    writeFileSync(join(home, 'cordis.patch.yml'), [
+      '- id: skills',
+      `  name: '@deepseek-ai/dsh-skill-filesystem'`,
+      '  config:',
+      '    dshHome: "   "',
+      '    customSkillDirs:',
+      '      - "  "',
+      '',
+    ].join('\n'))
+    const roots = skillRoots(ctx())
+    expect(roots.map(r => r.root)).toEqual(['user-dsh', 'user-agents'])
+    expect(roots.every(r => !r.path.startsWith(process.cwd()))).toBe(true)
+  })
+
+  it('ignores an EMPTY agents/bundled env override instead of scanning the cwd', () => {
+    // `??` treats `''` as configured, and `resolve('')` is the process cwd, which
+    // exists: the scan would walk the launcher's own working directory and report
+    // whatever SKILL.md / *.md it found there as this dsh's skills.
+    const savedAgents = process.env.DSH_AGENTS_HOME
+    const savedBundled = process.env.DSH_BUNDLED_SKILL_DIR
+    try {
+      delete process.env.DSH_AGENTS_HOME
+      delete process.env.DSH_BUNDLED_SKILL_DIR
+      const unset = skillRoots(ctx()).map(r => [r.root, r.path])
+
+      process.env.DSH_AGENTS_HOME = ''
+      process.env.DSH_BUNDLED_SKILL_DIR = ''
+      const blank = skillRoots(ctx())
+      // Blank resolves exactly like unset — with no agents override that is dsh's
+      // own `~/.agents`, NOT the cwd and not the tmp fixture.
+      expect(blank.map(r => [r.root, r.path])).toEqual(unset)
+      expect(blank.every(r => !r.path.startsWith(process.cwd()))).toBe(true)
+      expect(blank.some(r => r.root === 'bundled')).toBe(false)
+    } finally {
+      if (savedAgents === undefined) delete process.env.DSH_AGENTS_HOME
+      else process.env.DSH_AGENTS_HOME = savedAgents
+      if (savedBundled === undefined) delete process.env.DSH_BUNDLED_SKILL_DIR
+      else process.env.DSH_BUNDLED_SKILL_DIR = savedBundled
+    }
+  })
+
+  it('still honours a non-empty bundled env override', () => {
+    // The guard must tell blank from set: a real override still wins.
+    const saved = process.env.DSH_BUNDLED_SKILL_DIR
+    try {
+      process.env.DSH_BUNDLED_SKILL_DIR = custom
+      expect(skillRoots(ctx()).find(r => r.root === 'bundled')?.path).toBe(custom)
+    } finally {
+      if (saved === undefined) delete process.env.DSH_BUNDLED_SKILL_DIR
+      else process.env.DSH_BUNDLED_SKILL_DIR = saved
+    }
+  })
+
   it('never scans a runtime root', () => {
     // A real user-dsh skill next to a runtime declaration: the catalog holds the
     // skill and nothing derived from the expression. Fixtures are removed again

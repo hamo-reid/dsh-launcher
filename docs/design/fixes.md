@@ -1,6 +1,6 @@
 # 缺陷修复计划（2026-10 代码审查）
 
-> 状态：**P0 已完成（4 条，含施工中新发现的 A7）；F1、B4、F9、B2、B10、B3、B1、A4、A5 已完成，并带出施工中新发现的 F10；其余 13 条未实现**。这是一份施工计划，不是规范。
+> 状态：**P0 已完成（4 条，含施工中新发现的 A7）；F1、B4、F9、B2、B10、B3、B1、A4、A5、B5、B6 已完成，并带出施工中新发现的 F10；其余 11 条未实现**。这是一份施工计划，不是规范。
 > 来源：对 `feature/preset-management` 三块功能代码的审查（preset 功能、dev 插件 pnpm pack 快照、registry/skills 修复）。
 > 定位：每条修完后 —— 仍生效的规则上收 `docs/specs/` 或 `docs/presets.md`，测试进仓库，然后**从本文删掉该条**。本文清空即代表这批缺陷关闭。
 
@@ -11,7 +11,7 @@
 | 批次 | 条目 | 为什么是这个顺序 |
 |---|---|---|
 | **P0 硬后果** ✅ | ~~A2、A1、A3~~（+ 施工中新发现的 **A7**） | 会静默把 profile 指向错误的构建，或让包/文件名可控的字符串决定写入/递归删除的路径。**已完成**，见 §1 |
-| **P1 正确性与信息丢失** ✅ | ~~F1、B4、F9、B2、B3、B1、A4、A5~~（+ 施工中新发现的 **F10**）、F3、B5 | 守卫失效、功能做完却不可达、诊断被丢掉、选错版本、归档不可修复、清单先改后失败。**F1 / B4 / F10 见 §2.1，F9 / B2 见 §2.2，B3 / B1 见 §2.3，A4 / A5 见 §2.4** |
+| **P1 正确性与信息丢失** ✅ | ~~F1、B4、F9、B2、B3、B1、A4、A5、B5、B6~~（+ 施工中新发现的 **F10**）、F3 | 守卫失效、功能做完却不可达、诊断被丢掉、选错版本、归档不可修复、清单先改后失败。**F1 / B4 / F10 见 §2.1，F9 / B2 见 §2.2，B3 / B1 见 §2.3，A4 / A5 见 §2.4，B5 / B6 见 §2.5** |
 | **P2 一致性与性能** | ~~B10~~ ✅（见 §2.2）、F2、F5、F6、F7、F8、B6、B7、B8、B9 | 文案/范围不一致、幻影根、缓存与 i18n 瑕疵 |
 | **先确证再定方案** | F4、A6 | 取决于宿主真实行为 / 数据根搬迁是否改变大小写，先做实验再改 |
 
@@ -118,6 +118,17 @@ A5 → §4（改清单前先留原文，失败即恢复）。
 > A5 的 catch 分支（改写之后的异常）是**防御网**：两次写入同一路径，第二次失败需要磁盘级故障才触发，
 > 单测里造不出来 —— 这里如实记下，不假装它被覆盖。
 
+## 2.5 ✅ 已完成（2026-10-09）：B5、B6
+
+同一个读取路径（`readSkillFsConfig` + `skillRoots`）上的两处取值守卫，判据收敛成一个 `pathOverride`。
+仍生效的规则上收 [`specs/extensions.md`](../specs/extensions.md) §3.1（四个 config 路径字段一视同仁、
+空白即未配置）。
+
+| 条目 | 修法 | 测试 |
+|---|---|---|
+| **B5** | `dshHome` / `agentsHome` / `bundledSkillDir` 与 `customSkillDirs` 一视同仁：命中 `isJsExpr` 即视为**未配置**，绝不 `resolve`。`dshHome` 是四个里最严重的 —— 它**替换**真实可写根，被哨兵顶掉后 `user-dsh` 从列表里消失，同时报出一个 writable 的幻影根 | `skills.test.ts`：`!!js dshHome` → `user-dsh` 仍在、`path` 就是 `<home>/skills`、`writable: true`、无哨兵字节；`!!js agentsHome` + `bundledSkillDir` → 不新增根、`user-agents` 退回默认。反向校验：还原旧行为 → 3 例挂（可写根被替掉、多出幻影根、空白字段落进 cwd） |
+| **B6** | 空白（`''` 或纯空格）在 **config 与环境变量两侧**都等于未配置：`resolve('')` 是当前工作目录而它存在，扫描器会走进 Launcher 的 cwd，把那里的 `SKILL.md` / `*.md` 当成这个 dsh 的技能。`??` 不吃 `''`，所以 env 覆盖显式判空 | `skills.test.ts`：`DSH_AGENTS_HOME=''` / `DSH_BUNDLED_SKILL_DIR=''` 的解析结果与**未设置完全相同**，且没有根落在 cwd；另一例断言非空 env 覆盖仍然生效（守卫必须能区分"空白"与"已设置"）。反向校验：还原 `??` → 空白 env 多出一个根 |
+
 ### [ ] F3 —— 同一 loader 行 id 被两次 insert 时静默折叠，页面显示成健康名册
 
 **现象**：`declaration.ts:155-177` 的 fold 以 row id 为键、后者覆盖前者，`order` 只压栈一次 → 两层各 insert 一次同一 row id，只得到**一条**名册记录、**零**警告。而那是硬性启动失败（`store/combo.ts:255` 的 `findInsertConflicts`，接在 `ipc/dsh/run.ts:222` 与 `ipc/profile/read.ts:73`）。重复 preset id 的警告只在"两个不同 row id 共用同一 `config.id`"时触发。
@@ -126,17 +137,9 @@ A5 → §4（改清单前先留原文，失败即恢复）。
 
 **验证**：`presets/index` 单测：构造两层同时 insert `- id: preset-x`（同一 preset id），断言 `warnings` 非空、且文案点到冲突双方；再断言"后层只写 `- id: preset-x` + `disabled:`（合法的 id 覆盖）"**不**产生 warning。
 
-### [ ] B5 —— `!!js` 只过滤了 `customSkillDirs`，三个兄弟字段仍会把哨兵当路径
 
-**现象**：`skills/skills.ts:80-81`、`:98` 只按 `typeof === 'string'` 接受 `dshHome` / `agentsHome` / `bundledSkillDir`，随后 `:149` `resolve(config.dshHome)`、`:153` `resolve(config.agentsHome)`、`:159` `resolve(bundled)` —— 而 `!!js` 在 `patch/yaml.ts` 里是**带哨兵前缀的字符串**，会一路穿过去变成由 JS 源码拼出的路径（`customSkillDirs` 的同类问题正是 `db83573` 修的，`:83-94`）。对 `dshHome` 尤其糟：它**替换**真实可写根，于是 `user-dsh`（`<home>/skills`）从列表里消失，同时报出一个 writable 的幻影根。
-
-**方案**：把 `isJsExpr` 判断提到这三个字段的读取处（命中即视为未配置），与 `customSkillDirs` 一致；在模块注释里把"四个 config 字段都拒绝哨兵"写成一条规则。
-
-**验证**：`skills.test.ts` 加一例：home 层 `skill-filesystem` 行写 `dshHome: !!js …` → 断言 `user-dsh` 根仍在、没有被替换成幻影根。
-（触发条件未确证：现有 shipped / fixture 配置没有对这三个键用 `!!js`；但这是同一缺陷类，修法三行且无副作用。）
 
 ---
-
 ## 3. P2
 
 ### [ ] F2 —— home 层 declaration 在本页只读（**已定：方案 B**）
@@ -189,14 +192,6 @@ A5 → §4（改清单前先留原文，失败即恢复）。
 **方案**：该分支返回 `places: []`（`presets`/`grades`/`legacy`/`warnings` 已是空）。若希望仍能告诉用户"退役根在哪"，改为只列 `<home>/.agent-presets` 并带上 `exists`，但不要列未挂载包的目录。
 
 **验证**：IPC 单测：`model === 'none'` 时 `listing.places` 为空（或只含用户根），且页面显示 `noModel` 空状态。
-
-### [ ] B6 —— 空的 `DSH_AGENTS_HOME` / `DSH_BUNDLED_SKILL_DIR` 会变成 `process.cwd()`
-
-**现象**：`skills/skills.ts:152-154` 用 `process.env.DSH_AGENTS_HOME ?? join(homedir(), '.agents')`，`:158-159` 用 `config.bundledSkillDir ?? process.env.DSH_BUNDLED_SKILL_DIR`。`??` 不把 `''` 当未设置，而 `resolve('') === process.cwd()`、`existsSync(cwd)` 为真 —— 扫描器会走进 launcher 的工作目录，把遇到的 `<dir>/SKILL.md` / `*.md` 当作 `user-agents` / `bundled` 技能收进目录。config 行的同名字段是有 `''` 过滤的（`:80-81`），env 这一侧没有。
-
-**方案**：两处都改成 `.trim() !== ''` 才算有效（先取 `process.env.X?.trim()`，为空则按未设置处理），与 config 行口径一致。
-
-**验证**：`skills.test.ts` 加一例：`DSH_AGENTS_HOME=''` 时根解析结果与未设置时相同（不出现 cwd）。
 
 ### [ ] B7 —— 插件更新缓存没有把 registry 算进键
 
@@ -277,7 +272,8 @@ A5 → §4（改清单前先留原文，失败即恢复）。
 - [x] **P1 第二批（F9 / B2 / B10）**：账目在 §2.2，规则上收 `specs/extensions.md` §3.3 与 §5 的测试锚点（§3.4 仍待 **B3**）。**唯一缺口**：F9 的页面接线没有渲染测试（仓库无组件测试基建），该行已写明替代钉法与理由。
 - [x] **P1 第三批（B3 / B1）**：账目在 §2.3，规则上收 `specs/extensions.md` §3.4（三种"读不出"的归属 + `problem` 可见）与 §5；顺带把渲染测试入口写进 `vitest.config.ts` 并落成约定（`docs/TESTING.md` §4），F9 的验证缺口据此回填。
 - [x] **P1 第四批（A4 / A5）**：账目在 §2.4，规则上收 `specs/profile.md` §8 **P10**（pack 按版本分层 + 版本段守卫）与 §4（改清单前先留原文，失败即恢复）。
-- [x] `pnpm typecheck`、`pnpm test`、`pnpm run build` 三项全绿（**已可在此机直接跑**：2026-10-09 最新一次 = 86 files / 1091 tests 全绿，`typecheck` / `build` 亦为 0）。
+- [x] **P1 第五批（B5 / B6）**：账目在 §2.5，规则上收 `specs/extensions.md` §3.1（四个 config 路径字段都拒绝哨兵、空白即未配置）。
+- [x] `pnpm typecheck`、`pnpm test`、`pnpm run build` 三项全绿（**已可在此机直接跑**：2026-10-09 最新一次 = 86 files / 1096 tests 全绿，`typecheck` / `build` 亦为 0）。
 - [ ] 其余每条新增的测试都进仓库，并在本文件对应条目下留一行"验证方式"。
 - [ ] 行为或口径有变化的条目（F2、F3、F5，以及 F4 的结论）已同步进 `docs/presets.md` / `docs/specs/extensions.md` / `docs/specs/launch.md`，§5 的三处修正已落地。
 - [ ] 本文所有 `[ ]` 清空后，删除本文件，并从 `docs/README.md` 的"未实现的设计"表里移除对应行。

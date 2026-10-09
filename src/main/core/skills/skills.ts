@@ -60,8 +60,36 @@ interface SkillFsConfig {
   bundledSkillDir?: string
 }
 
+/**
+ * A configured path override, or `undefined` when it must be treated as unset.
+ *
+ * Three shapes LOOK configured and are not:
+ *
+ * - not a string — YAML `dshHome:` with no value parses to null, not `''`;
+ * - the `!!js` SENTINEL: a string whose content is JavaScript source, so
+ *   `resolve()` turns it into a path built from that source. Shipped presets write
+ *   exactly this form, and for `dshHome` the damage is worse than a phantom root —
+ *   it REPLACES the real writable root, so `user-dsh` (`<home>/skills`) vanishes
+ *   from the list while a root nothing can write is reported as writable;
+ * - blank (`''` or spaces): `resolve('')` is the process CWD, which EXISTS, so the
+ *   scan would walk the launcher's own working directory and report whatever
+ *   `SKILL.md` / `*.md` it finds as skills of this dsh.
+ *
+ * All four config path fields and both environment overrides go through this one
+ * predicate. The value is returned as written (not trimmed) — only the decision is
+ * made on the trimmed form, so a path's own bytes are never rewritten.
+ */
+function pathOverride(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.trim() === '') return undefined
+  if (isJsExpr(value)) return undefined
+  return value
+}
+
 /** Read the `@deepseek-ai/dsh-skill-filesystem` row's config from the home
- * layer. An absent row, or an unparsable one, means dsh's defaults apply. */
+ * layer. An absent row, or an unparsable one, means dsh's defaults apply.
+ *
+ * Every path field it reads goes through {@link pathOverride}: a `!!js` value is
+ * dsh's to evaluate, never the launcher's to resolve. */
 function readSkillFsConfig(ctx: DshContext): SkillFsConfig {
   const { text } = readHomePatch(ctx)
   const row = parseNamedRows(text).find(candidate => candidate.name === SKILL_PACKAGE)
@@ -78,8 +106,10 @@ function readSkillFsConfig(ctx: DshContext): SkillFsConfig {
   const config = parsed as Record<string, unknown>
   const out: SkillFsConfig = {}
   if (typeof config.includeDefaultRoots === 'boolean') out.includeDefaultRoots = config.includeDefaultRoots
-  if (typeof config.dshHome === 'string' && config.dshHome !== '') out.dshHome = config.dshHome
-  if (typeof config.agentsHome === 'string' && config.agentsHome !== '') out.agentsHome = config.agentsHome
+  const dshHome = pathOverride(config.dshHome)
+  if (dshHome !== undefined) out.dshHome = dshHome
+  const agentsHome = pathOverride(config.agentsHome)
+  if (agentsHome !== undefined) out.agentsHome = agentsHome
   if (Array.isArray(config.customSkillDirs)) {
     // A `!!js` entry parses to a SENTINEL-PREFIXED STRING, so a `typeof` filter
     // does not catch it — and resolving one yields a path built from JavaScript
@@ -89,14 +119,16 @@ function readSkillFsConfig(ctx: DshContext): SkillFsConfig {
     const dirs: string[] = []
     const runtime: string[] = []
     for (const value of config.customSkillDirs) {
-      if (typeof value !== 'string' || value === '') continue
-      if (isJsExpr(value)) runtime.push(jsExprText(value))
-      else dirs.push(value)
+      if (typeof value !== 'string') continue
+      if (value.trim() === '') continue
+      if (isJsExpr(value)) { runtime.push(jsExprText(value)); continue }
+      dirs.push(value)
     }
     if (dirs.length > 0) out.customSkillDirs = dirs
     if (runtime.length > 0) out.runtimeDirs = runtime
   }
-  if (typeof config.bundledSkillDir === 'string' && config.bundledSkillDir !== '') out.bundledSkillDir = config.bundledSkillDir
+  const bundled = pathOverride(config.bundledSkillDir)
+  if (bundled !== undefined) out.bundledSkillDir = bundled
   return out
 }
 
@@ -149,14 +181,16 @@ export function skillRoots(ctx: DshContext, opts: SkillRootOptions = {}): SkillR
     // dshHome: config override wins, else the launcher-set DSH_HOME (= ctx.home).
     const dshHome = config.dshHome !== undefined ? resolve(config.dshHome) : ctx.home
     // agentsHome: config override, then the launcher process env (the child
-    // inherits it), then the dsh default `~/.agents`.
+    // inherits it), then the dsh default `~/.agents`. `??` alone would accept an
+    // EMPTY variable as configured — and `resolve('')` is this process's own
+    // working directory, which exists, so the scan would walk the launcher's cwd.
     const agentsHome = config.agentsHome !== undefined
       ? resolve(config.agentsHome)
-      : resolve(process.env.DSH_AGENTS_HOME ?? join(homedir(), '.agents'))
+      : resolve(pathOverride(process.env.DSH_AGENTS_HOME) ?? join(homedir(), '.agents'))
     push('user-dsh', 'user-dsh', USER_DSH_RANK, join(dshHome, 'skills'), true)
     push('user-agents', 'user-agents', USER_AGENTS_RANK, join(agentsHome, 'skills'), false)
   }
-  const bundled = config.bundledSkillDir ?? process.env.DSH_BUNDLED_SKILL_DIR
+  const bundled = config.bundledSkillDir ?? pathOverride(process.env.DSH_BUNDLED_SKILL_DIR)
   if (bundled !== undefined) push('bundled', 'bundled', BUNDLED_SKILL_RANK, resolve(bundled), false)
   return roots.sort((a, b) => a.rank - b.rank)
 }
