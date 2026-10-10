@@ -276,6 +276,42 @@ export function listSkills(ctx: DshContext, opts: SkillRootOptions = {}): SkillL
   return { roots, skills, issues }
 }
 
+/** Where one skill named `name` lives for this dsh. */
+export interface SkillLocation {
+  /** The file that carries it: its SKILL.md, or the flat `<name>.md` itself. */
+  path: string
+  /** The folder that HOLDS it: the bundle directory, or the root for a flat entry. */
+  dir: string
+  /** Which of the two it is. "Open" needs the distinction: a bundle IS its folder
+   * (scripts, references and assets sit beside the SKILL.md), while a flat entry's
+   * folder is the whole root — every other skill in it — so that one is opened as
+   * the file it is. */
+  shape: 'bundle' | 'flat'
+}
+
+/** The file that carries a skill, and the folder that holds it (`<root>/<name>`
+ * for a bundle, the root itself for a flat `<name>.md`, the same convention the
+ * scan uses). This is what "open" hands to the editor — the launcher does not edit
+ * a skill's text, because a skill is not only its SKILL.md.
+ *
+ * Resolved against the FULL listing, so a copy in a root the launcher may not
+ * write can still be opened, and `opts.profile` composes the same preset roots
+ * the listing the page rendered did. Ties go to the first entry in rank order,
+ * which is the copy dsh itself would load.
+ *
+ * Not found is a business answer (`ext.skillNotFound`, localized), not an internal
+ * error: the name can be real on another dsh, or have been removed between the
+ * render and the click. */
+export function skillLocationOf(
+  ctx: DshContext,
+  name: string,
+  opts: SkillRootOptions = {},
+): SkillLocation {
+  const found = listSkills(ctx, opts).skills.find(entry => entry.name === name)
+  if (found === undefined) throwE(E.extSkillNotFound, { detail: name })
+  return { path: found.path, dir: found.dir, shape: found.shape }
+}
+
 // ── write / delete (writable root only) ──────────────────────────────────────
 
 /** The injected OS-recycle-bin move; main wires `shell.trashItem`, tests a fake. */
@@ -303,15 +339,6 @@ export function findEditableSkill(ctx: DshContext, name: string): WritableSkill 
 function targetPaths(ctx: DshContext, name: string): { dir: string; file: string } {
   const dir = join(writableSkillRoot(ctx), name)
   return { dir, file: join(dir, 'SKILL.md') }
-}
-
-/** Read the full text of an editable skill (for the editor modal). */
-export function readSkillFile(ctx: DshContext, name: string): string {
-  const found = findEditableSkill(ctx, name)
-  // A business refusal, not an internal error: the name may be perfectly real and
-  // simply live in a read-only root (project / custom / agents / bundled).
-  if (found === undefined) throwE(E.extSkillReadOnly, { detail: name })
-  return readFileSync(found.entry.path, 'utf8')
 }
 
 /**

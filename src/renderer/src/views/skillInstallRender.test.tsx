@@ -62,7 +62,7 @@ describe('a cell that cannot be read', () => {
       <SkillCard
         entry={ENTRY}
         installs={[cell({ installed: true, stale: true, problem: PROBLEM })]}
-        editBusy={false}
+        openBusy={false}
         onOpen={() => undefined}
         onInstall={() => undefined}
         onDelete={() => undefined}

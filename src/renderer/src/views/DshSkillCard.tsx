@@ -3,10 +3,15 @@
  * `SkillCard`. The dsh panel shows a grid of these, so a skill reads as a unit
  * with its own actions instead of a row between two dividers.
  *
- * What a card may offer follows from where the copy lives: only the dsh's writable
- * root is editable (`entry.editable`), and "reinstall" appears only when there IS a
- * verdict from the library saying the copy drifted — an unreadable copy gets that
- * tag with its reason, because reinstalling cannot fix an unreadable file.
+ * What a card may offer follows from where the copy lives: the launcher only
+ * ever writes to the dsh's writable root, so only a copy there may be deleted, and
+ * "reinstall" appears only when there IS a verdict from the library saying the copy
+ * drifted — an unreadable copy gets that tag with its reason, because reinstalling
+ * cannot fix an unreadable file.
+ *
+ * Opening is NOT gated that way: reading a skill is not writing one, and the copies
+ * worth looking at (a preset's, a package's) are exactly the ones the launcher may
+ * not touch.
  *
  * All colours derive from theme tokens per docs/ui-guidelines.md.
  */
@@ -16,6 +21,7 @@ import { useTranslation } from 'react-i18next'
 import ConfirmMenu, { type MenuAction } from '../components/ConfirmMenu.tsx'
 import { installCellColour, installCellState } from '../lib/skillInstallState.ts'
 import { SOURCE_COLOUR, sourceLabelKey } from '../lib/skillSource.ts'
+import SkillOpenMenu from './SkillOpenMenu.tsx'
 import type { SkillEntry, SkillLibInstall } from '../../../shared/types.ts'
 
 const MONO: React.CSSProperties = {
@@ -30,8 +36,9 @@ interface DshSkillCardProps {
    * library has no entry to compare against. */
   cell: SkillLibInstall | undefined
   /** Which of this card's actions is running, for that button's spinner. */
-  busy: 'edit' | 'reinstall' | null
-  onEdit: () => void
+  busy: 'open' | 'reinstall' | null
+  /** `true` opens the SKILL.md, `false` shows the folder that holds it. */
+  onOpen: (editor: boolean) => void
   onReinstall: () => void
   onDelete: () => void
 }
@@ -73,25 +80,10 @@ export default function DshSkillCard(p: DshSkillCardProps): JSX.Element {
         transition: 'border-color 0.15s, box-shadow 0.15s',
       }}
     >
-      {/* Upper region — opens the editor where this copy may be edited. */}
-      <div
-        role={entry.editable ? 'button' : undefined}
-        tabIndex={entry.editable ? 0 : undefined}
-        aria-label={entry.editable ? t('common.edit') : undefined}
-        onClick={entry.editable ? p.onEdit : undefined}
-        onKeyDown={event => {
-          if (!entry.editable) return
-          if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); p.onEdit() }
-        }}
-        style={{
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 8,
-          cursor: entry.editable ? 'pointer' : 'default',
-          outline: 'none',
-        }}
-      >
+      {/* The body is static: everything this card can DO is in the footer, where
+          it is named. A card-wide click target would have to pick one of the two
+          open destinations for the user. */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
           <span
             title={entry.name}
@@ -141,9 +133,7 @@ export default function DshSkillCard(p: DshSkillCardProps): JSX.Element {
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: token.paddingSM, paddingTop: token.paddingSM, borderTop: `1px solid ${token.colorSplit}` }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-          {entry.editable && (
-            <Button size="small" loading={p.busy === 'edit'} onClick={p.onEdit}>{t('common.edit')}</Button>
-          )}
+          <SkillOpenMenu name={entry.name} busy={p.busy === 'open'} onSelect={p.onOpen} />
           {(stale || problem) && (
             <Button size="small" type="primary" onClick={p.onReinstall}>{t('ext.skills.reinstall')}</Button>
           )}

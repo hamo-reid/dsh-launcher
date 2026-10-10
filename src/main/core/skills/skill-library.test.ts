@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { renderSkillFile, installedEntry, installZipSkills, parseSkillText, writableSkillRoot } from './skills.ts'
 import {
-  deleteSkillLib, installSkillToDsh, listSkillLibrary, readSkillLibFile, scanSkillInstalls,
+  deleteSkillLib, findSkillLibEntry, installSkillToDsh, listSkillLibrary, scanSkillInstalls,
   setSkillLibraryTrash, skillLibraryDir, skillLibShape, skillLibTextOf, writeSkillLib,
 } from './library.ts'
 import { configureAppState, contextForEntry, updateDshState } from '../profile/appState.ts'
@@ -34,6 +34,10 @@ function writeLib(name: string, text: string): void {
   mkdirSync(join(lib, name), { recursive: true })
   writeFileSync(join(lib, name, 'SKILL.md'), text)
 }
+
+/** One library bundle's SKILL.md text, read off the disk (the library has no
+ * reader of its own any more: nothing in the launcher edits a skill's text). */
+const readLib = (name: string): string => readFileSync(join(lib, name, 'SKILL.md'), 'utf8')
 
 beforeAll(async () => {
   root = mkdtempSync(join(tmpdir(), 'pm-skill-lib-'))
@@ -70,12 +74,18 @@ describe('skill library CRUD', () => {
     expect(existsSync(skillLibraryDir())).toBe(true)
   })
 
-  it('write creates a bundle; read returns the full text', () => {
+  it('write creates a bundle; the file holds the text', () => {
     const entry = writeSkillLib(null, makeSkill('greeter'))
     expect(entry.name).toBe('greeter')
     expect(entry.path).toBe(join(lib, 'greeter', 'SKILL.md'))
-    expect(readSkillLibFile('greeter').text).toBe(makeSkill('greeter'))
+    expect(readLib('greeter')).toBe(makeSkill('greeter'))
     expect(listSkillLibrary().skills.map(s => s.name)).toEqual(['greeter'])
+  })
+
+  it('finds one entry by name — what the page opens — and answers undefined when it is gone', () => {
+    writeSkillLib(null, makeSkill('greeter'))
+    expect(findSkillLibEntry('greeter')?.path).toBe(join(lib, 'greeter', 'SKILL.md'))
+    expect(findSkillLibEntry('never-here')).toBeUndefined()
   })
 
   it('editing the frontmatter name renames the bundle dir', () => {
@@ -99,7 +109,7 @@ describe('skill library CRUD', () => {
     expect(existsSync(join(lib, 'flat-edit', 'SKILL.md'))).toBe(true)
     // One skill, not two: the flat file no longer doubles the entry.
     expect(listSkillLibrary().skills.map(s => s.name)).toEqual(['flat-edit'])
-    expect(readSkillLibFile('flat-edit').text).toContain('edited in place')
+    expect(readLib('flat-edit')).toContain('edited in place')
   })
 
   it('installs a flat library entry as a flat copy, and reinstalls across shapes', () => {

@@ -1,32 +1,55 @@
-/** The skill half of `ext:*`: what a dsh discovers on disk, and the launcher-global library where skills are created, edited and installed. */
+/** The skill half of `ext:*`: what a dsh discovers on disk, and the launcher-global
+ * library where skills are collected, created from a scaffold, and installed.
+ *
+ * The launcher writes no skill TEXT: a skill is a directory — scripts, references
+ * and assets beside its SKILL.md — so editing one is not a text box's job. Every
+ * copy offers the same two ways out instead: show its folder, or hand the skill to
+ * the editor (a bundle goes in as its folder, which opens as a workspace). Creating
+ * one writes the launcher's own scaffold (a valid file to start from), and never
+ * overwrites anything. */
 
 
 import { existsSync } from 'node:fs'
-import { dialog } from 'electron'
+import { dialog, shell } from 'electron'
 import { join } from 'node:path'
 import { ctxOf } from '../ctxOf.ts'
 import { handle } from '../handle.ts'
 import { profileRefused, profileTarget } from '../validate.ts'
 import { logger } from '../../core/shared/logger.ts'
 import {
-  deleteSkill, importSkillZip, installedEntry, installZipSkills, listSkills, parseSkillText, readSkillFile,
-  scaffoldSkill, writableSkillRoot, writeSkill, zipImportProblem,
+  deleteSkill, importSkillZip, installedEntry, installZipSkills, listSkills, parseSkillText,
+  scaffoldSkill, skillLocationOf, writableSkillRoot, writeSkill, zipImportProblem,
 } from '../../core/skills/skills.ts'
 import {
-  deleteSkillLib, installSkillToDsh, listSkillLibrary, readSkillLibFile, scanSkillInstalls, skillLibraryDir,
-  skillLibShape, skillLibTextOf, writeSkillLib,
+  deleteSkillLib, findSkillLibEntry, installSkillToDsh, listSkillLibrary, scanSkillInstalls,
+  skillLibraryDir, skillLibShape, skillLibTextOf, writeSkillLib,
 } from '../../core/skills/library.ts'
 import { SKILL_NAME_RE } from '../../../shared/skill.ts'
 import { fail, failFromError, E } from '../../core/shared/errors.ts'
 import type { IpcResult, SkillEntry, SkillLibEntry, SkillLibOverviewRow, SkillListing } from '../../../shared/types.ts'
 
 
+/** Show one skill's folder in the OS file manager. A bundle's folder is the skill
+ * itself (its resource files live there); a flat `<name>.md` has its root as its
+ * folder, which is where the file is. */
+async function revealDir(dir: string): Promise<IpcResult<boolean>> {
+  const error = await shell.openPath(dir)
+  return error === '' ? { ok: true, value: true } : fail(E.shellOpenPath, { detail: error })
+}
 
-/** A layer the extensions surface may write. `bundle` is read-only (shipped). */
-
-/** Largest skill file text the editor may send (a SKILL.md plus resources are
- * separate files; the edited document itself is prose). */
-const MAX_SKILL_TEXT = 256 * 1024
+/** Open one skill in VS Code, through the protocol the editor registers: spawning
+ * `code` would depend on a PATH entry, and the protocol is the editor's own
+ * contract for "open this thing" (the same call the presets page makes). A protocol
+ * URL takes forward slashes on every platform, a Windows drive included.
+ *
+ * `target` is the skill ITSELF, and for a bundle that is its folder: the editor
+ * opens a folder as a workspace, so the scripts and references sit in the tree
+ * beside the SKILL.md. A flat `<name>.md` has no folder of its own (its folder is
+ * the whole root), so the caller passes the file for that case. */
+async function openInEditor(target: string): Promise<IpcResult<boolean>> {
+  await shell.openExternal(`vscode://file/${target.replace(/\\/g, '/')}`)
+  return { ok: true, value: true }
+}
 
 export function registerSkillsExtIpc(): void {
   // Every root dsh scans, the discovered catalog (rank order), and every
@@ -63,41 +86,49 @@ export function registerSkillsExtIpc(): void {
     }
   })
 
-  // Scaffold text for a new skill, rendered by the same renderer that writes it.
-  // The template is dsh-independent, but the dsh-side flow gets its own channel so
-  // creating a skill on a dsh never has to call a library-namespaced method.
-  handle('ext:skillScaffold', (_event, name: string): IpcResult<string> => {
-    if (!SKILL_NAME_RE.test(name)) return fail(E.extBadSkill, { detail: name })
-    return { ok: true, value: scaffoldSkill(name) }
-  })
-
-  // Full text of one editable skill on this dsh, for the editor modal.
-  handle('ext:skillRead', (_event, dshId: string, name: string): IpcResult<string> => {
+  // Create a skill in this dsh's writable root from the launcher's own scaffold:
+  // a valid SKILL.md to start from. A name the root already holds is refused by
+  // core (`ext.skillExists`) — nothing is ever overwritten here.
+  handle('ext:skillCreate', (_event, dshId: string, name: string): IpcResult<SkillEntry> => {
     const ctx = ctxOf(dshId)
     if (ctx === null) return fail(E.dshNotFound)
     if (!SKILL_NAME_RE.test(name)) return fail(E.extBadSkill, { detail: name })
     try {
-      return { ok: true, value: readSkillFile(ctx, name) }
+      return { ok: true, value: writeSkill(ctx, null, scaffoldSkill(name)) }
     } catch (error) {
       return failFromError(error)
     }
   })
 
-  // Create (`previousName === null`) or update one skill in the dsh's writable
-  // root; the frontmatter `name` is authoritative and renames the bundle dir. A
-  // create over a name already in that root is refused by core.
-  handle('ext:skillSave', (_event, dshId: string, previousName: string | null, text: string): IpcResult<SkillEntry> => {
+  // Show where one skill lives. Any copy the page can list may be opened, in a
+  // read-only root included — `profile` decides which preset roots compose, so it
+  // has to be the one the listing was read with.
+  handle('ext:skillReveal', async (_event, dshId: string, name: string, profile?: string): Promise<IpcResult<boolean>> => {
     const ctx = ctxOf(dshId)
     if (ctx === null) return fail(E.dshNotFound)
-    if (previousName !== null && !SKILL_NAME_RE.test(previousName)) return fail(E.extBadSkill, { detail: previousName })
-    // A skill is text-sized: refuse an absurd payload before it is parsed or
-    // written, and say which limit it broke.
-    if (typeof text !== 'string') return fail(E.extBadSkill, { detail: typeof text })
-    if (text.length > MAX_SKILL_TEXT) {
-      return fail(E.extBadSkill, { detail: `${Math.ceil(text.length / 1024)} KB > ${MAX_SKILL_TEXT / 1024} KB` })
-    }
+    if (!SKILL_NAME_RE.test(name)) return fail(E.extBadSkill, { detail: name })
+    const pick = profileTarget(ctx, profile)
+    if (profileRefused(pick)) return pick
     try {
-      return { ok: true, value: writeSkill(ctx, previousName, text) }
+      const { dir } = skillLocationOf(ctx, name, pick !== null ? { profile: pick } : {})
+      return await revealDir(dir)
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Open one skill in the editor. A bundle goes in as its FOLDER — that is the
+  // whole point of not editing it here: the scripts and references are part of the
+  // skill, and a folder opens as a workspace.
+  handle('ext:skillOpenEditor', async (_event, dshId: string, name: string, profile?: string): Promise<IpcResult<boolean>> => {
+    const ctx = ctxOf(dshId)
+    if (ctx === null) return fail(E.dshNotFound)
+    if (!SKILL_NAME_RE.test(name)) return fail(E.extBadSkill, { detail: name })
+    const pick = profileTarget(ctx, profile)
+    if (profileRefused(pick)) return pick
+    try {
+      const { path, dir, shape } = skillLocationOf(ctx, name, pick !== null ? { profile: pick } : {})
+      return await openInEditor(shape === 'flat' ? path : dir)
     } catch (error) {
       return failFromError(error)
     }
@@ -153,29 +184,38 @@ export function registerSkillsExtIpc(): void {
     }
   })
 
-  // Scaffold text for a new library skill, rendered by the same renderer that
-  // writes it.
-  handle('ext:libSkillScaffold', (_event, name: string): IpcResult<string> => {
-    if (!SKILL_NAME_RE.test(name)) return fail(E.extBadSkill, { detail: name })
-    return { ok: true, value: scaffoldSkill(name) }
-  })
-
-  // Full text of one library skill, for the editor modal.
-  handle('ext:libSkillRead', (_event, name: string): IpcResult<{ text: string; path: string }> => {
+  // Create a library skill from the launcher's own scaffold, refused when the
+  // library already holds that name (core).
+  handle('ext:libSkillCreate', (_event, name: string): IpcResult<SkillLibEntry> => {
     if (!SKILL_NAME_RE.test(name)) return fail(E.extBadSkill, { detail: name })
     try {
-      return { ok: true, value: readSkillLibFile(name) }
+      return { ok: true, value: writeSkillLib(null, scaffoldSkill(name)) }
     } catch (error) {
       return failFromError(error)
     }
   })
 
-  // Create (`previousName === null`) or update one library skill from full file
-  // text; the frontmatter `name` is authoritative and renames the entry.
-  handle('ext:libSkillSave', (_event, previousName: string | null, text: string): IpcResult<SkillLibEntry> => {
-    if (previousName !== null && !SKILL_NAME_RE.test(previousName)) return fail(E.extBadSkill, { detail: previousName })
+  // Show where one library skill lives, in the OS file manager. `undefined` means
+  // the entry is gone (it can go between the render and the click).
+  handle('ext:libSkillReveal', async (_event, name: string): Promise<IpcResult<boolean>> => {
+    if (!SKILL_NAME_RE.test(name)) return fail(E.extBadSkill, { detail: name })
     try {
-      return { ok: true, value: writeSkillLib(previousName, text) }
+      const entry = findSkillLibEntry(name)
+      if (entry === undefined) return fail(E.extSkillNotFound, { detail: name })
+      return await revealDir(entry.dir)
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Open one library skill in the editor, on the same rule as a dsh copy: the
+  // bundle's folder, or the flat file when the entry has no folder of its own.
+  handle('ext:libSkillOpenEditor', async (_event, name: string): Promise<IpcResult<boolean>> => {
+    if (!SKILL_NAME_RE.test(name)) return fail(E.extBadSkill, { detail: name })
+    try {
+      const entry = findSkillLibEntry(name)
+      if (entry === undefined) return fail(E.extSkillNotFound, { detail: name })
+      return await openInEditor(skillLibShape(entry) === 'flat' ? entry.path : entry.dir)
     } catch (error) {
       return failFromError(error)
     }
@@ -242,7 +282,7 @@ export function registerSkillsExtIpc(): void {
     if (ctx === null) return fail(E.dshNotFound)
     if (!SKILL_NAME_RE.test(name)) return fail(E.extBadSkill, { detail: name })
     try {
-      const lib = listSkillLibrary().skills.find(candidate => candidate.name === name)
+      const lib = findSkillLibEntry(name)
       if (lib === undefined) return fail(E.extSkillNotFound, { detail: name })
       const root = writableSkillRoot(ctx)
       installSkillToDsh(root, lib, overwrite === true)

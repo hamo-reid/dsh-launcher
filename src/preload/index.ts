@@ -199,12 +199,12 @@ const api = {
       ipcRenderer.invoke('ext:skillList', dshId, profile),
     skillDelete: (dshId: string, name: string): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('ext:skillDelete', dshId, name),
-    skillScaffold: (name: string): Promise<IpcResult<string>> =>
-      ipcRenderer.invoke('ext:skillScaffold', name),
-    skillRead: (dshId: string, name: string): Promise<IpcResult<string>> =>
-      ipcRenderer.invoke('ext:skillRead', dshId, name),
-    skillSave: (dshId: string, previousName: string | null, text: string): Promise<IpcResult<SkillEntry>> =>
-      ipcRenderer.invoke('ext:skillSave', dshId, previousName, text),
+    skillCreate: (dshId: string, name: string): Promise<IpcResult<SkillEntry>> =>
+      ipcRenderer.invoke('ext:skillCreate', dshId, name),
+    skillReveal: (dshId: string, name: string, profile?: string): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('ext:skillReveal', dshId, name, profile),
+    skillOpenEditor: (dshId: string, name: string, profile?: string): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('ext:skillOpenEditor', dshId, name, profile),
     skillImportZip: (dshId: string, zipPath?: string): Promise<IpcResult<SkillEntry[] | null>> =>
       ipcRenderer.invoke('ext:skillImportZip', dshId, zipPath),
     libMcpOverview: (): Promise<IpcResult<McpLibOverviewRow[]>> =>
@@ -223,12 +223,12 @@ const api = {
       ipcRenderer.invoke('ext:libSkillList'),
     libSkillOverview: (): Promise<IpcResult<SkillLibOverviewRow[]>> =>
       ipcRenderer.invoke('ext:libSkillOverview'),
-    libSkillScaffold: (name: string): Promise<IpcResult<string>> =>
-      ipcRenderer.invoke('ext:libSkillScaffold', name),
-    libSkillRead: (name: string): Promise<IpcResult<{ text: string; path: string }>> =>
-      ipcRenderer.invoke('ext:libSkillRead', name),
-    libSkillSave: (previousName: string | null, text: string): Promise<IpcResult<SkillLibEntry>> =>
-      ipcRenderer.invoke('ext:libSkillSave', previousName, text),
+    libSkillCreate: (name: string): Promise<IpcResult<SkillLibEntry>> =>
+      ipcRenderer.invoke('ext:libSkillCreate', name),
+    libSkillReveal: (name: string): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('ext:libSkillReveal', name),
+    libSkillOpenEditor: (name: string): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('ext:libSkillOpenEditor', name),
     libSkillDelete: (name: string): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('ext:libSkillDelete', name),
     libSkillImportZip: (zipPath?: string): Promise<IpcResult<SkillLibEntry[] | null>> =>

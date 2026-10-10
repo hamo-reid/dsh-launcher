@@ -196,14 +196,17 @@ export interface WindowApi {
     skillList: (dshId: string, profile?: string) => Promise<IpcResult<SkillListing>>
     /** Move an editable skill to the OS recycle bin. */
     skillDelete: (dshId: string, name: string) => Promise<IpcResult<boolean>>
-    /** Scaffold text for a new skill, rendered by the same renderer that writes it. */
-    skillScaffold: (name: string) => Promise<IpcResult<string>>
-    /** Full text of one editable skill on this dsh, for the editor modal. */
-    skillRead: (dshId: string, name: string) => Promise<IpcResult<string>>
-    /** Create (`previousName === null`) or update one skill in this dsh's writable
-     * root; the frontmatter `name` is authoritative and renames the bundle dir.
-     * A create over a name already in that root is refused. */
-    skillSave: (dshId: string, previousName: string | null, text: string) => Promise<IpcResult<SkillEntry>>
+    /** Create one skill in this dsh's writable root, from the launcher's own
+     * scaffold. A name that root already holds is refused: the launcher never
+     * writes over a skill that is there. */
+    skillCreate: (dshId: string, name: string) => Promise<IpcResult<SkillEntry>>
+    /** Show one skill's folder in the OS file manager. `profile` is the scope the
+     * listing was read with, so a preset-contributed copy resolves too. */
+    skillReveal: (dshId: string, name: string, profile?: string) => Promise<IpcResult<boolean>>
+    /** Open one skill in the editor: a bundle as its folder — a workspace, with its
+     * resource files in the tree beside the SKILL.md — and a flat `<name>.md` as
+     * itself. */
+    skillOpenEditor: (dshId: string, name: string, profile?: string) => Promise<IpcResult<boolean>>
     /** Install a zip's skills into this dsh's writable root (all-or-nothing). With
      * no `zipPath` a file dialog picks the archive; a drag & drop passes its
      * resolved path. `null` when the dialog was cancelled. */
@@ -230,13 +233,13 @@ export interface WindowApi {
     libSkillList: () => Promise<IpcResult<{ skills: SkillLibEntry[]; issues: SkillLibIssue[] }>>
     /** Entries with their per-dsh install states (installed / stale). */
     libSkillOverview: () => Promise<IpcResult<SkillLibOverviewRow[]>>
-    /** Scaffold text for a new library skill. */
-    libSkillScaffold: (name: string) => Promise<IpcResult<string>>
-    /** Full text of one library skill, for the editor modal. */
-    libSkillRead: (name: string) => Promise<IpcResult<{ text: string; path: string }>>
-    /** Create (`previousName === null`) or update one library skill; the
-     * frontmatter `name` is authoritative and renames the entry. */
-    libSkillSave: (previousName: string | null, text: string) => Promise<IpcResult<SkillLibEntry>>
+    /** Create one library skill from the launcher's own scaffold; a name the
+     * library already holds is refused. */
+    libSkillCreate: (name: string) => Promise<IpcResult<SkillLibEntry>>
+    /** Show one library skill's folder in the OS file manager. */
+    libSkillReveal: (name: string) => Promise<IpcResult<boolean>>
+    /** Open one library skill in the editor, on the same rule as a dsh copy. */
+    libSkillOpenEditor: (name: string) => Promise<IpcResult<boolean>>
     /** Move one library skill to the OS recycle bin. */
     libSkillDelete: (name: string) => Promise<IpcResult<boolean>>
     /** Install a zip's skills into the library (all-or-nothing). With no

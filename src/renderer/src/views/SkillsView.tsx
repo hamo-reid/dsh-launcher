@@ -9,6 +9,11 @@
  *
  * Layout mirrors the plugins section: a heading that carries the actions, then
  * a searchable / filterable card grid with local pagination.
+ *
+ * The launcher does not edit a skill: an entry is a directory that may hold more
+ * than its SKILL.md, so every card opens it somewhere else instead (show the
+ * folder, or open the file in the editor) and creating one writes the launcher's
+ * scaffold for the user to take over.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Pagination, Segmented, Skeleton, Space, Typography, theme, message } from 'antd'
@@ -22,7 +27,7 @@ import SearchInput from '../components/SearchInput.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
 import Toolbar from '../components/Toolbar.tsx'
 import SkillCard from './SkillCard.tsx'
-import { SkillEditorModal, SkillNameModal } from './ExtensionsModals.tsx'
+import { SkillNameModal } from './ExtensionsModals.tsx'
 import { InstallSkillModal, type DshScope } from './LibraryModals.tsx'
 import type { SkillLibEntry, SkillLibIssue, SkillLibOverviewRow } from '../../../shared/types.ts'
 
@@ -30,13 +35,6 @@ import type { SkillLibEntry, SkillLibIssue, SkillLibOverviewRow } from '../../..
 const CARDS_PER_PAGE = 24
 
 type Bucket = 'all' | 'installed' | 'notInstalled' | 'stale'
-
-interface EditorState {
-  open: boolean
-  /** The name being edited, or `null` when creating. */
-  previousName: string | null
-  text: string
-}
 
 export default function SkillsView(): JSX.Element {
   const { t } = useTranslation()
@@ -48,7 +46,6 @@ export default function SkillsView(): JSX.Element {
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState('')
   const [nameModal, setNameModal] = useState(false)
-  const [editor, setEditor] = useState<EditorState>({ open: false, previousName: null, text: '' })
   const [installEntry, setInstallEntry] = useState<SkillLibEntry | null>(null)
 
   // Repository filters + local pagination.
@@ -72,29 +69,26 @@ export default function SkillsView(): JSX.Element {
 
   useEffect(() => { void load() }, [load])
 
+  /** Create the entry from the launcher's scaffold; the user takes over in their
+   * own editor, which is what the open menu is for. */
   const create = async (name: string): Promise<void> => {
     setNameModal(false)
-    const r = await window.api.ext.libSkillScaffold(name)
-    if (!r.ok) { void message.error(apiErrorText(r)); return }
-    setEditor({ open: true, previousName: null, text: r.value })
-  }
-
-  const openEdit = async (entry: SkillLibEntry): Promise<void> => {
-    setBusy(`edit:${entry.name}`)
-    const r = await window.api.ext.libSkillRead(entry.name)
+    setBusy('create')
+    const r = await window.api.ext.libSkillCreate(name)
     setBusy('')
     if (!r.ok) { void message.error(apiErrorText(r)); return }
-    setEditor({ open: true, previousName: entry.name, text: r.value.text })
-  }
-
-  const save = async (): Promise<void> => {
-    setBusy('save')
-    const r = await window.api.ext.libSkillSave(editor.previousName, editor.text)
-    setBusy('')
-    if (!r.ok) { void message.error(apiErrorText(r)); return }
-    void message.success(t('ext.skills.saved', { name: r.value.name }))
-    setEditor({ open: false, previousName: null, text: '' })
+    void message.success(t('ext.skills.created', { name: r.value.name }))
     await load()
+  }
+
+  /** Show the entry's folder, or open its SKILL.md in the editor. */
+  const open = async (entry: SkillLibEntry, editor: boolean): Promise<void> => {
+    setBusy(`open:${entry.name}`)
+    const r = editor
+      ? await window.api.ext.libSkillOpenEditor(entry.name)
+      : await window.api.ext.libSkillReveal(entry.name)
+    setBusy('')
+    if (!r.ok) void message.error(apiErrorText(r))
   }
 
   const remove = async (entry: SkillLibEntry): Promise<void> => {
@@ -281,8 +275,8 @@ export default function SkillsView(): JSX.Element {
                     key={row.entry.name}
                     entry={row.entry}
                     installs={row.installs}
-                    editBusy={busy === `edit:${row.entry.name}`}
-                    onOpen={() => void openEdit(row.entry)}
+                    openBusy={busy === `open:${row.entry.name}`}
+                    onOpen={editor => void open(row.entry, editor)}
                     onInstall={() => setInstallEntry(row.entry)}
                     onDelete={() => void remove(row.entry)}
                   />
@@ -316,16 +310,6 @@ export default function SkillsView(): JSX.Element {
         open={nameModal}
         onCancel={() => setNameModal(false)}
         onSubmit={name => void create(name)}
-      />
-
-      <SkillEditorModal
-        open={editor.open}
-        previousName={editor.previousName}
-        text={editor.text}
-        saving={busy === 'save'}
-        onChange={text => setEditor(prev => ({ ...prev, text }))}
-        onCancel={() => setEditor({ open: false, previousName: null, text: '' })}
-        onSubmit={() => void save()}
       />
 
       <InstallSkillModal

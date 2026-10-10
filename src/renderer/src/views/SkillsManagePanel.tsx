@@ -1,9 +1,16 @@
 /**
  * Skills installed on ONE dsh — the dsh side of the extensions model. dsh
- * discovers skills from filesystem roots, so this panel lists what the dsh
- * holds, creates and edits the ones living in its writable root, drops entries
+ * discovers skills from filesystem roots, so this panel lists what the dsh holds,
+ * creates one in its writable root from the launcher's scaffold, drops entries
  * into the recycle bin, imports a zip, and installs from the launcher-global
  * library. A copy that drifted from its library entry is flagged for reinstall.
+ *
+ * The launcher does not EDIT a skill: a skill is a directory — a SKILL.md beside
+ * scripts, references and assets — so every card opens it somewhere else instead
+ * (show the folder, with its resource files in it, or open the file in the
+ * editor), and creating one only writes the scaffold to start from. That is also
+ * why opening is offered on every copy, not just the writable ones: the copies
+ * worth looking at are the ones the launcher may not touch.
  *
  * Three presentation decisions, all of them about density:
  *
@@ -31,7 +38,7 @@ import EmptyState from '../components/EmptyState.tsx'
 import Panel from '../components/Panel.tsx'
 import { DropOverlay, useFileDrop } from '../components/DropZone.tsx'
 import DshSkillCard from './DshSkillCard.tsx'
-import { SkillEditorModal, SkillNameModal } from './ExtensionsModals.tsx'
+import { SkillNameModal } from './ExtensionsModals.tsx'
 import { PickLibSkillModal } from './LibraryModals.tsx'
 import type {
   SkillEntry, SkillLibInstall, SkillLibOverviewRow, SkillListing, SkillRootInfo,
@@ -42,15 +49,6 @@ const MONO: React.CSSProperties = {
   fontSize: 12,
   wordBreak: 'break-all',
 }
-
-/** The editor modal's state: a name being edited, or `null` when creating. */
-interface EditorState {
-  open: boolean
-  previousName: string | null
-  text: string
-}
-
-const CLOSED_EDITOR: EditorState = { open: false, previousName: null, text: '' }
 
 export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
   const { t } = useTranslation()
@@ -74,7 +72,6 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
   const [busy, setBusy] = useState('')
   const [installOpen, setInstallOpen] = useState(false)
   const [nameOpen, setNameOpen] = useState(false)
-  const [editor, setEditor] = useState<EditorState>(CLOSED_EDITOR)
   // Two in-flight sequences, each guarded: a response may only land for the
   // selection it was asked about (a late listing must not appear under the next
   // dsh's heading, and a late name list must not re-tag the scope as its own).
@@ -175,31 +172,29 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
     await load()
   }
 
-  /** A new skill starts from the same scaffold the writer renders, so an
-   * untouched save is already a valid SKILL.md. */
+  /** A new skill starts from the scaffold the writer renders, so what lands on
+   * disk is already a valid SKILL.md — the rest of the bundle is the user's own
+   * files, which is why creating is where the launcher stops. */
   const create = async (name: string): Promise<void> => {
     setNameOpen(false)
-    const r = await window.api.ext.skillScaffold(name)
-    if (!r.ok) { void message.error(apiErrorText(r)); return }
-    setEditor({ open: true, previousName: null, text: r.value })
-  }
-
-  const openEdit = async (entry: SkillEntry): Promise<void> => {
-    setBusy(`edit:${entry.name}`)
-    const r = await window.api.ext.skillRead(p.dshId, entry.name)
+    setBusy('create')
+    const r = await window.api.ext.skillCreate(p.dshId, name)
     setBusy('')
     if (!r.ok) { void message.error(apiErrorText(r)); return }
-    setEditor({ open: true, previousName: entry.name, text: r.value })
-  }
-
-  const save = async (): Promise<void> => {
-    setBusy('save')
-    const r = await window.api.ext.skillSave(p.dshId, editor.previousName, editor.text)
-    setBusy('')
-    if (!r.ok) { void message.error(apiErrorText(r)); return }
-    void message.success(t('ext.skills.saved', { name: r.value.name }))
-    setEditor(CLOSED_EDITOR)
+    void message.success(t('ext.skills.created', { name: r.value.name }))
     await load()
+  }
+
+  /** Show the copy's folder, or open its SKILL.md in the editor. `profile` goes
+   * along: it is the scope the listing was read with, so a copy a preset
+   * contributes resolves to the same file the card was rendered from. */
+  const open = async (entry: SkillEntry, editor: boolean): Promise<void> => {
+    setBusy(`open:${entry.name}`)
+    const r = editor
+      ? await window.api.ext.skillOpenEditor(p.dshId, entry.name, profile)
+      : await window.api.ext.skillReveal(p.dshId, entry.name, profile)
+    setBusy('')
+    if (!r.ok) void message.error(apiErrorText(r))
   }
 
   const importZip = async (zipPath?: string): Promise<void> => {
@@ -235,8 +230,8 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
   })
 
   /** Which of one card's actions is running, from the panel's single busy key. */
-  const busyOf = (name: string): 'edit' | 'reinstall' | null => {
-    if (busy === `edit:${name}`) return 'edit'
+  const busyOf = (name: string): 'open' | 'reinstall' | null => {
+    if (busy === `open:${name}`) return 'open'
     if (busy === `reinstall:${name}`) return 'reinstall'
     return null
   }
@@ -330,7 +325,7 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
                             entry={entry}
                             cell={cellFor(entry.name)}
                             busy={busyOf(entry.name)}
-                            onEdit={() => void openEdit(entry)}
+                            onOpen={editor => void open(entry, editor)}
                             onReinstall={() => void reinstall(entry)}
                             onDelete={() => void remove(entry)}
                           />
@@ -362,15 +357,6 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
         open={nameOpen}
         onCancel={() => setNameOpen(false)}
         onSubmit={name => void create(name)}
-      />
-      <SkillEditorModal
-        open={editor.open}
-        previousName={editor.previousName}
-        text={editor.text}
-        saving={busy === 'save'}
-        onChange={text => setEditor(prev => ({ ...prev, text }))}
-        onCancel={() => setEditor(CLOSED_EDITOR)}
-        onSubmit={() => void save()}
       />
     </>
   )

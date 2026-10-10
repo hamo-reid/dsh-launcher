@@ -1,4 +1,6 @@
-/** Name a new skill: the name becomes a directory, so it is validated up front. */
+/** Name a new skill: the name becomes a directory holding the scaffold, so it is
+ * validated up front. What the launcher writes is only a starting point — the
+ * card's open menu is how the skill is actually written from here on. */
 import { useEffect, useState } from 'react'
 import { Input, Modal, Space, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
@@ -53,6 +55,3 @@ export function SkillNameModal(props: SkillNameModalProps): JSX.Element {
     </Modal>
   )
 }
-
-/** Full-file editor for one skill. The frontmatter `name` is authoritative:
- * changing it renames the bundle dir on save (validated main-side). */

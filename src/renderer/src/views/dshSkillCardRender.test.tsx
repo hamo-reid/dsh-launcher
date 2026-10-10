@@ -3,10 +3,11 @@
  * library thinks of it, and which actions this copy may offer.
  *
  * Rendering goes through `react-dom/server` (already a dependency — no DOM, no
- * test-only renderer). Two things are deliberately not asserted: the kebab's menu
- * items (an antd `Dropdown` renders through a portal, so they are absent here) and
- * the problem tag's tooltip (rendered on hover) — the reason reaches the page as the
- * tag's tooltip, and `skillInstallRender.test.tsx` pins the tag itself.
+ * test-only renderer). What is deliberately not asserted: the open menu's two
+ * entries and the kebab's items (an antd `Dropdown` renders through a portal, so
+ * they are absent here — the button's accessible name is what proves the menu) and
+ * the problem tag's tooltip (rendered on hover), which `skillInstallRender.test.tsx`
+ * pins as a tag.
  */
 import { beforeAll, describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -41,7 +42,7 @@ const card = (skill: SkillEntry, install: SkillLibInstall | undefined): string =
         entry={skill}
         cell={install}
         busy={null}
-        onEdit={() => undefined}
+        onOpen={() => undefined}
         onReinstall={() => undefined}
         onDelete={() => undefined}
       />
@@ -77,12 +78,16 @@ describe('a skill card on the dsh panel', () => {
     expect(html).not.toContain('>This dsh<')
   })
 
-  it('offers editing only where the copy may be edited', () => {
+  it('offers the one open menu on every copy, and never an editor of its own', () => {
     const mine = card(entry(), undefined)
-    expect(mine).toContain('Edit')
-    // A read-only root contributes a skill the panel can show but not change.
+    expect(mine).toContain('Open: notes')
+    // The launcher does not edit a skill: a text box here could only ever hold part
+    // of a bundle, so the menu's two destinations are the whole offer.
+    expect(mine).not.toContain('Edit')
+    // A read-only root's copy opens the same way — reading a skill is not writing
+    // one, and those are the copies worth looking at.
     const foreign = card(entry({ source: 'preset', editable: false }), undefined)
-    expect(foreign).not.toContain('Edit')
+    expect(foreign).toContain('Open: notes')
     expect(foreign).toContain('From a preset')
   })
 

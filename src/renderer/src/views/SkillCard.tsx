@@ -1,6 +1,6 @@
-/** One skill-library card for the repository grid — mirrors PluginCard: the
- * upper region opens the editor; the footer carries the "install to dsh…"
- * action and a kebab with edit / recycle-bin delete. The usage line summarizes
+/** One skill-library card for the repository grid — mirrors PluginCard: the body
+ * states what the entry is; the footer carries the "install to dsh…" action, the
+ * open menu, and a kebab with the recycle-bin delete. The usage line summarizes
  * where the skill is installed (installed copies are matched by frontmatter
  * `name`). All colours derive from theme tokens per docs/ui-guidelines.md. */
 import { useState } from 'react'
@@ -8,6 +8,7 @@ import { Button, Tag, Tooltip, theme } from 'antd'
 import { useTranslation } from 'react-i18next'
 import ConfirmMenu, { type MenuAction } from '../components/ConfirmMenu.tsx'
 import { installCellColour, installProblems } from '../lib/skillInstallState.ts'
+import SkillOpenMenu from './SkillOpenMenu.tsx'
 import type { SkillLibEntry, SkillLibInstall } from '../../../shared/types.ts'
 
 interface SkillCardProps {
@@ -15,9 +16,10 @@ interface SkillCardProps {
   /** Per-dsh install states (installed / stale), each possibly carrying the reason
    * it cannot be read at all. */
   installs: SkillLibInstall[]
-  /** The edit (read the file) is in flight. */
-  editBusy: boolean
-  onOpen: () => void
+  /** An open (show the folder / open the SKILL.md) is in flight. */
+  openBusy: boolean
+  /** `true` opens the SKILL.md, `false` shows the folder that holds it. */
+  onOpen: (editor: boolean) => void
   onInstall: () => void
   onDelete: () => void
 }
@@ -29,13 +31,8 @@ export default function SkillCard(p: SkillCardProps): JSX.Element {
   const { entry } = p
 
   const actions: MenuAction[] = [
-    { key: 'edit', label: t('common.edit') },
     { key: 'delete', label: t('common.delete'), danger: true, confirmText: t('ext.skills.deleteLibConfirm', { name: entry.name }) },
   ]
-  const onAction = (key: string): void => {
-    if (key === 'edit') p.onOpen()
-    else if (key === 'delete') p.onDelete()
-  }
 
   const installedCount = p.installs.filter(install => install.installed).length
   const staleCount = p.installs.filter(install => install.installed && install.stale).length
@@ -57,33 +54,21 @@ export default function SkillCard(p: SkillCardProps): JSX.Element {
         transition: 'border-color 0.15s, box-shadow 0.15s',
       }}
     >
-      {/* Upper region — clickable into the editor. */}
-      <div
-        role="button"
-        tabIndex={0}
-        aria-label={entry.name}
-        onClick={p.onOpen}
-        onKeyDown={event => {
-          if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); p.onOpen() }
-        }}
-        style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8, cursor: 'pointer', outline: 'none' }}
-      >
+      {/* The body is static: what this card can DO is in the footer, where it is
+          named (the whole body used to be a click target into a text editor). */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
         <CardBody entry={entry} installedCount={installedCount} staleCount={staleCount} problems={problems} />
       </div>
 
-      {/* Footer — "install to dsh…" is the primary action; kebab carries edit /
-          delete. */}
+      {/* Footer — "install to dsh…" is the primary action; the open menu and the
+          delete kebab sit beside it. */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: token.paddingSM, paddingTop: token.paddingSM, borderTop: `1px solid ${token.colorSplit}` }}>
         <Button size="small" type="primary" onClick={p.onInstall}>
           {t('ext.skills.installTo')}
         </Button>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-          <Tooltip title={t('common.edit')}>
-            <Button size="small" loading={p.editBusy} onClick={p.onOpen}>
-              {t('common.edit')}
-            </Button>
-          </Tooltip>
-          <ConfirmMenu actions={actions} onAction={onAction} />
+          <SkillOpenMenu name={entry.name} busy={p.openBusy} onSelect={p.onOpen} />
+          <ConfirmMenu actions={actions} onAction={key => { if (key === 'delete') p.onDelete() }} />
         </span>
       </div>
     </div>

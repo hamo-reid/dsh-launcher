@@ -11,8 +11,8 @@ import { join } from 'node:path'
 import { contextForEntry } from '../profile/appState.ts'
 import { AppError } from '../shared/errors.ts'
 import {
-  deleteSkill, findEditableSkill, importSkillZip, installZipSkills, listSkills, parseSkillText, readSkillFile, renderSkillFile,
-  scaffoldSkill, setSkillTrash, skillRoots, writeSkill, zipEntryUnsafe, zipImportProblem,
+  deleteSkill, findEditableSkill, importSkillZip, installZipSkills, listSkills, parseSkillText, renderSkillFile,
+  scaffoldSkill, setSkillTrash, skillLocationOf, skillRoots, writeSkill, zipEntryUnsafe, zipImportProblem,
 } from './skills.ts'
 import type { DshContext } from '../profile/appState.ts'
 
@@ -40,6 +40,11 @@ function makeSkill(name: string, description = `the ${name} skill`): string {
 }
 
 const USER_DSH = (): string => join(home, 'skills')
+
+/** One skill's SKILL.md text, read off the disk (the launcher has no reader of
+ * its own any more: nothing in it edits a skill's text). */
+const readSkill = (name: string, flat = false): string =>
+  readFileSync(flat ? join(USER_DSH(), `${name}.md`) : join(USER_DSH(), name, 'SKILL.md'), 'utf8')
 
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), 'pm-skills-'))
@@ -391,7 +396,7 @@ describe('write / rename / delete (writable root only)', () => {
     const entry = writeSkill(ctx(), null, makeSkill('creator', 'makes things'))
     expect(entry.editable).toBe(true)
     expect(existsSync(join(USER_DSH(), 'creator', 'SKILL.md'))).toBe(true)
-    const text = readSkillFile(ctx(), 'creator')
+    const text = readSkill('creator')
     expect(text).toContain('name: creator')
     expect(parseSkillText(text).ok).toBe(true)
   })
@@ -423,7 +428,7 @@ describe('write / rename / delete (writable root only)', () => {
     writeSkill(ctx(), null, makeSkill('taken-bundle', 'the original'))
     expect(() => writeSkill(ctx(), null, makeSkill('taken-bundle', 'the impostor')))
       .toThrow(/ext\.skillExists/)
-    expect(readSkillFile(ctx(), 'taken-bundle')).toContain('the original')
+    expect(readSkill('taken-bundle')).toContain('the original')
   })
 
   it('refuses a fresh create beside a flat file of the same name', () => {
@@ -441,9 +446,39 @@ describe('write / rename / delete (writable root only)', () => {
     // read-only root — or, as here, have been moved out of the writable one.
     skill('moved-out', makeSkill('moved-out'))
     renameSync(join(USER_DSH(), 'moved-out'), join(root, 'elsewhere-moved-out'))
-    expect(() => readSkillFile(ctx(), 'moved-out')).toThrow(/ext\.skillReadOnly/)
     expect(() => writeSkill(ctx(), 'moved-out', makeSkill('moved-out'))).toThrow(/ext\.skillReadOnly/)
     await expect(deleteSkill(ctx(), 'moved-out')).rejects.toThrow(/ext\.skillReadOnly/)
+  })
+
+  it('locates a skill by name for the page to open, read-only roots included', () => {
+    // The launcher opens a copy anywhere — the ones worth looking at are exactly
+    // the ones it may not write. A flat entry's folder is its root, which is where
+    // the file is; a bundle's folder is the bundle.
+    writeSkill(ctx(), null, makeSkill('locatable'))
+    skill('flat-locatable', makeSkill('flat-locatable'), true)
+    mkdirSync(join(custom, 'foreign'), { recursive: true })
+    writeFileSync(join(custom, 'foreign', 'SKILL.md'), makeSkill('foreign'))
+    writeFileSync(join(home, 'cordis.patch.yml'), [
+      '- id: skills',
+      `  name: '@deepseek-ai/dsh-skill-filesystem'`,
+      '  config:',
+      '    customSkillDirs:',
+      `      - ${custom}`,
+      '',
+    ].join('\n'))
+
+    // The shape is part of the answer: "open" sends a bundle in as its folder but a
+    // flat entry as the file, because a flat entry's folder is the whole root.
+    expect(skillLocationOf(ctx(), 'locatable'))
+      .toEqual({ path: join(USER_DSH(), 'locatable', 'SKILL.md'), dir: join(USER_DSH(), 'locatable'), shape: 'bundle' })
+    expect(skillLocationOf(ctx(), 'flat-locatable'))
+      .toEqual({ path: join(USER_DSH(), 'flat-locatable.md'), dir: USER_DSH(), shape: 'flat' })
+    // A read-only root is located just the same.
+    expect(skillLocationOf(ctx(), 'foreign').dir).toBe(join(custom, 'foreign'))
+    // Not found is a business answer, not an internal error.
+    expect(() => skillLocationOf(ctx(), 'never-here')).toThrow(/ext\.skillNotFound/)
+    // Leave no skill behind for the tests that declare the same root.
+    rmSync(custom, { recursive: true, force: true })
   })
 
   it('moves the bundle to the injected recycle bin on delete', async () => {
@@ -470,7 +505,7 @@ describe('write / rename / delete (writable root only)', () => {
     expect(existsSync(join(USER_DSH(), 'flat-edit', 'SKILL.md'))).toBe(true)
     // One skill, not two: the flat file no longer shadows the bundle.
     expect(listSkills(ctx()).skills.filter(s => s.name === 'flat-edit')).toHaveLength(1)
-    expect(readSkillFile(ctx(), 'flat-edit')).toContain('edited in place')
+    expect(readSkill('flat-edit')).toContain('edited in place')
   })
 })
 

@@ -18,6 +18,7 @@
 | skill 可写范围 | 仅 user-dsh 根（`<dshHome>/skills`）；其余根只读展示 |
 | profile 作用域（两个页面共用） | 名字与「它读自哪台 dsh」绑成一个值（`renderer/src/lib/profileScope.ts`）；页面**只问本 dsh 名单确认过的名字**，切 dsh 时旧名字整体作废 |
 | 技能列表的呈现 | dsh 面板 = **卡片栅格**（一张卡一个 skill，自带操作），扫描的根在它上方作为一块安静的信息块；dsh 面板与技能库都以**面板自身**为 zip 落点（覆盖层只在手势期间存在，`components/DropZone.tsx`），不再有常驻的拖放方块；来源文案/颜色只有一份（`renderer/src/lib/skillSource.ts`） |
+| skill 的「编辑」 | **Launcher 没有 skill 文本编辑器**：skill 是目录（SKILL.md 之外还有脚本、引用、素材），文本框只能装下其中一部分。每张卡片给的是**打开下拉**（在文件管理器中显示 / 用 VS Code 打开，`views/SkillOpenMenu.tsx`），与 preset 行的「插件列表交给外部编辑器」是同一条规矩；「新建」只写脚手架，见 §3.3 |
 
 ## 2. MCP
 
@@ -112,24 +113,38 @@ config 行（`- id: … / name: '@deepseek-ai/dsh-skill-filesystem'`）从 **hom
 **dsh 静默忽略**不合格文件，Launcher 则以 issue 形式点名文件与原因 —— 这是两处唯一的
 行为差异，且只差在「可见性」上。
 
-### 3.3 写入 / 重命名 / 删除
+### 3.3 新建 / 打开 / 删除
 
-写入口在 **dsh 可写根**（`ext:skill*`）与 **库**（`ext:libSkill*`）两侧同形：一侧管「这个 dsh 上的副本」，
-一侧管「launcher 全局的库」，页面**成对使用，不互相借用**（脚手架也不例外：`ext:skillScaffold` /
-`ext:libSkillScaffold`）。
+入口在 **dsh 可写根**（`ext:skill*`）与 **库**（`ext:libSkill*`）两侧同形：一侧管「这个 dsh 上的副本」，
+一侧管「launcher 全局的库」，页面**成对使用，不互相借用**。
 
-- **写**（`writeSkill` / `ext:skillSave`）：整文件文本编辑，frontmatter `name` 是权威名称；改名时先在
-  同根内 rename bundle 目录；写后校验回读。文本必须是字符串且不超过 **256 KB**，超出在 IPC 边界拒绝。
-- **拒绝覆盖**：**新建**（`previousName === null`）时可写根里已有 `<name>/` 或 `<name>.md` 即拒绝
-  （`ext.skillExists`）—— 编辑器此刻手上没有任何可读的旧内容，没有这道守卫就会静默替换既有
-  `SKILL.md`（或在一个名字下留下两份）。改名撞名同样拒绝；只有「原地编辑」（`previousName === name`）
-  才允许落在既有目录上，且那条路径会顺手删掉同名的扁平文件。
-- **读**（`readSkillFile` / `ext:skillRead`）：只读可写根内的条目。名字存在但不在可写根（project /
-  custom / agents / bundled）时以 `ext.skillReadOnly` 拒绝，而不是 `internal` —— 那是业务答案，不是异常。
-- **新建**：先取名字（slug 校验走 `shared/skill.ts` 的 `SKILL_NAME_RE`），主进程用与写入
-  相同的渲染器生成脚手架（占位描述可解析，直接保存即合法）。
-- **删除**（`deleteSkill`）：主进程**自行解析条目**（调用方无法把可写根之外的路径传进
-  来），经注入的 `shell.trashItem` 移入系统回收站。
+**Launcher 不编辑 skill 的文本。** skill 是**目录**：SKILL.md 之外还有脚本、引用、素材，文本框永远只装得下
+其中一部分，所以「改这个 skill」等于把它交给外部编辑器 —— 页面给的是两个去处（`views/SkillOpenMenu.tsx`，
+与 preset 行同一个控件、同一套文案），而不是一个编辑器。由此定下三条：
+
+- **新建**（`ext:skillCreate` / `ext:libSkillCreate`；core 里是 `writeSkill(ctx, null, scaffoldSkill(name))` /
+  `writeSkillLib(null, scaffoldSkill(name))`）：只写 launcher **自己的脚手架** —— frontmatter 带名字、占位
+  描述可解析，落盘就是 dsh 认的合法 SKILL.md；其余文件是用户自己的。名字先过 `SKILL_NAME_RE`（它会成为目录名）。
+  **拒绝覆盖**：可写根/库里已有 `<name>/` 或 `<name>.md` 即 `ext.skillExists`（bundle 与扁平两种形态都算），
+  launcher 从不写掉既有的 skill。
+- **打开**（`skillLocationOf` / `ext:skillReveal` / `ext:skillOpenEditor`；库侧 `findSkillLibEntry` + 同名两个通道）：
+  - 解析在**完整清单**里按名字做，不是只找可写根 —— **值得看的那份副本，恰好常是 launcher 不能写的那份**
+    （preset 随包 / agents / custom 一律能打开）。`profile` 参数决定哪些 preset 根参与组合，必须是渲染那份清单时
+    用的同一个，否则预设根的副本会解析不到；同名多份时取 rank 最靠前的一份，也就是 dsh 自己会加载的那份。
+  - 两个去处各自给的**正是那个「东西」本身**：
+    - **在文件管理器中显示** → **目录**：bundle 目录本身（资源文件就在里面），扁平 `<name>.md` 则是它所在的根。
+    - **用 VS Code 打开** → 同样是**这个 skill 自己**：bundle 给的是**它的目录**（编辑器把目录当工作区打开，
+      脚本与引用直接出现在 SKILL.md 旁边 —— 用户明确要的就是这个），扁平单文件给的是**那个 `.md` 文件**：
+      扁平条目的目录是整个根，把根当工作区打开会是"所有别的 skill"，不是这一个。
+    - 判据是 `skillLocationOf` 返回的 `shape`（库侧 `skillLibShape`），不是"有没有 `.md` 后缀"这类猜测。
+      两者都走 `vscode://file/<path>` / `shell.openPath`（与 preset 同一调用），协议 URL 一律正斜杠，含 Windows 盘符。
+    - **待真机核对**：`vscode://file/<目录>` 是否被编辑器按文件夹打开成工作区（本机 VS Code 已装、`vscode:`
+      协议已注册，但 handler 侧行为未实测）。若不是，退路是给目录补一个尾斜杠，改动只有一处。
+  - 找不到是业务答案（`ext.skillNotFound`），不是 `internal`：名字可能属于另一台 dsh，也可能在渲染与点击之间被删掉。
+- **删除**（`deleteSkill`）：主进程**自行解析条目**（调用方无法把可写根之外的路径传进来），经注入的
+  `shell.trashItem` 移入系统回收站。
+- **备注**：core 的写入原语（`writeSkill` / `writeSkillLib` 的 `previousName` 分支）仍保留「按 frontmatter
+  改名、扁平 → bundle 升级」，由单测钉住；页面没有入口 —— 这是「不改文本」的必然结果，不是漏接线。
 - **ZIP 导入**（`importSkillZip` / `ext:skillImportZip`，库侧 `ext:libSkillImportZip`）：文件对话框选
   zip → 解压到临时 staging → 校验 → 统一改名落入目标根。
   - 识别规则：zip 根带 `SKILL.md` 即整个压缩包是一个 bundle；否则**任意深度**的每个
@@ -178,12 +193,18 @@ config 行（`- id: … / name: '@deepseek-ai/dsh-skill-filesystem'`）从 **hom
   （否则 `resolve('')` 会把扫描带进 cwd）、`!!js`
   运行时根不被 `resolve` / 不被扫描）、frontmatter 接受规则（含旧键拒绝与布尔容错）、列表 +
   issue、创建 / 改名冲突 / **新建拒绝覆盖（bundle 目录与扁平文件两种形态）** / 可写根之外的名字
-  以 `ext.skillReadOnly` 拒绝、回收站删除（仅可写根）、ZIP 导入（单包 / 根包 / 多包 / 包装层、
+  以 `ext.skillReadOnly` 拒绝、**`skillLocationOf` 按名字定位（bundle 目录、扁平文件所在的根、只读根同样能定位、
+  找不到是 `ext.skillNotFound`）**、回收站删除（仅可写根）、ZIP 导入（单包 / 根包 / 多包 / 包装层、
   无 `SKILL.md`、zip-slip 守卫、重名冲突、all-or-nothing、**探针与复制之间出现同名条目**、
   **探针恒说"空闲"时由文件系统拒绝覆盖**）。
+- `core/skills/skill-library.test.ts`：库 CRUD（新建即 bundle、按 frontmatter 改名、非法文本与撞名拒绝、
+  扁平 → bundle 升级）、**`findSkillLibEntry`（按名字取一条，没了就是 `undefined` —— 库侧「打开」的判据）**、
+  安装到 dsh（扁平 ↔ bundle 两种形态、重装覆盖）、`scanSkillInstalls` 的漂移判定。
 - `ipc/extensions/extensions.test.ts`：`ext:mcpSave` 的 id 守卫；`ext:skill*` 的端到端契约
-  （scaffold → save → read 回读、frontmatter 改名、新建拒绝覆盖、非可写名与超长文本的拒绝码、
-  zip 导入落进可写根、非 zip 路径的拒绝码）。
+  （`ext:skillCreate` 落的是可解析的脚手架、同名再建即 `ext.skillExists` 且原文件不变，`ext:skillReveal` /
+  `ext:skillOpenEditor` 分别打到 `shell.openPath`（目录）与 `shell.openExternal`（`vscode://file/…`），
+  **只读根里的副本照样能打开**，坏名字 / 不存在的名字 / 不存在的 profile 各自的拒绝码，
+  zip 导入落进可写根、非 zip 路径的拒绝码；库侧同两个动词一对，外加条目消失时的 `ext.skillNotFound`）。
 - `renderer/src/lib/profileScope.test.ts`：页面作用域的 profile 选择规则（记住仍在的、否则首个、
   没有 profile 时是 `undefined` 这个**有意义**的答案）。作用域**带 dsh 标签**：标签对不上的作用域
   一律答 `undefined` / 空名单 —— 页面在切 dsh 时组件不重挂载，无标签的名字会活过切换、被拿去问
@@ -198,13 +219,15 @@ config 行（`- id: … / name: '@deepseek-ai/dsh-skill-filesystem'`）从 **hom
 - `renderer/src/views/skillInstallRender.test.tsx`、`dshSkillCardRender.test.tsx`、
   `dshSkillsPanelRender.test.tsx`：**渲染断言**（`react-dom/server`，无 DOM、无新依赖）：
   问题标签出现在库卡片上且**不**出现"库有更新"这类结论、安装弹窗里出现理由原文与「仍要重装」；
-  dsh 侧技能卡片按同一份文案显示副本来源（本 dsh / 本机 agents）、只有可写根的副本才给「编辑」、
-  只有 `stale` 才给「重新安装」；未选 profile 的技能面板**明说** preset 根不列出、创作入口在位、
+  dsh 侧技能卡片按同一份文案显示副本来源（本 dsh / 本机 agents）、**每份副本都给同一个「打开」菜单
+  （只读根的副本也一样）且卡片上没有自己的编辑器**、只有 `stale` 才给「重新安装」；未选 profile 的技能面板
+  **明说** preset 根不列出、创作入口在位、
   **首帧是骨架**而不是空盒子或提前出现的"还没有任何 skill"、且**没有**常驻的拖放方块（面板自身就是
   拖放目标）。渲染层测试由 `vitest.config.ts` 的 `src/renderer/src/views/**/*.test.tsx` 纳入
   （coverage 仍只统计 `core`）。
   - 边界：antd 的 `Modal` 走 portal，SSR 下内容为空，所以弹窗的**主体**单独成组件
-    （`InstallSkillFields`）以便断言；tooltip 内容同理只在悬停时渲染，不做断言。
+    （`InstallSkillFields`）以便断言；tooltip 内容同理只在悬停时渲染，不做断言；**下拉菜单的两项也在 portal 里**，
+    所以「打开」只能断言按钮的可访问名（`Open: <name>`）—— 两个去处由 IPC 层那对断言钉住。
   - 仍未断言：需要 effect 的行为（例如"传入 profile 时确实以它调用了 `ext:skillList`"）——
     SSR 不跑 effect，那一半由 `core/skills/preset-roots.test.ts` 与读码覆盖。**profile 作用域这一半**
     （切 dsh 后第一次请求不带外来的 profile 名）同样测不到 effect，判据放在 `profileScope.test.ts`

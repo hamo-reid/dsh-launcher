@@ -118,6 +118,7 @@
 - 危险操作(软删、卸载、移除)用 `ConfirmMenu` 的 `confirmText` 做二次确认,**不做裸删除按钮**。行操作少(≤2 项)时用显式按钮 + `confirmDanger`(`ConfirmMenu.tsx` 导出),别塞进 kebab——藏起来的操作等于不存在。
 - 长表单可提供 表单/JSON 双模式(用 `Segmented` 切换,`CodeEditor` 做 JSON  pane):结构化输入是唯一真相源,JSON 是它的投影;JSON 非法时禁用提交,绝不在 JSON 模式下把输入反序列化回文本(会打乱光标)。
 - 诊断/探测类操作(「测试」)失败是**结果**不是错误:IPC 返回 `value.ok:false` 并在原处内联展示成因与耗时,不要弹 `message.error`;异步结果行加 `role="status" aria-live="polite"`,否则读屏器对文字变化完全静默。
+- **「打开」是欠定的一个动作**:目的地有两个(目录 / 文件),所以一律是**一个按钮 + 下拉两项**(在文件管理器中显示 / 用 VS Code 打开),不拆成并排两个图标,也不塞进 kebab —— 打开是条目的常规动作,藏起来等于不存在。preset 行与 skill 卡片共用这一形态(skill 侧收在 `views/SkillOpenMenu.tsx`);**两项都指向那个「东西」本身**:「在文件管理器中显示」给的是**目录**;「用 VS Code 打开」在 skill 上给的是**这个 skill 自己** —— bundle 是它的目录(编辑器按文件夹打开成工作区,脚本与素材就在树里),扁平单文件才是那个文件(它的"目录"是整个根,打开根等于打开别的 skill)。
 
 ### 3.7 状态反馈
 成功 / 失败统一走 antd `message`:`message.success('已保存')`、`message.error(res.error)`。不要用 alert、console 或裸 toast 自造。

@@ -96,15 +96,12 @@ export function listSkillLibrary(): { skills: SkillLibEntry[]; issues: SkillLibI
   return { skills, issues }
 }
 
-function findEntry(name: string): SkillLibEntry | undefined {
+/** One library entry by name, or `undefined`. The scan behind it is the same one
+ * every library view renders, so "found" means "the page can see it"; ties (two
+ * entries sharing a frontmatter name — hand-made, the writer refuses to create
+ * them) go to the first in scan order, which is how the grid lists them. */
+export function findSkillLibEntry(name: string): SkillLibEntry | undefined {
   return listSkillLibrary().skills.find(entry => entry.name === name)
-}
-
-/** Full text of one library skill, for the editor modal. */
-export function readSkillLibFile(name: string): { text: string; path: string } {
-  const found = findEntry(name)
-  if (found === undefined) throw new Error(`skill "${name}" is not in the library`)
-  return { text: readFileSync(found.path, 'utf8'), path: found.path }
 }
 
 /**
@@ -120,7 +117,7 @@ export function writeSkillLib(previousName: string | null, text: string): SkillL
   const destFile = join(destDir, 'SKILL.md')
   // Only a CHANGED name is a rename; editing in place keeps the bundle as is.
   const renaming = previousName !== null && previousName !== name
-  const previous = renaming ? findEntry(previousName) : undefined
+  const previous = renaming ? findSkillLibEntry(previousName) : undefined
   if (renaming && previous === undefined) {
     throw new Error(`skill "${previousName}" is not in the library`)
   }
@@ -153,7 +150,7 @@ export function writeSkillLib(previousName: string | null, text: string): SkillL
 /** Move one library skill to the OS recycle bin. The entry is resolved here so
  * nothing outside the library directory can be passed. */
 export async function deleteSkillLib(name: string): Promise<void> {
-  const found = findEntry(name)
+  const found = findSkillLibEntry(name)
   if (found === undefined) throw new Error(`skill "${name}" is not in the library`)
   if (trash === null) throw new Error('skill library trash mover is not wired')
   const target = found.dir !== skillLibraryDir() ? found.dir : found.path
