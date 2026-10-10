@@ -159,7 +159,7 @@ config.plugins     ← parts 里所有 kind ∈ {bundle, plugin, dev, mcp} 的�
 
 | 期 | 内容 | 验收 |
 |---|---|---|
-| ~~P0~~ ✅ 已完成（与组装解耦的前置缺陷） | 四个 skill 侧缺陷的修复，规则已上收 [specs/extensions.md](../specs/extensions.md) §3.1、§3.4 | 四个 preset 自带 skill 在技能页可见（**选定 profile 后**；未选时页面明说 preset 根不列出）；`!!js` 不再生成幻影根；坏路径不炸总览（`6b80b84` / `db83573` / `f652479` / `4fe1e65`；技能页那一半在 `4465853`，判据见 [specs/extensions.md](../specs/extensions.md) §3.3） |
+| ~~P0~~ ✅ 已完成（与组装解耦的前置缺陷） | 四个 skill 侧缺陷的修复，规则已上收 [specs/extensions.md](../specs/extensions.md) §3.1、§3.4 | 四个 preset 自带 skill 在技能页可见（**选定 profile 后**；未选时页面明说 preset 根不列出）；`!!js` 不再生成幻影根；坏路径不炸总览（`6b80b84` / `db83573` / `f652479` / `4fe1e65`；技能页那一半在 `d907843`，判据见 [specs/extensions.md](../specs/extensions.md) §3.3） |
 | P1 | `Assembly` / `Part` / `Verdict` / `Plan` 类型 + `resolve()`（纯读），先只覆盖 `skill` 与 `mcp` | 一个 assembly × 一个 target 的 plan 有完整判定与理由；无写、无网 |
 | P2 | `materialize()`：把 `installSkillToDsh` 与 mcp 写路径接到 plan 上；`preSnapshotChecks` 改为 `resolve` 的一个特例 | 落地后回读校验；plan 里 satisfied 的部件不再动盘 |
 | P3 | preset 编码器（两模型）+ 组装视图 | 目录模型编码出 `customSkillDirs: new URL('skills/', baseUrl)`；声明模型编码出两行标准行；`plugins` 块逐字保留 |
