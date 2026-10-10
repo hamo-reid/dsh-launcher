@@ -1026,6 +1026,7 @@ const zh = {
     'ext.skills.profileNoneDesc': '这是该 dsh 的机器级视图：preset 贡献的 skill 根只在某个 profile 的组合里才有意义，所以现在不列出。选一个 profile 即可看到它们。',
     'ext.skills.dropSubHintDsh': '松手即导入到该 dsh 的可写根',
     'ext.skills.emptyDescDsh': '用右上角的「新建 Skill」或「从 ZIP 导入」，也可以直接把 zip 拖到这个面板上。',
+    'ext.skills.loadFailed': '这个 dsh 的 skill 列表读不出来',
     'ext.skills.pickFromLib': '从 Skill 库安装',
     'ext.skills.upToDateTag': '已是最新',
     'ext.skills.staleTag': '库有更新',

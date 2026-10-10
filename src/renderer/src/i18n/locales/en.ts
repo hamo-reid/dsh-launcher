@@ -1028,6 +1028,7 @@ const en: typeof zh = {
     'ext.skills.profileNoneDesc': 'This is the machine-level view of the dsh: skill roots contributed by presets only exist inside a profile’s composition, so they are not listed. Pick a profile to see them.',
     'ext.skills.dropSubHintDsh': 'Drop it to import into this dsh’s writable root',
     'ext.skills.emptyDescDsh': 'Use New skill or Import ZIP above — or drop a zip anywhere on this panel.',
+    'ext.skills.loadFailed': 'This dsh’s skill list could not be read',
     'ext.skills.pickFromLib': 'Install from the skill library',
     'ext.skills.upToDateTag': 'Up to date',
     'ext.skills.staleTag': 'Library has updates',

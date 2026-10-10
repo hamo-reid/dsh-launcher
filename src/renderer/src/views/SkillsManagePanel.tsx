@@ -57,6 +57,10 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
   const { token } = theme.useToken()
   const [listing, setListing] = useState<SkillListing | null>(null)
   const [overview, setOverview] = useState<SkillLibOverviewRow[]>([])
+  // Why the last listing could not be read. Kept apart from `listing`: a refused
+  // read is not an empty dsh, and rendering it as "no skills yet" tells the user
+  // something false about their dsh (the reason is what they need).
+  const [error, setError] = useState<string | null>(null)
   // The profile names AND the choice among them are one value, tagged with the dsh
   // they were read from. This panel keeps its state across a dsh switch (the page
   // renders it without a `key`), so an untagged name would outlive the dsh it came
@@ -119,8 +123,11 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
         const fresh = await readProfiles()
         if (fresh !== null && canReaskProfile(profile, fresh)) return
       }
-      void message.error(apiErrorText(list)); return
+      void message.error(apiErrorText(list))
+      setError(apiErrorText(list))
+      return
     }
+    setError(null)
     setListing(list.value)
     if (lib.ok) setOverview(lib.value)
   }, [p.dshId, profile, readProfiles])
@@ -130,7 +137,10 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
   // A listing belongs to ONE dsh: switching must not leave the previous dsh's
   // skills on screen while the next one loads — the same rule its requests follow.
   // (A profile switch within the dsh keeps the cards: they are still this dsh's.)
-  useEffect(() => { setListing(null) }, [p.dshId])
+  useEffect(() => {
+    setListing(null)
+    setError(null)
+  }, [p.dshId])
 
   /** This skill's cell on THIS dsh: the library's verdict, or the reason the copy
    * (or the library entry) cannot be read at all. */
@@ -297,7 +307,15 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
                       )}
                     />
                   ))}
-                  {skills.length === 0
+                  {error !== null && (
+                    <Alert
+                      type="error"
+                      showIcon
+                      title={t('ext.skills.loadFailed')}
+                      description={error}
+                    />
+                  )}
+                  {error === null && (skills.length === 0
                     ? (
                       <EmptyState
                         title={t('dsh.skillsEmpty')}
@@ -318,7 +336,7 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
                           />
                         ))}
                       </div>
-                    )}
+                    ))}
                 </>
               )}
           </Space>
