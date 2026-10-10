@@ -16,6 +16,7 @@
 | MCP 凭据 | 引用式：patch 行写 `!!js process.env.<NAME>`，值不落盘 |
 | skill 删除 | 移入 **OS 回收站**（`shell.trashItem`），可随时在系统回收站恢复 |
 | skill 可写范围 | 仅 user-dsh 根（`<dshHome>/skills`）；其余根只读展示 |
+| profile 作用域（两个页面共用） | 名字与「它读自哪台 dsh」绑成一个值（`renderer/src/lib/profileScope.ts`）；页面**只问本 dsh 名单确认过的名字**，切 dsh 时旧名字整体作废 |
 
 ## 2. MCP
 
@@ -183,7 +184,11 @@ config 行（`- id: … / name: '@deepseek-ai/dsh-skill-filesystem'`）从 **hom
   （scaffold → save → read 回读、frontmatter 改名、新建拒绝覆盖、非可写名与超长文本的拒绝码、
   zip 导入落进可写根、非 zip 路径的拒绝码）。
 - `renderer/src/lib/profileScope.test.ts`：页面作用域的 profile 选择规则（记住仍在的、否则首个、
-  没有 profile 时是 `undefined` 这个**有意义**的答案）。
+  没有 profile 时是 `undefined` 这个**有意义**的答案）。作用域**带 dsh 标签**：标签对不上的作用域
+  一律答 `undefined` / 空名单 —— 页面在切 dsh 时组件不重挂载，无标签的名字会活过切换、被拿去问
+  另一台 dsh，而主进程**必须**拒绝它（`profile.notFound`；静默降级成"这台 dsh 没有 preset 根"更坏）。
+  同一文件钉住"拒绝后是否值得重问"：名字已不在本 dsh 名单里（改名 / 删除 / home 被改）→ 重读一次再问；
+  名字仍在名单里 → 那次拒绝是真的，照实报。
 - `renderer/src/lib/skillInstallState.test.ts`：单元格状态判定 —— `problem` 压过 `installed`/`stale`
   的一切结论（"读不出"不是"有更新"），以及状态 → 标签/颜色的映射。
 - `renderer/src/views/skillInstallRender.test.tsx`、`dshSkillsPanelRender.test.tsx`：**渲染断言**
@@ -194,7 +199,10 @@ config 行（`- id: … / name: '@deepseek-ai/dsh-skill-filesystem'`）从 **hom
   - 边界：antd 的 `Modal` 走 portal，SSR 下内容为空，所以弹窗的**主体**单独成组件
     （`InstallSkillFields`）以便断言；tooltip 内容同理只在悬停时渲染，不做断言。
   - 仍未断言：需要 effect 的行为（例如"传入 profile 时确实以它调用了 `ext:skillList`"）——
-    SSR 不跑 effect，那一半由 `core/skills/preset-roots.test.ts` 与读码覆盖。
+    SSR 不跑 effect，那一半由 `core/skills/preset-roots.test.ts` 与读码覆盖。**profile 作用域这一半**
+    （切 dsh 后第一次请求不带外来的 profile 名）同样测不到 effect，判据放在 `profileScope.test.ts`
+    的纯函数里，接线由读码 + 真机日志核对补齐（在 DSH 页反复切 dsh，`main-<DATE>.log` 不得新增
+    `ipc fail: ext:skillList`）。
 - `core/skills/preset-roots.test.ts`：preset 贡献根 —— 目录模型的 `skills/`、声明模型走自己的解析
   链、自身不带 skill 的 preset 跳过；无 profile / profile 不挂 preset 模型 / preset 包未安装均不
   产出根；rank 300 且永不 writable；profile 组合声明模型时不再认已退役的目录模型。

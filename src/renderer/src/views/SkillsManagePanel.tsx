@@ -10,12 +10,14 @@
  * only inside a profile's composition, so a listing without one is the
  * machine-level answer — and it says so, rather than quietly omitting those rows.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Alert, Button, Empty, Select, Space, Tag, Tooltip, theme, message } from 'antd'
 import { PlusOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
-import { nextProfileChoice } from '../lib/profileScope.ts'
+import {
+  canReaskProfile, profileScope, scopeNames, scopeProfile, type ProfileScope,
+} from '../lib/profileScope.ts'
 import { installCellColour, installCellState } from '../lib/skillInstallState.ts'
 import Panel from '../components/Panel.tsx'
 import ConfirmMenu, { type MenuAction } from '../components/ConfirmMenu.tsx'
@@ -64,42 +66,70 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
   const { token } = theme.useToken()
   const [listing, setListing] = useState<SkillListing | null>(null)
   const [overview, setOverview] = useState<SkillLibOverviewRow[]>([])
-  const [profiles, setProfiles] = useState<string[]>([])
-  const [profile, setProfile] = useState<string>()
+  // The profile names AND the choice among them are one value, tagged with the dsh
+  // they were read from. This panel keeps its state across a dsh switch (the page
+  // renders it without a `key`), so an untagged name would outlive the dsh it came
+  // from and be sent to the next one — a refusal core has to make, since a silently
+  // dropped profile reads as "this dsh contributes nothing".
+  const [scope, setScope] = useState<ProfileScope | null>(null)
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState('')
   const [installOpen, setInstallOpen] = useState(false)
   const [nameOpen, setNameOpen] = useState(false)
   const [editor, setEditor] = useState<EditorState>(CLOSED_EDITOR)
+  // Two in-flight sequences, each guarded: a response may only land for the
+  // selection it was asked about (a late listing must not appear under the next
+  // dsh's heading, and a late name list must not re-tag the scope as its own).
+  const profileRead = useRef(0)
+  const listingRead = useRef(0)
 
-  // The profile list follows the dsh; the current choice survives a refresh while
-  // it still exists, and falls back to the first profile otherwise. `undefined`
-  // stays reachable — the select can be cleared — and means the machine-level
-  // view, which the hint below states rather than hides.
-  useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      const r = await window.api.dsh.profiles(p.dshId)
-      if (cancelled) return
-      if (!r.ok) { void message.error(apiErrorText(r)); return }
-      const names = r.value.map(entry => entry.name)
-      setProfiles(names)
-      setProfile(prev => nextProfileChoice(prev, names))
-    })()
-    return () => { cancelled = true }
+  /** Read THIS dsh's profile names into the scope, keeping the remembered name,
+   * and return them — a refused listing needs to know whether asking again is
+   * worth it. A failed read writes nothing, so the scope keeps its previous tag
+   * and the derived profile stays `undefined` rather than pointing at names this
+   * dsh never confirmed. `null` means the read itself did not answer. */
+  const readProfiles = useCallback(async (): Promise<readonly string[] | null> => {
+    const mine = profileRead.current + 1
+    profileRead.current = mine
+    const r = await window.api.dsh.profiles(p.dshId)
+    if (profileRead.current !== mine) return null
+    if (!r.ok) { void message.error(apiErrorText(r)); return null }
+    const names = r.value.map(entry => entry.name)
+    setScope(prev => profileScope(p.dshId, names, prev?.chosen))
+    return names
   }, [p.dshId])
 
+  useEffect(() => { void readProfiles() }, [readProfiles])
+
+  // `undefined` stays reachable — the select can be cleared — and means the
+  // machine-level view, which the hint below states rather than hides.
+  const profile = scopeProfile(scope, p.dshId)
+  const names = scopeNames(scope, p.dshId)
+
   const load = useCallback(async (): Promise<void> => {
+    const mine = listingRead.current + 1
+    listingRead.current = mine
     setLoading(true)
     const [list, lib] = await Promise.all([
       window.api.ext.skillList(p.dshId, profile),
       window.api.ext.libSkillOverview(),
     ])
+    if (listingRead.current !== mine) return
     setLoading(false)
-    if (!list.ok) { void message.error(apiErrorText(list)); return }
+    if (!list.ok) {
+      // A name this dsh no longer has — its home moved, or the profile was deleted
+      // or renamed while this page stayed open: re-read the list and ask again
+      // through the reconciled choice, instead of reporting a refusal the page
+      // itself caused. A name still listed means the refusal is real.
+      if (profile !== undefined) {
+        const fresh = await readProfiles()
+        if (fresh !== null && canReaskProfile(profile, fresh)) return
+      }
+      void message.error(apiErrorText(list)); return
+    }
     setListing(list.value)
     if (lib.ok) setOverview(lib.value)
-  }, [p.dshId, profile])
+  }, [p.dshId, profile, readProfiles])
 
   useEffect(() => { void load() }, [load])
 
@@ -206,9 +236,9 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
         placeholder={t('ext.skills.profile')}
         aria-label={t('ext.skills.profile')}
         allowClear
-        disabled={profiles.length === 0}
-        options={profiles.map(name => ({ value: name, label: name }))}
-        onChange={(value?: string) => setProfile(value)}
+        disabled={names.length === 0}
+        options={names.map(name => ({ value: name, label: name }))}
+        onChange={(value?: string) => setScope(prev => (prev === null ? null : { ...prev, chosen: value }))}
       />
       <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => setNameOpen(true)}>
         {t('ext.skills.add')}

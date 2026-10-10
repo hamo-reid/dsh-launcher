@@ -26,7 +26,9 @@ import {
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
-import { nextProfileChoice } from '../lib/profileScope.ts'
+import {
+  canReaskProfile, profileScope, scopeNames, scopeProfile, type ProfileScope,
+} from '../lib/profileScope.ts'
 import { presetReadOnlyHintKey, presetRowActions, type PresetRowAction } from '../lib/presetRow.ts'
 import { presetTakenIds } from '../lib/presetCreate.ts'
 import AppShell from '../components/AppShell.tsx'
@@ -87,8 +89,10 @@ export default function PresetsSection(): JSX.Element {
   // Local view selection only — the launcher has no global "active dsh", so
   // this decides which roster is shown and nothing else.
   const [selectedId, setSelectedId] = useState<string>()
-  const [profiles, setProfiles] = useState<string[]>([])
-  const [profile, setProfile] = useState<string>()
+  // The profile names AND the chosen one are one value TAGGED with the dsh they
+  // were read from: this page swaps dsh in place, so an untagged name would be
+  // sent to a dsh that does not have it — which core refuses (`profile.notFound`).
+  const [scope, setScope] = useState<ProfileScope | null>(null)
   const [listing, setListing] = useState<PresetListing | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -96,8 +100,17 @@ export default function PresetsSection(): JSX.Element {
   const [editing, setEditing] = useState<PresetListItem | null>(null)
   // The open create dialog and what it opens on, or null while it is closed.
   const [create, setCreate] = useState<{ mode: PresetCreateMode; from: string } | null>(null)
-  // Guards a late response from a profile the page has already left.
-  const generation = useRef(0)
+  // Two in-flight sequences, each guarded: a response may only land for the
+  // selection it was asked about.
+  const profileRead = useRef(0)
+  const listingRead = useRef(0)
+
+  // The profile this page shows: `undefined` until the selected dsh's own name
+  // list has arrived, and after that only ever a name that list confirmed. Every
+  // write below passes THIS value, so the page can never ask about a profile the
+  // selected dsh does not have.
+  const profile = scopeProfile(scope, selectedId)
+  const names = scopeNames(scope, selectedId)
 
   const refreshDshes = useCallback(async (): Promise<void> => {
     const r = await window.api.dsh.list()
@@ -111,37 +124,49 @@ export default function PresetsSection(): JSX.Element {
 
   useEffect(() => { void refreshDshes() }, [refreshDshes])
 
-  // The profile list follows the dsh; the current choice survives a refresh when
-  // it still exists, and falls back to the first profile otherwise.
-  useEffect(() => {
-    if (selectedId === undefined) {
-      setProfiles([])
-      setProfile(undefined)
-      return
-    }
-    let cancelled = false
-    void (async () => {
-      const r = await window.api.dsh.profiles(selectedId)
-      if (cancelled) return
-      if (!r.ok) { void message.error(apiErrorText(r)); return }
-      const names = r.value.map(p => p.name)
-      setProfiles(names)
-      setProfile(prev => nextProfileChoice(prev, names))
-    })()
-    return () => { cancelled = true }
+  /** Read the selected dsh's profile names into the scope, keeping the remembered
+   * name, and return them (a refused listing needs to know whether asking again
+   * is worth it). A failed read writes nothing, so the page stays on "no profile
+   * to show" instead of holding another dsh's names. */
+  const readProfiles = useCallback(async (): Promise<readonly string[] | null> => {
+    if (selectedId === undefined) { setScope(null); return null }
+    const mine = profileRead.current + 1
+    profileRead.current = mine
+    const r = await window.api.dsh.profiles(selectedId)
+    if (profileRead.current !== mine) return null
+    if (!r.ok) { void message.error(apiErrorText(r)); return null }
+    const fresh = r.value.map(p => p.name)
+    setScope(prev => profileScope(selectedId, fresh, prev?.chosen))
+    return fresh
   }, [selectedId])
 
+  useEffect(() => { void readProfiles() }, [readProfiles])
+
   const load = useCallback(async (dshId: string, profileName: string): Promise<void> => {
-    const mine = generation.current + 1
-    generation.current = mine
+    const mine = listingRead.current + 1
+    listingRead.current = mine
     setLoading(true)
     const r = await window.api.preset.list(dshId, profileName)
-    if (generation.current !== mine) return
+    if (listingRead.current !== mine) return
+    if (!r.ok) {
+      // The remembered name is the thing most likely to have gone stale under this
+      // page (the dsh's home moved, or the profile was deleted / renamed): re-read
+      // the names, and when that changes the choice, let the effect reload through
+      // the reconciled one instead of reporting a refusal the page caused itself.
+      // A name still listed means the refusal is real, and a failed re-read says
+      // nothing about the listing — both are reported as they came.
+      const fresh = await readProfiles()
+      if (listingRead.current !== mine) return
+      if (fresh !== null && canReaskProfile(profileName, fresh)) return
+      setLoading(false)
+      setError(apiErrorText(r))
+      setListing(null)
+      return
+    }
     setLoading(false)
-    if (!r.ok) { setError(apiErrorText(r)); setListing(null); return }
     setError(null)
     setListing(r.value)
-  }, [])
+  }, [readProfiles])
 
   useEffect(() => {
     if (selectedId === undefined || profile === undefined) { setListing(null); return }
@@ -526,9 +551,9 @@ export default function PresetsSection(): JSX.Element {
                 value={profile}
                 placeholder={t('preset.profile')}
                 aria-label={t('preset.profile')}
-                disabled={profiles.length === 0}
-                onChange={(value: string) => setProfile(value)}
-                options={profiles.map(name => ({ value: name, label: name }))}
+                disabled={names.length === 0}
+                onChange={(value: string) => setScope(prev => (prev === null ? null : { ...prev, chosen: value }))}
+                options={names.map(name => ({ value: name, label: name }))}
               />
               {/* Long absolute paths belong behind a click, not wrapped across
                   the header where they would dominate the page. A 0.2.0-rc.1
