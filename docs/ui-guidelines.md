@@ -101,7 +101,7 @@
 ### 3.4 ActionCard(`ActionCard.tsx`) 与 ScrollModal(`ScrollModal.tsx`)
 - **`ActionCard`**:块状可点 / 可选中 / 可悬停 / 可选 `disabled` 的卡片,取代手写的 `Card` 入口卡与行条目。`selected` 显示主色左侧指示条,`hoverable` 悬停提升底色。
 - **`ScrollModal`**:带滚动体的 Modal,`bodyMax: 'md' | 'lg' | px` 封装各处重复的 `maxHeight + overflowY:auto` 弹窗;宽度传 `MODAL.wide` / `MODAL.narrow`。长表单优先用它而不是裸 `Modal`,让 footer 常驻、内容在弹窗内滚动。
-- **`DropZone` / `useFileDrop`**(`DropZone.tsx`):文件拖拽导入。hook 只挂容器(纯可视化方块不挂 handler,一次落点只触发一次);`dragover` 必须 `preventDefault`(否则浏览器把文件导航成页面);`dragleave` 用计数配对防闪烁;`App.tsx` 另有全局守卫,落在非拖拽区的文件不会导航走应用。
+- **`useFileDrop` / `DropOverlay`**（`DropZone.tsx`）：文件拖拽导入。hook 只挂容器（hook 与可见提示分离，一次落点只触发一次）；**可见提示是覆盖层**，只在拖拽中或导入进行时出现，并带 `pointerEvents: none` —— 否则覆盖层自己会变成第二个落点，落不到容器的 handler 上。**不要**再做一个常驻的虚线方块：拖拽是瞬时手势，而常驻方块要占掉近百像素版面（dsh 技能面板与技能库两处都按覆盖层改过）。`dragover` 必须 `preventDefault`（否则浏览器把文件导航成页面）；`dragleave` 用计数配对防闪烁；`App.tsx` 另有全局守卫，落在非拖拽区的文件不会导航走应用。
 
 ### 3.5 Panel(`Panel.tsx`)
 白底面板容器:把平铺的功能块(描述、表格、表单、列表)装进一块浮在画布(`colorBgLayout`)上的白色面板,让内容区读作一叠可分辨的块。可选 `title`/`extra` 头部行,`pad` 控制内边距。

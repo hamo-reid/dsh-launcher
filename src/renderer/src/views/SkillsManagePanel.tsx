@@ -1,50 +1,41 @@
 /**
  * Skills installed on ONE dsh — the dsh side of the extensions model. dsh
  * discovers skills from filesystem roots, so this panel lists what the dsh
- * holds (rank order, read-only roots tagged), creates and edits the ones living
- * in its writable root, drops entries into the recycle bin, imports a zip, and
- * installs from the launcher-global library. A copy that drifted from its library
- * entry is flagged for reinstall.
+ * holds, creates and edits the ones living in its writable root, drops entries
+ * into the recycle bin, imports a zip, and installs from the launcher-global
+ * library. A copy that drifted from its library entry is flagged for reinstall.
+ *
+ * Three presentation decisions, all of them about density:
+ *
+ * - The catalog is a GRID OF CARDS (one skill, one unit with its own actions)
+ *   rather than rows between dividers.
+ * - The roots dsh actually scans sit above it as one quiet block: they answer
+ *   "is the root I expected there?" and are read once.
+ * - The PANEL is the drop target, so importing a zip costs no layout at all —
+ *   the overlay only exists while the gesture does (`DropOverlay`).
  *
  * The PROFILE is the panel's scope, not a filter: a preset contributes skill roots
  * only inside a profile's composition, so a listing without one is the
  * machine-level answer — and it says so, rather than quietly omitting those rows.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Alert, Button, Empty, Select, Space, Tag, Tooltip, theme, message } from 'antd'
+import { Alert, Button, Select, Skeleton, Space, Tag, Tooltip, Typography, theme, message } from 'antd'
 import { PlusOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
 import {
   canReaskProfile, profileScope, scopeNames, scopeProfile, type ProfileScope,
 } from '../lib/profileScope.ts'
-import { installCellColour, installCellState } from '../lib/skillInstallState.ts'
+import { skillRootTags } from '../lib/skillSource.ts'
+import EmptyState from '../components/EmptyState.tsx'
 import Panel from '../components/Panel.tsx'
-import ConfirmMenu, { type MenuAction } from '../components/ConfirmMenu.tsx'
-import DropZone, { useFileDrop } from '../components/DropZone.tsx'
+import { DropOverlay, useFileDrop } from '../components/DropZone.tsx'
+import DshSkillCard from './DshSkillCard.tsx'
 import { SkillEditorModal, SkillNameModal } from './ExtensionsModals.tsx'
 import { PickLibSkillModal } from './LibraryModals.tsx'
 import type {
-  SkillEntry, SkillLibInstall, SkillLibOverviewRow, SkillListing,
+  SkillEntry, SkillLibInstall, SkillLibOverviewRow, SkillListing, SkillRootInfo,
 } from '../../../shared/types.ts'
-
-/** Tag colour per root origin (mirrors the dsh-side listing). */
-const SOURCE_COLOUR: Record<SkillEntry['source'], string> = {
-  'user-dsh': 'blue',
-  'user-agents': 'purple',
-  custom: 'orange',
-  bundled: 'default',
-  preset: 'cyan',
-}
-
-/** Source label key suffix (`ext.skills.source.<suffix>`). */
-const SOURCE_KEY: Record<SkillEntry['source'], 'userDsh' | 'userAgents' | 'custom' | 'bundled' | 'preset'> = {
-  'user-dsh': 'userDsh',
-  'user-agents': 'userAgents',
-  custom: 'custom',
-  bundled: 'bundled',
-  preset: 'preset',
-}
 
 const MONO: React.CSSProperties = {
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
@@ -72,7 +63,10 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
   // from and be sent to the next one — a refusal core has to make, since a silently
   // dropped profile reads as "this dsh contributes nothing".
   const [scope, setScope] = useState<ProfileScope | null>(null)
-  const [loading, setLoading] = useState(false)
+  // True from the first frame: the panel reads on mount, and a skeleton of the
+  // shape that is coming beats an empty box that then fills in (or, worse, an
+  // "no skills" line that is not true yet).
+  const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState('')
   const [installOpen, setInstallOpen] = useState(false)
   const [nameOpen, setNameOpen] = useState(false)
@@ -132,6 +126,11 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
   }, [p.dshId, profile, readProfiles])
 
   useEffect(() => { void load() }, [load])
+
+  // A listing belongs to ONE dsh: switching must not leave the previous dsh's
+  // skills on screen while the next one loads — the same rule its requests follow.
+  // (A profile switch within the dsh keeps the cards: they are still this dsh's.)
+  useEffect(() => { setListing(null) }, [p.dshId])
 
   /** This skill's cell on THIS dsh: the library's verdict, or the reason the copy
    * (or the library entry) cannot be read at all. */
@@ -216,8 +215,8 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
     void importZip(path)
   }
 
-  // The whole panel accepts drops; the DropZone block is purely visual and drops
-  // on it bubble up here, so one drop always imports once.
+  // The whole panel is the drop target: the gesture needs no block of its own, so
+  // nothing here does anything but hand the drop to `dropFiles`.
   const drop = useFileDrop({
     accept: ['.zip'],
     onDrop: files => dropFiles(files),
@@ -225,8 +224,16 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
     disabled: busy === 'import',
   })
 
+  /** Which of one card's actions is running, from the panel's single busy key. */
+  const busyOf = (name: string): 'edit' | 'reinstall' | null => {
+    if (busy === `edit:${name}`) return 'edit'
+    if (busy === `reinstall:${name}`) return 'reinstall'
+    return null
+  }
+
   const skills = listing?.skills ?? []
   const issues = listing?.issues ?? []
+  const roots = listing?.roots ?? []
   const actionRow = (
     <Space size={8} wrap>
       <Select
@@ -259,17 +266,10 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
     <>
       <div
         {...drop.handlers}
-        style={{
-          width: '100%',
-          borderRadius: token.borderRadiusLG,
-          // Highlight with an outline (not a background): the Panel is opaque and
-          // would cover anything painted behind it.
-          outline: drop.dragging ? `2px dashed ${token.colorPrimary}` : undefined,
-          outlineOffset: -2,
-        }}
+        style={{ position: 'relative', width: '100%', borderRadius: token.borderRadiusLG }}
       >
         <Panel title={t('dsh.skills')} extra={actionRow}>
-          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+          <Space direction="vertical" size={token.padding} style={{ width: '100%' }}>
             {profile === undefined && (
               <Alert
                 type="info"
@@ -278,104 +278,59 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
                 description={t('ext.skills.profileNoneDesc')}
               />
             )}
-            {listing !== null && (
-              <div style={{ color: token.colorTextTertiary, fontSize: token.fontSizeSM }}>
-                <div>{`${t('ext.skills.rootsLabel')} (${listing.roots.length})`}</div>
-                {listing.roots.map(root => (
-                  <div key={root.root} style={{ marginTop: 2 }}>
-                    <Tag color={SOURCE_COLOUR[root.source]} style={{ marginInlineEnd: 6 }}>
-                      {t(`ext.skills.source.${SOURCE_KEY[root.source]}`)}
-                    </Tag>
-                    {root.runtime === true
-                      ? (
-                        <>
-                          <Tag style={{ marginInlineEnd: 6 }}>{t('ext.skills.rootRuntime')}</Tag>
-                          <span style={MONO}>{root.path}</span>
-                        </>
-                      )
-                      : (
-                        <>
-                          {root.source === 'preset' && (
-                            <Tag color="cyan" style={{ marginInlineEnd: 6 }}>
-                              {t('ext.skills.rootFromPreset', { owner: root.root.replace(/^preset:/, '') })}
-                            </Tag>
-                          )}
-                          <span style={MONO}>{root.path}</span>
-                        </>
+            {loading && listing === null
+              ? <ListingSkeleton />
+              : (
+                <>
+                  {roots.length > 0 && <RootsBlock roots={roots} />}
+                  {issues.map((issue, i) => (
+                    <Alert
+                      key={i}
+                      type="warning"
+                      showIcon
+                      title={t('ext.skills.issueTitle')}
+                      description={(
+                        <div>
+                          <span style={{ ...MONO, fontSize: token.fontSizeSM }}>{issue.path}</span>
+                          <div style={{ marginTop: 2 }}>{issue.reason}</div>
+                        </div>
                       )}
-                  </div>
-                ))}
-              </div>
-            )}
-            {issues.map((issue, i) => (
-              <Alert
-                key={i}
-                type="warning"
-                showIcon
-                title={t('ext.skills.issueTitle')}
-                description={(
-                  <div>
-                    <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: token.fontSizeSM }}>{issue.path}</span>
-                    <div style={{ marginTop: 2 }}>{issue.reason}</div>
-                  </div>
-                )}
-              />
-            ))}
-            {skills.length === 0 && !loading && (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('dsh.skillsEmpty')} />
-            )}
-            {skills.map(entry => {
-              const cell = cellFor(entry.name)
-              const state = cell === undefined ? undefined : installCellState(cell)
-              const stale = state === 'stale'
-              const actions: MenuAction[] = [
-                ...(entry.editable ? [{ key: 'edit', label: t('common.edit') } as MenuAction] : []),
-                ...(stale || state === 'problem' ? [{ key: 'reinstall', label: t('ext.skills.reinstall') } as MenuAction] : []),
-                ...(entry.editable
-                  ? [{ key: 'delete', label: t('common.delete'), danger: true, confirmText: t('ext.skills.deleteConfirm', { name: entry.name }) } as MenuAction]
-                  : []),
-              ]
-              return (
-                <div key={`${entry.source}:${entry.path}`} style={{ borderBottom: `1px solid ${token.colorSplit}`, paddingBottom: 8 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span title={entry.name} style={{ flex: 1, minWidth: 0, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {entry.name}
-                    </span>
-                    <Tag color={SOURCE_COLOUR[entry.source]}>{t(`ext.skills.source.${SOURCE_KEY[entry.source]}`)}</Tag>
-                    {state === 'problem'
-                      ? (
-                        <Tooltip title={cell?.problem}>
-                          <Tag color={installCellColour('problem')}>{t('ext.skills.problemTag', { count: 1 })}</Tag>
-                        </Tooltip>
-                        )
-                      : stale && <Tag color={installCellColour('stale')}>{t('ext.skills.staleTag')}</Tag>}
-                    {actions.length > 0 && (
-                      <ConfirmMenu
-                        actions={actions}
-                        onAction={key => {
-                          if (key === 'edit') void openEdit(entry)
-                          else if (key === 'delete') void remove(entry)
-                          else if (key === 'reinstall') void reinstall(entry)
-                        }}
+                    />
+                  ))}
+                  {skills.length === 0
+                    ? (
+                      <EmptyState
+                        title={t('dsh.skillsEmpty')}
+                        description={t('ext.skills.emptyDescDsh')}
                       />
+                    )
+                    : (
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: token.padding }}>
+                        {skills.map(entry => (
+                          <DshSkillCard
+                            key={`${entry.source}:${entry.path}`}
+                            entry={entry}
+                            cell={cellFor(entry.name)}
+                            busy={busyOf(entry.name)}
+                            onEdit={() => void openEdit(entry)}
+                            onReinstall={() => void reinstall(entry)}
+                            onDelete={() => void remove(entry)}
+                          />
+                        ))}
+                      </div>
                     )}
-                  </div>
-                  <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                    {entry.description}
-                  </div>
-                </div>
-              )
-            })}
-            {/* Only the writable root takes a new skill, so the affordance carries
-                its own explanation rather than appearing to accept anything. */}
-            <DropZone
-              dragging={drop.dragging}
-              busy={busy === 'import'}
-              onPick={() => void importZip()}
-              subHint={t('ext.skills.dropSubHintDsh')}
-            />
+                </>
+              )}
           </Space>
         </Panel>
+        {/* The import gesture covers the whole panel for as long as it lasts — over
+            it while a zip is dragged, and while the import runs. */}
+        <DropOverlay
+          active={drop.dragging || busy === 'import'}
+          busy={busy === 'import'}
+          hint={t('ext.skills.dropHint')}
+          subHint={t('ext.skills.dropSubHintDsh')}
+        />
       </div>
       <PickLibSkillModal
         open={installOpen}
@@ -400,5 +355,82 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
         onSubmit={() => void save()}
       />
     </>
+  )
+}
+
+/** The panel's loading state, shaped like what is coming: a roots line and a row of
+ * cards. A skeleton of the right size keeps the page from jumping when the answer
+ * lands, which is the whole reason for having one (docs/ui-guidelines.md §4). */
+function ListingSkeleton(): JSX.Element {
+  const { token } = theme.useToken()
+  return (
+    <>
+      <Skeleton active title={false} paragraph={{ rows: 1 }} />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: token.padding }}>
+        {Array.from({ length: 3 }, (_, i) => (
+          <div key={i} style={{ border: `1px solid ${token.colorBorder}`, borderRadius: token.borderRadiusLG, padding: token.padding }}>
+            <Skeleton active title={false} paragraph={{ rows: 3 }} />
+          </div>
+        ))}
+      </div>
+    </>
+  )
+}
+
+/** The roots dsh actually scans, as one quiet block above the catalog.
+ *
+ * These paths are long and mostly read once ("is the root I expected in the list?"),
+ * so each stays on ONE line with the full value on hover and a copy control beside
+ * it — the treatment the presets page gives its source paths. Each row's tags come
+ * from {@link skillRootTags}, which is where the one-tag-per-fact rule lives.
+ *
+ * Exported for its own render assertion: the panel's own listing arrives through an
+ * effect, which a server render never runs (docs/TESTING.md §4). */
+export function RootsBlock(props: { roots: SkillRootInfo[] }): JSX.Element {
+  const { t } = useTranslation()
+  const { token } = theme.useToken()
+  return (
+    <div
+      style={{
+        background: token.colorFillQuaternary,
+        border: `1px solid ${token.colorSplit}`,
+        borderRadius: token.borderRadiusLG,
+        padding: `${token.paddingSM}px ${token.padding}px`,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <span style={{ fontWeight: 600, fontSize: token.fontSizeSM, color: token.colorTextSecondary }}>
+          {t('ext.skills.rootsLabel')}
+        </span>
+        <span style={{ fontSize: token.fontSizeSM, color: token.colorTextTertiary }}>{props.roots.length}</span>
+      </div>
+      <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {props.roots.map(root => (
+          <div key={root.root} style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+            {skillRootTags(root).map(tag => (
+              <Tag key={tag.key} color={tag.colour} style={{ marginInlineEnd: 0 }}>
+                {t(tag.key, tag.params)}
+              </Tag>
+            ))}
+            <Tooltip title={root.path}>
+              <span
+                style={{
+                  ...MONO,
+                  flex: 1,
+                  minWidth: 0,
+                  color: token.colorTextTertiary,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {root.path}
+              </span>
+            </Tooltip>
+            <Typography.Text copyable={{ text: root.path }} style={{ fontSize: token.fontSizeSM }} />
+          </div>
+        ))}
+      </div>
+    </div>
   )
 }

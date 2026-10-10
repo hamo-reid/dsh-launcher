@@ -1,14 +1,20 @@
 /**
- * File drop zone: a `useFileDrop` state machine (attach to a container) plus a
- * `DropZone` visual block (purely presentational — it owns no drop handler, so
- * a drop on it bubbles to the container exactly once).
+ * The file-drop kit: a `useFileDrop` state machine (attach it to the surface that
+ * accepts the file) plus the `DropOverlay` hint that covers that surface mid-drag.
  *
- * The depth counter defeats the classic flicker: every child boundary crossing
- * fires its own dragenter/dragleave pair, so a boolean flag would flap.
+ * There is deliberately no always-visible dashed BLOCK: a drop target that spends a
+ * hundred pixels of the layout on a gesture that lasts a second is a bad trade, and
+ * the surface a user would aim at is the surface itself. While a drag is over it (or
+ * an import runs) the overlay covers it — and with `pointer-events: none`, so the
+ * DROP still lands on the container's own handlers: an overlay that could receive it
+ * would be a second drop target.
+ *
+ * The depth counter defeats the classic flicker: every child boundary crossing fires
+ * its own dragenter/dragleave pair, so a boolean flag would flap.
  */
 import { useRef, useState } from 'react'
-import type { CSSProperties, DragEvent, KeyboardEvent } from 'react'
-import { Spin, Typography, theme } from 'antd'
+import type { DragEvent } from 'react'
+import { Spin, theme } from 'antd'
 import { InboxOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 
@@ -82,65 +88,46 @@ export function useFileDrop(opts: FileDropOptions): { dragging: boolean; handler
   }
 }
 
-interface DropZoneProps {
-  dragging: boolean
+interface DropOverlayProps {
+  /** Shown while a drag is over the surface, or while an import runs. */
+  active: boolean
+  /** An import is running: replaces the hint with the importing line and a spinner. */
   busy?: boolean
-  /** Click (or Enter/Space) falls back to the button flow. */
-  onPick: () => void
-  style?: CSSProperties
-  /** Overrides for the default wording — a host that is not the library card
-   * grid needs its own second line (the default one names that grid). */
-  hint?: string
+  hint: string
+  /** Second line naming what dropping does; omitted while busy. */
   subHint?: string
 }
 
-/** The always-visible dashed block. Clickable — a drop hint that cannot be
- * clicked reads as broken. */
-export default function DropZone(p: DropZoneProps): JSX.Element {
+/** The hint that covers the surface it is given, mid-drag. Render it as the last
+ * child of a `position: relative` container that carries `useFileDrop`'s handlers. */
+export function DropOverlay(p: DropOverlayProps): JSX.Element | null {
   const { t } = useTranslation()
   const { token } = theme.useToken()
-  const active = p.dragging || p.busy === true
-
-  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault()
-      p.onPick()
-    }
-  }
-
+  if (!p.active) return null
   return (
     <div
-      role="button"
-      tabIndex={0}
-      aria-label={t('ext.skills.import')}
-      onClick={() => p.onPick()}
-      onKeyDown={onKeyDown}
       style={{
-        border: `1px dashed ${active ? token.colorPrimary : token.colorBorder}`,
-        borderRadius: token.borderRadiusLG,
-        background: active ? token.colorPrimaryBg : token.colorFillQuaternary,
-        padding: `${token.paddingLG}px ${token.padding}px`,
-        minHeight: 96,
+        position: 'absolute',
+        inset: 0,
+        zIndex: 1,
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
         gap: token.paddingXS,
-        color: active ? token.colorPrimary : token.colorTextTertiary,
-        transition: 'all .15s',
-        cursor: p.busy === true ? 'wait' : 'pointer',
-        pointerEvents: p.busy === true ? 'none' : undefined,
-        ...p.style,
+        borderRadius: token.borderRadiusLG,
+        border: `2px dashed ${token.colorPrimary}`,
+        background: token.colorPrimaryBg,
+        color: token.colorPrimary,
+        pointerEvents: 'none',
       }}
     >
-      {p.busy === true ? <Spin size="small" /> : <InboxOutlined style={{ fontSize: 22 }} />}
-      <Typography.Text style={{ color: 'inherit', fontWeight: 600 }}>
-        {p.busy === true ? t('ext.skills.dropImporting') : (p.hint ?? t('ext.skills.dropHint'))}
-      </Typography.Text>
-      {p.busy !== true && (
-        <Typography.Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
-          {p.subHint ?? t('ext.skills.dropSubHint')}
-        </Typography.Text>
+      {p.busy === true ? <Spin size="small" /> : <InboxOutlined style={{ fontSize: 28 }} />}
+      <div style={{ fontWeight: 600 }}>
+        {p.busy === true ? t('ext.skills.dropImporting') : p.hint}
+      </div>
+      {p.busy !== true && p.subHint !== undefined && (
+        <div style={{ fontSize: token.fontSizeSM }}>{p.subHint}</div>
       )}
     </div>
   )

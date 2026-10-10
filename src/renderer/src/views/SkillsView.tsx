@@ -15,7 +15,7 @@ import { Alert, Button, Pagination, Segmented, Skeleton, Space, Typography, them
 import { PlusOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
-import DropZone, { useFileDrop } from '../components/DropZone.tsx'
+import { DropOverlay, useFileDrop } from '../components/DropZone.tsx'
 import EmptyState from '../components/EmptyState.tsx'
 import Panel from '../components/Panel.tsx'
 import SearchInput from '../components/SearchInput.tsx'
@@ -129,8 +129,8 @@ export default function SkillsView(): JSX.Element {
     void importZip(path)
   }
 
-  // The whole card area accepts drops (the DropZone block below is purely
-  // visual — drops on it bubble up here, so one drop always imports once).
+  // The whole card area accepts drops: the surface a user aims at IS the target, so
+  // the gesture needs no block of its own.
   const drop = useFileDrop({
     accept: ['.zip'],
     onDrop: files => dropFiles(files),
@@ -227,14 +227,7 @@ export default function SkillsView(): JSX.Element {
 
       <div
         {...drop.handlers}
-        style={{
-          width: '100%',
-          borderRadius: token.borderRadiusLG,
-          // Highlight with an outline (not a background): the Panel is opaque
-          // and would cover anything painted behind it.
-          outline: drop.dragging ? `2px dashed ${token.colorPrimary}` : undefined,
-          outlineOffset: -2,
-        }}
+        style={{ position: 'relative', width: '100%', borderRadius: token.borderRadiusLG }}
       >
       <Panel pad={false}>
         <Toolbar>
@@ -307,14 +300,16 @@ export default function SkillsView(): JSX.Element {
               )}
             </>
           )}
-          <DropZone
-            dragging={drop.dragging}
-            busy={busy === 'import'}
-            onPick={() => void importZip()}
-            style={{ marginTop: token.padding }}
-          />
         </div>
       </Panel>
+      {/* Covers the card area for as long as the gesture lasts, and while an import
+          runs. */}
+      <DropOverlay
+        active={drop.dragging || busy === 'import'}
+        busy={busy === 'import'}
+        hint={t('ext.skills.dropHint')}
+        subHint={t('ext.skills.dropSubHint')}
+      />
       </div>
 
       <SkillNameModal

@@ -29,6 +29,7 @@ import { presetSkillRoots } from './preset-roots.ts'
 import { installZipSkills } from './zip.ts'
 import { parseSkillText } from './frontmatter.ts'
 import type { ParsedSkill } from './frontmatter.ts'
+import { presetSkillRootLabel } from '../../../shared/skill.ts'
 import type { DshContext } from '../profile/appState.ts'
 import type { SkillEntry, SkillIssue, SkillListing, SkillRootInfo, SkillSource } from '../../../shared/types.ts'
 
@@ -165,7 +166,7 @@ export function skillRoots(ctx: DshContext, opts: SkillRootOptions = {}): SkillR
   // position is presentation only, and ties keep insertion order below.
   if (opts.profile !== undefined && opts.profile !== '') {
     for (const root of presetSkillRoots(ctx, opts.profile)) {
-      push(`preset:${root.owner}`, 'preset', CUSTOM_RANK, root.path, false)
+      push(presetSkillRootLabel(root.owner), 'preset', CUSTOM_RANK, root.path, false)
     }
   }
   ;(config.customSkillDirs ?? []).forEach((dir, i) => {

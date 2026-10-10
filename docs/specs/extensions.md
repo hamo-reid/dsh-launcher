@@ -17,6 +17,7 @@
 | skill 删除 | 移入 **OS 回收站**（`shell.trashItem`），可随时在系统回收站恢复 |
 | skill 可写范围 | 仅 user-dsh 根（`<dshHome>/skills`）；其余根只读展示 |
 | profile 作用域（两个页面共用） | 名字与「它读自哪台 dsh」绑成一个值（`renderer/src/lib/profileScope.ts`）；页面**只问本 dsh 名单确认过的名字**，切 dsh 时旧名字整体作废 |
+| 技能列表的呈现 | dsh 面板 = **卡片栅格**（一张卡一个 skill，自带操作），扫描的根在它上方作为一块安静的信息块；dsh 面板与技能库都以**面板自身**为 zip 落点（覆盖层只在手势期间存在，`components/DropZone.tsx`），不再有常驻的拖放方块；来源文案/颜色只有一份（`renderer/src/lib/skillSource.ts`） |
 
 ## 2. MCP
 
@@ -191,10 +192,16 @@ config 行（`- id: … / name: '@deepseek-ai/dsh-skill-filesystem'`）从 **hom
   名字仍在名单里 → 那次拒绝是真的，照实报。
 - `renderer/src/lib/skillInstallState.test.ts`：单元格状态判定 —— `problem` 压过 `installed`/`stale`
   的一切结论（"读不出"不是"有更新"），以及状态 → 标签/颜色的映射。
-- `renderer/src/views/skillInstallRender.test.tsx`、`dshSkillsPanelRender.test.tsx`：**渲染断言**
-  （`react-dom/server`，无 DOM、无新依赖）：问题标签出现在库卡片上且**不**出现"库有更新"这类结论、
-  安装弹窗里出现理由原文与「仍要重装」、未选 profile 的技能面板**明说** preset 根不列出、创作入口
-  与拖放块在位。渲染层测试由 `vitest.config.ts` 的 `src/renderer/src/views/**/*.test.tsx` 纳入
+- `renderer/src/lib/skillSource.test.ts`：来源怎么读 —— **一个事实一个标签**：preset 贡献的根只戴**一个**
+  带 owner 的标签（旧行为是"来自 preset"与"来自 preset「cordis」"两条同现，一个根读成两个），路径不是路径
+  的运行时根额外带"由运行时解析"；每个 source 都有文案键与颜色，两页共用这一份而不是各拼一遍。
+- `renderer/src/views/skillInstallRender.test.tsx`、`dshSkillCardRender.test.tsx`、
+  `dshSkillsPanelRender.test.tsx`：**渲染断言**（`react-dom/server`，无 DOM、无新依赖）：
+  问题标签出现在库卡片上且**不**出现"库有更新"这类结论、安装弹窗里出现理由原文与「仍要重装」；
+  dsh 侧技能卡片按同一份文案显示副本来源（本 dsh / 本机 agents）、只有可写根的副本才给「编辑」、
+  只有 `stale` 才给「重新安装」；未选 profile 的技能面板**明说** preset 根不列出、创作入口在位、
+  **首帧是骨架**而不是空盒子或提前出现的"还没有任何 skill"、且**没有**常驻的拖放方块（面板自身就是
+  拖放目标）。渲染层测试由 `vitest.config.ts` 的 `src/renderer/src/views/**/*.test.tsx` 纳入
   （coverage 仍只统计 `core`）。
   - 边界：antd 的 `Modal` 走 portal，SSR 下内容为空，所以弹窗的**主体**单独成组件
     （`InstallSkillFields`）以便断言；tooltip 内容同理只在悬停时渲染，不做断言。
@@ -202,7 +209,8 @@ config 行（`- id: … / name: '@deepseek-ai/dsh-skill-filesystem'`）从 **hom
     SSR 不跑 effect，那一半由 `core/skills/preset-roots.test.ts` 与读码覆盖。**profile 作用域这一半**
     （切 dsh 后第一次请求不带外来的 profile 名）同样测不到 effect，判据放在 `profileScope.test.ts`
     的纯函数里，接线由读码 + 真机日志核对补齐（在 DSH 页反复切 dsh，`main-<DATE>.log` 不得新增
-    `ipc fail: ext:skillList`）。
+    `ipc fail: ext:skillList`）。骨架屏也没有文案，只能断言 antd 的 `ant-skeleton` class —— 少数直接
+    盯标记的地方，拿不到文案时才用。
 - `core/skills/preset-roots.test.ts`：preset 贡献根 —— 目录模型的 `skills/`、声明模型走自己的解析
   链、自身不带 skill 的 preset 跳过；无 profile / profile 不挂 preset 模型 / preset 包未安装均不
   产出根；rank 300 且永不 writable；profile 组合声明模型时不再认已退役的目录模型。
