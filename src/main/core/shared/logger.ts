@@ -104,13 +104,18 @@ function consoleFormat(): ReturnType<typeof format.combine> {
     ts,
     format.splat(),
     format.printf((info) => {
-      const { message, level, timestamp, err, detail, domain } = info as Record<string, unknown>
+      const { message, level, timestamp, err, detail, domain, code } = info as Record<string, unknown>
       const fg = LEVEL_FG[level as LogLevel]
       // body (bold) · timestamp (grey) · [domain] (bold, when a child logger tags it) · level badge (severity colour) · message (default)
       const segs = [`${paint('1', '[dsh]')} ${paint('90', `[${String(timestamp)}]`)}`]
       if (domain !== undefined && domain !== '') segs.push(paint('1', `[${String(domain)}]`))
       segs.push(paint(`1;${fg}`, `[${String(level).toUpperCase()}]`))
-      const head = `${segs.join(' ')} ${String(message)}`
+      // A failure code is part of what the line SAYS, not decoration: without it
+      // `ipc fail: <channel>` names the channel and hides the reason, sending the
+      // reader to the file log for the one thing they came for. Only the IPC
+      // boundary's failure lines carry a top-level code today.
+      const reason = code === undefined || code === '' ? '' : ` (${String(code)})`
+      const head = `${segs.join(' ')} ${String(message)}${reason}`
       if (err !== undefined && err !== null) {
         const e = err as { stack?: string; message?: string }
         return `${head}\n${paint(fg, indent(e.stack ?? e.message ?? String(err)))}`

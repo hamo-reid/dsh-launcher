@@ -4,7 +4,7 @@
  * `err`, an object `extra` spreads as metadata, and stale files are pruned by
  * the rotating sink's `maxFiles`.
  */
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -44,6 +44,29 @@ async function until(pred: () => boolean, ms = 1500): Promise<void> {
     if (Date.now() - start > ms) throw new Error('timed out polling the log sink')
     await new Promise(r => setTimeout(r, 25))
   }
+}
+
+/** What the console sink writes for one call. winston writes through
+ * `console._stdout` (Node maps it to `process.stdout`), which a test runner may
+ * have swapped, so the spy goes on whichever stream the transport actually uses. */
+function captureConsole(fn: () => void): string {
+  type Writable = { write: (chunk: string | Uint8Array) => unknown }
+  const chunks: string[] = []
+  const globalConsole = console as unknown as { _stdout?: Writable; _stderr?: Writable }
+  const targets = new Set<Writable>()
+  for (const stream of [process.stdout, process.stderr, globalConsole._stdout, globalConsole._stderr]) {
+    if (stream !== undefined && typeof stream.write === 'function') targets.add(stream)
+  }
+  const spies = [...targets].map(stream => vi.spyOn(stream, 'write').mockImplementation((chunk) => {
+    chunks.push(String(chunk))
+    return true
+  }))
+  try {
+    fn()
+  } finally {
+    for (const spy of spies) spy.mockRestore()
+  }
+  return chunks.join('')
 }
 
 describe('logger', () => {
@@ -104,6 +127,18 @@ describe('logger', () => {
   it('logs only to the console when no dir is configured', () => {
     // afterEach already reset to a console-only logger; the call must not throw.
     expect(() => logger.warn('no-dir', 'x')).not.toThrow()
+  })
+
+  it('prints a failure code on the console line, and nothing when there is none', () => {
+    // The console sink prints the message and drops unstructured metadata, so a
+    // refusal used to read `ipc fail: ext:skillList` with the reason only in the
+    // file JSON — the one line a reader greps is the one that hid its own cause.
+    const withCode = captureConsole(() => { logger.debug('ipc fail: ext:skillList', { code: 'profile.notFound' }) })
+    expect(withCode).toContain('ipc fail: ext:skillList (profile.notFound)')
+    // Control: the suffix belongs to the code, not to every line.
+    const without = captureConsole(() => { logger.debug('ipc fail: ext:skillList') })
+    expect(without).toContain('ipc fail: ext:skillList')
+    expect(without).not.toContain('(')
   })
 
   it('initLogger attaches the sink, writes today, and leaves non-log files alone', async () => {
