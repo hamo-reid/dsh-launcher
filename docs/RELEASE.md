@@ -56,9 +56,17 @@ git push origin release:main
   Release 正文由 workflow 读 `docs/releases/<tag>.md`，与 tag message 保持一致。
 - **打 tag 必须带 `--cleanup=verbatim`**：`git tag -F` 默认按 `strip` 清理，会把
   changelog 里**所有 `#` 开头的行当注释删掉**——也就是标题与**每一个 `####` 分类标题**，
-  于是 tag 页只剩一串没有归属的条目，与 Release 正文对不上。历史 tag（≤ `v0.4.0-beta1`）
-  都是这样打的（`v0.4.0-beta1` 的 tag message 74 行 vs 文件 108 行），需要时可用
-  `git tag -d <tag> && git tag -a <tag> -F <file> --cleanup=verbatim` 重打。
+  于是 tag 页只剩一串没有归属的条目，与 Release 正文对不上。
+  `v0.5.0-beta1` 起都带上了它；此前的历史 tag（`v0.1.3`–`v0.4.0-beta1`）全部漏了它，
+  已于 2026-10-12 逐个重打，tag message 现在与各自的 changelog 逐字节一致
+  （发布记录文件本身未改）。`v0.1.0`–`v0.1.2` 那时还没有 `docs/releases/<tag>.md`，无从重打，保持原样。
+- **重打已发布的 tag 必须显式给出提交**：
+  `git tag -a <tag> -F docs/releases/<tag>.md --cleanup=verbatim <commit>`。
+  少了末尾那个提交，`git tag -a` 会默认把 tag 打在 **HEAD** 上——重打历史 tag 时 HEAD
+  几乎不可能是那个版本，于是一排历史 tag 会被全部指到同一个提交上。提交可用
+  `git cat-file --batch-all-objects --batch-check` 列 `tag` 类型的悬空对象找回。
+  重打后需要 `git push --force origin <tag>`：换的是 tag 对象，**它指向的提交不变**，
+  GitHub Release 与其资产不受影响（已实测）。
 - **tag 一律从 `release` 打**，避免 main/release 与 tag 指向不一致。
 - **每次发版后必须 `git push origin release:main`**，使 `main` 永不落后于最后发版
   （见 BRANCHING.md「硬性约定」）。
