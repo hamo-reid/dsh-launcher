@@ -38,7 +38,7 @@ interface UseRuns {
   select: (id: string) => void
   /** Buffered console output for one run. */
   logsOf: (id: string) => string
-  start: (profile: string, mode: RunMode | undefined, options: LaunchOptions | undefined, dshId: string, select?: boolean) => Promise<boolean>
+  start: (profile: string, mode: RunMode | undefined, options: LaunchOptions | undefined, dshId: string) => Promise<boolean>
   /** Relaunch an exited run with its own dsh + mode and saved parameters. */
   restart: (run: RunInfo) => Promise<void>
   /** Return to the launcher view (no run selected). */
@@ -130,7 +130,7 @@ export function useRuns(): UseRuns {
     return () => { alive = false }
   }, [selectedId])
 
-  const start = async (profile: string, mode: RunMode | undefined, options: LaunchOptions | undefined, dshId: string, select = true): Promise<boolean> => {
+  const start = async (profile: string, mode: RunMode | undefined, options: LaunchOptions | undefined, dshId: string): Promise<boolean> => {
     if (profile.trim() === '') return false
     const result = await window.api.run.start(profile, mode, options, dshId)
     if (!result.ok) {
@@ -143,11 +143,10 @@ export function useRuns(): UseRuns {
       }
       return false
     }
-    // The 'started' event adds it to the list; clear any stale buffer.
+    // The 'started' event adds it to the list; clear any stale buffer and show
+    // the new run — a launch always lands on its console.
     setLogs(prev => ({ ...prev, [result.value.id]: '' }))
-    // Quick launch keeps the launcher visible (so several can be started in a
-    // row); the new run still appears in the rail and turns its tile to 运行中.
-    if (select) setSelectedId(result.value.id)
+    setSelectedId(result.value.id)
     if (mode === 'shell') void message.success(t('run.openedShell', { profile }))
     return true
   }

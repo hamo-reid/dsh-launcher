@@ -1,16 +1,20 @@
 /** Run page — two tabs:
- *   - 启动 (Launch): pick a dsh, then start any of its profiles from a tile grid.
- *     A tile's play icon launches with saved parameters; its "…" icon opens the
- *     launch dialog to configure them.
+ *   - 启动 (Launch): the rail lists the registered dsh (one card each) and the
+ *     content is the selected dsh's profiles as a tile grid. A tile's play icon
+ *     launches with saved parameters AND moves to 进程管理, where the new console
+ *     is; its "…" icon opens the launch dialog to configure them first.
  *   - 进程管理 (Processes): a two-pane view (process rail + console) for every
  *     live run, plus runs that ended this session.
  *
  * Concurrency model (see docs/specs/launch.md §5): different (dsh, profile)
  * pairs run in parallel; the same pair is limited to one live process. */
 
-import { useEffect, useState, type ReactNode } from 'react'
-import { Button, Modal, Select, Space, Spin, Tabs, Tag, Tooltip, theme } from 'antd'
-import { MoreOutlined, PlayCircleOutlined, RocketOutlined, UnorderedListOutlined } from '@ant-design/icons'
+import { useEffect, useState, type ComponentType, type ReactNode } from 'react'
+import { Button, Modal, Space, Spin, Tabs, Tag, Tooltip, theme } from 'antd'
+import {
+  CloseOutlined, MoreOutlined, PlayCircleOutlined, PoweroffOutlined, ReloadOutlined, RocketOutlined,
+  UnorderedListOutlined,
+} from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import AppShell from '../components/AppShell.tsx'
 import EmptyState from '../components/EmptyState.tsx'
@@ -19,19 +23,14 @@ import Panel from '../components/Panel.tsx'
 import RunConsole from '../components/RunConsole.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
 import { RUN_DSH_KEY, readDshSelection, saveDshSelection } from '../lib/dshSelection.ts'
+import { runCardActions, runCardMeta, runDotKind, type RunCardAction, type RunDotKind } from '../lib/runCard.ts'
 import { useRuns } from './useRuns.tsx'
 import { RunConflictModal, RunFailModal } from './RunsModals.tsx'
 import RunLaunchModal from './RunLaunchModal.tsx'
 import { LAYOUT } from '../theme.ts'
-import type { DshProfileInfo, LaunchOptions, RunInfo, RunMode } from '../../../shared/types.ts'
+import type { DshEntry, DshProfileInfo, LaunchOptions, RunInfo, RunMode } from '../../../shared/types.ts'
 
 type RunTab = 'launch' | 'processes'
-
-/** A registered dsh, for the launch-target selector. */
-interface DshOption {
-  id: string
-  name: string
-}
 
 /** The fixed target a launch-parameter dialog is opened for. */
 interface ConfigTarget {
@@ -46,6 +45,19 @@ function GroupLabel({ children }: { children: ReactNode }): JSX.Element {
   return (
     <div style={{ padding: '10px 16px 4px', fontSize: token.fontSizeSM, color: token.colorTextTertiary }}>{children}</div>
   )
+}
+
+/** A rail card's actions as icons: the 280px rail has no room for the labels,
+ * and both are one click from the labelled buttons the console header shows for
+ * the selected run. Every button keeps its label in the tooltip + aria-label.
+ * `stop` is the power glyph rather than a barred circle — that one reads as
+ * "not allowed", which is not what ending this process means. */
+const RUN_ACTION_ICON: Record<RunCardAction, ComponentType> = {
+  stop: PoweroffOutlined, restart: ReloadOutlined, clear: CloseOutlined,
+}
+/** Literal keys (not `string`) so `t` stays key-checked. */
+const RUN_ACTION_LABEL: Record<RunCardAction, 'run.stop' | 'run.restart' | 'run.clear'> = {
+  stop: 'run.stop', restart: 'run.restart', clear: 'run.clear',
 }
 
 /** One launch tile: profile name + manifest counts. Only the icons act — the
@@ -128,7 +140,7 @@ export default function RunsSection(): JSX.Element {
   // Run-page-local dsh selection: remembered across restarts and tab switches,
   // falling back to the first registered dsh when the stored one is gone. Not
   // bound to any global "active dsh".
-  const [dshes, setDshes] = useState<DshOption[]>([])
+  const [dshes, setDshes] = useState<DshEntry[]>([])
   const [dshId, setDshId] = useState<string | undefined>(
     () => readDshSelection(RUN_DSH_KEY) || undefined,
   )
@@ -143,7 +155,7 @@ export default function RunsSection(): JSX.Element {
     void window.api.dsh.list().then(result => {
       if (!alive) return
       if (result.ok) {
-        setDshes(result.value.dshes.map(d => ({ id: d.id, name: d.name })))
+        setDshes(result.value.dshes)
         setDshId(prev => (prev !== undefined && result.value.dshes.some(d => d.id === prev)) ? prev : result.value.dshes[0]?.id)
       }
       setDshLoading(false)
@@ -172,6 +184,8 @@ export default function RunsSection(): JSX.Element {
   }, [run.running.length])
 
   const runningKeys = new Set(run.running.map(r => `${r.dshId}::${r.profile}`))
+  // Which dsh have a live run — marked on their rail card, matching the DSH page.
+  const runningDshIds = new Set(run.running.map(r => r.dshId))
 
   const formatElapsed = (startedAt: number): string => {
     const total = Math.max(0, Math.floor((now - startedAt) / 1000))
@@ -189,10 +203,11 @@ export default function RunsSection(): JSX.Element {
     saveDshSelection(RUN_DSH_KEY, id)
   }
 
-  // Quick launch: saved mode + parameters, stay on the launch tab.
+  // Quick launch: saved mode + parameters, then straight to the console. A
+  // refused start stays here — its toast (or the conflict modal) is the answer.
   const quickLaunch = (profile: string): void => {
     if (dshId === undefined) return
-    void run.start(profile, undefined, undefined, dshId, false)
+    void run.start(profile, undefined, undefined, dshId).then(ok => { if (ok) setTab('processes') })
   }
 
   // Configured launch from the dialog: show the process tab so it is visible.
@@ -218,44 +233,73 @@ export default function RunsSection(): JSX.Element {
     })
   }
 
-  const statusDot = (item: RunInfo): JSX.Element => (
-    <span
-      style={{
-        width: 8,
-        height: 8,
-        borderRadius: '50%',
-        flex: '0 0 auto',
-        background: item.status === 'running' ? token.colorSuccess : token.colorTextQuaternary,
-      }}
-    />
-  )
+  /** The status dot: live (green), ended abnormally (red), ended (grey — a
+   * crash and a clean exit are not the same answer). */
+  const statusDot = (item: RunInfo): JSX.Element => {
+    const kind: RunDotKind = runDotKind(item)
+    return (
+      <span
+        style={{
+          width: 8,
+          height: 8,
+          borderRadius: '50%',
+          flex: '0 0 auto',
+          background: kind === 'running'
+            ? token.colorSuccess
+            : (kind === 'failed' ? token.colorError : token.colorTextQuaternary),
+        }}
+      />
+    )
+  }
 
+  // The title row carries ONLY the dot + the profile name: the mode used to sit
+  // here as a tag and squeezed the one thing the card exists to say.
   const renderTitle = (item: RunInfo): JSX.Element => (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+    <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
       {statusDot(item)}
-      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.profile}</span>
-      <Tag style={{ marginInlineStart: 2 }} color={item.mode === 'shell' ? 'purple' : undefined}>
-        {item.mode === 'shell' ? t('run.modeShell') : t('run.modeApp')}
-      </Tag>
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.profile}</span>
     </span>
   )
 
+  const runState = (item: RunInfo): string =>
+    item.status === 'running' ? formatElapsed(item.startedAt) : t('run.exitCode', { code: item.code ?? '?' })
+
+  /** One meta line for everything else: state · mode · dsh. */
   const renderMeta = (item: RunInfo): ReactNode => {
-    const state = item.status === 'running'
-      ? formatElapsed(item.startedAt)
-      : t('run.exitCode', { code: item.code ?? '?' })
-    return item.dshName === '' ? state : `${item.dshName} · ${state}`
+    const meta = runCardMeta(item, runState(item), t(item.mode === 'shell' ? 'run.modeShell' : 'run.modeApp'))
+    return (
+      <span
+        title={meta}
+        style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+      >
+        {meta}
+      </span>
+    )
   }
 
   const runActions = (item: RunInfo): JSX.Element => (
-    item.status === 'running'
-      ? <Button size="small" danger onClick={() => void run.stop(item.id)}>{t('run.stop')}</Button>
-      : (
-        <Space size={4}>
-          <Button size="small" onClick={() => void run.restart(item)}>{t('run.restart')}</Button>
-          <Button size="small" type="text" onClick={() => run.clearExited(item.id)}>{t('run.clear')}</Button>
-        </Space>
-      )
+    <Space size={0}>
+      {runCardActions(item).map(action => {
+        const label = t(RUN_ACTION_LABEL[action])
+        const Icon = RUN_ACTION_ICON[action]
+        return (
+          <Tooltip key={action} title={label}>
+            <Button
+              size="small"
+              type="text"
+              danger={action === 'stop'}
+              icon={<Icon />}
+              aria-label={`${label} ${item.profile}`}
+              onClick={() => {
+                if (action === 'stop') void run.stop(item.id)
+                else if (action === 'restart') void run.restart(item)
+                else run.clearExited(item.id)
+              }}
+            />
+          </Tooltip>
+        )
+      })}
+    </Space>
   )
 
   const selected = run.selected
@@ -267,22 +311,40 @@ export default function RunsSection(): JSX.Element {
       flush
       contentBg={token.colorBgContainer}
       sider={
-        // The rail's header block: which dsh this page launches into. It sits
-        // here rather than in the content heading so the target is visible (and
-        // switchable) without scrolling the tile grid.
-        <div style={{ padding: 12, borderBottom: `1px solid ${token.colorSplit}` }}>
-          <div style={{ marginBottom: 6, color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>
-            {t('run.selectDsh')}
+        // The rail states its scope and lists the installs as cards: the launch
+        // target stays visible (and switchable) without scrolling the tile grid,
+        // and a card has room for what the dropdown could not say — its version,
+        // and whether anything of it is already running.
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+          <div style={{
+            display: 'flex', alignItems: 'center',
+            padding: '10px 12px', borderBottom: `1px solid ${token.colorSplit}`,
+          }}>
+            <span style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>
+              {t('run.section.dsh', { count: dshes.length })}
+            </span>
           </div>
-          <Select
-            value={dshId}
-            onChange={value => selectDsh(String(value))}
-            style={{ width: '100%' }}
-            loading={dshLoading}
-            aria-label={t('run.selectDsh')}
-            placeholder={t('dsh.selectPlaceholder')}
-            options={dshes.map(d => ({ value: d.id, label: d.name }))}
-          />
+          <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 12 }}>
+            <NavList
+              items={dshes}
+              keyOf={d => d.id}
+              selectedKey={dshId}
+              onSelect={d => selectDsh(d.id)}
+              renderTitle={d => d.name}
+              renderMeta={d => (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {d.version === '' ? t('common.unknown') : d.version}
+                  </span>
+                  {runningDshIds.has(d.id) && (
+                    <Tag color="success" style={{ marginInlineEnd: 0 }}>{t('run.running')}</Tag>
+                  )}
+                </span>
+              )}
+              loading={dshLoading}
+              empty={<EmptyState title={t('run.empty.dsh')} description={t('run.empty.dshDesc')} />}
+            />
+          </div>
         </div>
       }
     >
