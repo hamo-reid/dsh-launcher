@@ -12,7 +12,7 @@ import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
 import { issueCount, lastSeenByRow, layerLabel, layerRowCount, type LayerLabel } from '../lib/profileLayers.ts'
 import { RenameProfileModal, TransferPatchModal } from './profile-detail/ProfileDialogs.tsx'
-import LayerRows from './profile-detail/LayerRows.tsx'
+import LayerDetail from './profile-detail/LayerDetail.tsx'
 import RawEditor from './profile-detail/RawEditor.tsx'
 import DepsSection from './profile-detail/DepsSection.tsx'
 import BundlesSection from './profile-detail/BundlesSection.tsx'
@@ -20,7 +20,7 @@ import PatchSection from './profile-detail/PatchSection.tsx'
 import DiagnosticsSection from './profile-detail/DiagnosticsSection.tsx'
 import ProfileInspector from './profile-detail/ProfileInspector.tsx'
 import type { SectionKey } from './profile-detail/sections.ts'
-import { NewRowModal, PatchRowEditorModal, SourceEditModal, type EditorTarget, type RowEditKind } from './profile-detail/PatchModals.tsx'
+import { NewRowModal, SourceEditModal } from './profile-detail/PatchModals.tsx'
 import type { InsertConflict, ProfileDetail, ProfileLayer, ProfileValidation } from '../../../shared/types.ts'
 import FieldLabel from '../components/FieldLabel.tsx'
 import Loadable from '../components/Loadable.tsx'
@@ -59,7 +59,6 @@ export default function ProfileDetailView({ dshId, name, onChanged, onRenamed }:
   const [loading, setLoading] = useState(true)
 
   const [openLayer, setOpenLayer] = useState<number | null>(null)
-  const [editor, setEditor] = useState<EditorTarget | null>(null)
   const [reconciling, setReconciling] = useState(false)
 
   // Source mode: raw `cordis.patch.yml` editing in Monaco (content lives in the dialog).
@@ -165,15 +164,6 @@ const loadSeq = useRef(0)
     if (!result.ok) { void message.error(apiErrorText(result)); return }
     void load()
     onChanged?.()
-  }
-
-  const openEdit = (id: string, kind: RowEditKind): void => {
-    setOpenLayer(null)
-    const owner = lastSeen.get(id)
-    // The row's own profile layer is not an "overlap"; any other layer serving it is.
-    const ownerText = owner === undefined ? undefined : labelText(owner)
-    const overlap = ownerText !== undefined && ownerText !== t('profile.layer.profile', { name }) ? ownerText : null
-    setEditor({ id, kind, overlap })
   }
 
   const copyFromBundle = (bundle: string, id: string): void => {
@@ -667,29 +657,21 @@ const loadSeq = useRef(0)
         )}
       </div>
 
-      <ScrollModal title={activeLayer !== undefined ? labelText(layerLabel(activeLayer)) : ''} open={openLayer !== null} footer={null} onCancel={() => setOpenLayer(null)} width={MODAL.wide} bodyMax={440}>
-        {activeLayer?.source === 'profile' && (
-          <Button type="dashed" block style={{ marginBottom: token.paddingSM }} onClick={() => setNewRowOpen(true)}>{t('profile.detail.newRow')}</Button>
-        )}
+      <ScrollModal title={activeLayer !== undefined ? labelText(layerLabel(activeLayer)) : ''} open={openLayer !== null} footer={null} onCancel={() => setOpenLayer(null)} width={MODAL.wide} bodyMax={460}>
         {activeLayer !== undefined && (
-          <LayerRows
+          <LayerDetail
             layer={activeLayer}
             lastSeen={lastSeen}
+            dshId={dshId}
+            name={name}
             onToggle={(id, disabled) => void (activeLayer.source === 'home' ? toggleHome(id, disabled) : toggleProfile(id, disabled))}
             onCover={(id) => { if (activeLayer.bundle !== undefined) copyFromBundle(activeLayer.bundle, id) }}
-            onEdit={openEdit}
             onRemoveCover={removeCover}
+            onNewRow={() => setNewRowOpen(true)}
+            onSaved={() => { void load(); onChanged?.() }}
           />
         )}
       </ScrollModal>
-
-      <PatchRowEditorModal
-        dshId={dshId}
-        name={name}
-        target={editor}
-        onClose={() => setEditor(null)}
-        onSaved={() => { void load(); onChanged?.() }}
-      />
 
       <NewRowModal
         dshId={dshId}

@@ -10,7 +10,7 @@
  * 2. Being free of React and i18next, it is inside the vitest include and the
  *    branches below are actually asserted.
  */
-import type { InsertConflict, InsertConflictLayer, ProfileLayer, ProfileLayerFile, ProfileValidation } from '../../../shared/types.ts'
+import type { ClassifiedRow, InsertConflict, InsertConflictLayer, ProfileLayer, ProfileLayerFile, ProfileValidation } from '../../../shared/types.ts'
 
 /** An i18n key plus its interpolation params. */
 export interface LayerLabel {
@@ -49,7 +49,85 @@ export function layerLabel(layer: LabeledLayer): LayerLabel {
 /** How one FILE inside a layer is named. A single-file layer has no qualifier, so
  * this is the layer's own label; a multi-file bundle's file is its own identity. */
 export function fileLabel(layer: ProfileLayer, file: ProfileLayerFile): LayerLabel {
-  return layerLabel({ source: layer.source, bundle: layer.bundle, label: layer.label, file: file.file })
+  return fileNameLabel(layer, file.file)
+}
+
+/** The same label, from the file's NAME alone — what a row entry keeps of the file
+ * it came from. */
+export function fileNameLabel(layer: ProfileLayer, file: string | undefined): LayerLabel {
+  return layerLabel({ source: layer.source, bundle: layer.bundle, label: layer.label, file })
+}
+
+/** One row of a layer, flattened with the patch file that serves it. */
+export interface LayerRowEntry {
+  /** Identity inside the layer — see {@link layerRowEntries}. */
+  key: string
+  /** The bundle-relative patch file, absent when the layer holds only one. */
+  file?: string
+  row: ClassifiedRow
+}
+
+/**
+ * A layer's rows in application order, each tagged with its file.
+ *
+ * The key is `file + id`, because one bundle may declare the same id in two of its
+ * patch files (and a single file may even repeat it): the two are separate rows the
+ * host merges, and the detail pane must be able to select them independently. Two
+ * rows sharing a key would move the highlight together.
+ */
+export function layerRowEntries(layer: ProfileLayer): LayerRowEntry[] {
+  const entries: LayerRowEntry[] = []
+  for (const file of layer.files) {
+    const occurrences = new Map<string, number>()
+    for (const row of file.rows) {
+      const occurrence = occurrences.get(row.id) ?? 0
+      occurrences.set(row.id, occurrence + 1)
+      entries.push({
+        key: `${file.file ?? ''}\u0000${row.id}\u0000${occurrence}`,
+        ...(file.file === undefined ? {} : { file: file.file }),
+        row,
+      })
+    }
+  }
+  return entries
+}
+
+/** Which actions a layer's rows allow. */
+export interface RowActions {
+  canToggle: boolean
+  canCover: boolean
+  canEdit: boolean
+  canDelete: boolean
+}
+
+/** Whether a row answers the layer list's search box.
+ *
+ * Both the display name and the id are searched: the list shows the name, but the
+ * id is what a user edits in the patch file and what the tags and the override
+ * note speak of — matching only the visible text would hide the row a user is
+ * looking for. A blank query matches everything, so clearing the box restores the
+ * whole layer. */
+export function rowMatchesQuery(row: ClassifiedRow, query: string): boolean {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return true
+  return (row.name ?? '').toLowerCase().includes(needle) || row.id.toLowerCase().includes(needle)
+}
+
+/**
+ * The actions one layer's rows allow — the host's model, not a UI preference.
+ *
+ * A row a bundle ships is not editable: covering it copies it into the profile's
+ * own layer, and THAT copy is what makes it editable. The home layer's rows can
+ * only be switched on and off, and only the profile's own rows can be rewritten or
+ * dropped. One place decides, so the list and the detail pane cannot offer
+ * different things.
+ */
+export function rowActionsOf(layer: Pick<ProfileLayer, 'source' | 'bundle'>): RowActions {
+  if (layer.source === 'bundle') {
+    return { canToggle: false, canCover: layer.bundle !== undefined, canEdit: false, canDelete: false }
+  }
+  if (layer.source === 'home') return { canToggle: true, canCover: false, canEdit: false, canDelete: false }
+  return { canToggle: true, canCover: false, canEdit: true, canDelete: true }
 }
 
 /** How many rows a layer holds across all of its patch files. */

@@ -6,7 +6,10 @@
  * and getting the walk backwards would silently relabel every row in the patch list.
  */
 import { describe, expect, it } from 'vitest'
-import { fileLabel, issueCount, lastSeenByRow, layerLabel, layerRowCount } from './profileLayers.ts'
+import {
+  fileLabel, fileNameLabel, issueCount, layerRowEntries, lastSeenByRow, layerLabel, layerRowCount, rowActionsOf,
+  rowMatchesQuery,
+} from './profileLayers.ts'
 import type { ClassifiedRow, InsertConflict, ProfileLayer, ProfileValidation } from '../../../shared/types.ts'
 
 const row = (id: string): ClassifiedRow => ({ id, disabled: false, hasConfig: false, hasInsert: false })
@@ -108,6 +111,95 @@ describe('lastSeenByRow', () => {
 
   it('is empty for no layers', () => {
     expect(lastSeenByRow([]).size).toBe(0)
+  })
+})
+
+describe('layerRowEntries', () => {
+  it('flattens a single-file layer in order, with no file qualifier', () => {
+    const entries = layerRowEntries(layer('profile', ['a', 'b'], { label: 'hamo' }))
+    expect(entries.map(e => e.row.id)).toEqual(['a', 'b'])
+    expect(entries.map(e => e.file)).toEqual([undefined, undefined])
+  })
+
+  it('keeps each row with the file of its bundle, in application order', () => {
+    const entries = layerRowEntries(multiLayer('web', [['cordis.patch.yml', ['a']], ['presets/standard.patch.yml', ['b']]]))
+    expect(entries.map(e => [e.file, e.row.id])).toEqual([
+      ['cordis.patch.yml', 'a'],
+      ['presets/standard.patch.yml', 'b'],
+    ])
+  })
+
+  // The pane is driven by this key: two rows sharing one would select together.
+  it('gives one id declared by two files two distinct keys', () => {
+    const entries = layerRowEntries(multiLayer('web', [['a.yml', ['web']], ['b.yml', ['web']]]))
+    expect(new Set(entries.map(e => e.key)).size).toBe(2)
+  })
+
+  it('gives an id repeated inside one file two distinct keys', () => {
+    const entries = layerRowEntries(layer('profile', ['web', 'web'], { label: 'hamo' }))
+    expect(entries.map(e => e.row.id)).toEqual(['web', 'web'])
+    expect(new Set(entries.map(e => e.key)).size).toBe(2)
+  })
+
+  it('is empty for a layer with no rows', () => {
+    expect(layerRowEntries(layer('home', []))).toEqual([])
+  })
+})
+
+describe('fileNameLabel', () => {
+  it('matches the file label of the file it names', () => {
+    const many = multiLayer('web', [['a.yml', ['a']], ['b.yml', ['b']]])
+    expect(fileNameLabel(many, 'b.yml')).toEqual(fileLabel(many, many.files[1]))
+  })
+
+  it('is the layer\'s own label for a single-file layer', () => {
+    const one = layer('bundle', ['a'], { bundle: 'base' })
+    expect(fileNameLabel(one, undefined)).toEqual({ key: 'profile.layer.bundle', options: { name: 'base' } })
+  })
+})
+
+describe('rowActionsOf', () => {
+  it('lets a bundle row be covered, and nothing else', () => {
+    expect(rowActionsOf({ source: 'bundle', bundle: 'base' }))
+      .toEqual({ canToggle: false, canCover: true, canEdit: false, canDelete: false })
+  })
+
+  it('offers nothing when a bundle layer carries no package name', () => {
+    // The cover write needs a bundle to copy FROM, so the action is unavailable.
+    expect(rowActionsOf({ source: 'bundle' })).toEqual({ canToggle: false, canCover: false, canEdit: false, canDelete: false })
+  })
+
+  it('lets a home row be toggled, and nothing else', () => {
+    expect(rowActionsOf({ source: 'home' })).toEqual({ canToggle: true, canCover: false, canEdit: false, canDelete: false })
+  })
+
+  it('lets the profile\'s own row be edited and dropped', () => {
+    expect(rowActionsOf({ source: 'profile' })).toEqual({ canToggle: true, canCover: false, canEdit: true, canDelete: true })
+  })
+})
+
+describe('rowMatchesQuery', () => {
+  const named = (over: Partial<ClassifiedRow> = {}): ClassifiedRow =>
+    ({ id: 'web-ui', name: 'Web UI', disabled: false, hasConfig: false, hasInsert: false, ...over })
+
+  it('matches a blank query, so clearing the box restores the layer', () => {
+    expect(rowMatchesQuery(named(), '')).toBe(true)
+    expect(rowMatchesQuery(named(), '   ')).toBe(true)
+  })
+
+  it('matches the id even when the row displays a name', () => {
+    // The id is what the patch file spells and what the tags name.
+    expect(rowMatchesQuery(named(), 'web-ui')).toBe(true)
+  })
+
+  it('matches the display name, case-insensitively', () => {
+    expect(rowMatchesQuery(named(), 'web ui')).toBe(true)
+    expect(rowMatchesQuery(named(), 'WEB')).toBe(true)
+  })
+
+  it('does not match a row that has neither', () => {
+    expect(rowMatchesQuery(named(), 'timer')).toBe(false)
+    expect(rowMatchesQuery(named({ name: undefined }), 'web ui')).toBe(false)
   })
 })
 

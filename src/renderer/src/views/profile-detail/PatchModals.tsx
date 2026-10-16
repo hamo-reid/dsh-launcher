@@ -1,14 +1,16 @@
 /**
- * The three patch-row dialogs: the row editor (a config override or an insert
- * list), the new-row form, and the raw source editor.
+ * The two remaining patch dialogs: the new-row form and the raw source editor.
  *
- * Each owns its inputs and its submit, so the workspace passes an open flag (or the
- * editor's target) plus a "a write landed" callback. None of them needs the composed
- * layer stack — the editor's only input from it is the overlap note, which the
- * workspace resolves before opening.
+ * Editing an existing row's config or insert list is NOT here: that editor lives in
+ * the layer pane itself (`LayerDetail`), which replaces the row's detail view with
+ * it. A dialog on top of the layer dialog hid the row list exactly when the user
+ * needed it — to check which row, which file, and who overrides it.
+ *
+ * Each of these owns its inputs and its submit, so the workspace passes an open flag
+ * plus a "a write landed" callback. Neither needs the composed layer stack.
  */
 import { lazy, Suspense, useEffect, useState } from 'react'
-import { Alert, Input, Modal, Select, Space, theme, message } from 'antd'
+import { Input, Modal, Select, Space, theme, message } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../../lib/ipc.ts'
 import FieldLabel from '../../components/FieldLabel.tsx'
@@ -18,17 +20,6 @@ import type { RowCreateInput } from '../../../../shared/types.ts'
 // The Monaco wrapper pulls the whole editor; keep it out of the first parse.
 const CodeEditor = lazy(() => import('../../components/CodeEditor.tsx'))
 
-/** Which editor a row's action opens — the config override or the insert list. */
-export type RowEditKind = 'config' | 'insert'
-
-/** The row an open editor is editing, as the workspace resolved it. `overlap` names
- * the other layer serving this row, when there is one. */
-export interface EditorTarget {
-  id: string
-  kind: RowEditKind
-  overlap: string | null
-}
-
 /** Props shared by the dialogs: the profile they write to, and what to do after. */
 interface DialogProps {
   dshId: string
@@ -36,87 +27,6 @@ interface DialogProps {
   onClose: () => void
   /** A write landed — the owner must reload the composed stack. */
   onSaved: () => void
-}
-
-/** Edit one existing row's config override or insert list. */
-export function PatchRowEditorModal({ dshId, name, target, onClose, onSaved }: DialogProps & { target: EditorTarget | null }): JSX.Element {
-  const { t } = useTranslation()
-  const { token } = theme.useToken()
-  const [text, setText] = useState('')
-  const [defaultText, setDefaultText] = useState('')
-  const [saving, setSaving] = useState(false)
-
-  // Load the row's current content (and, for a config row, the bundle default it
-  // replaces) when a target arrives. The guard drops a response that belongs to a
-  // row the user has since switched away from.
-  useEffect(() => {
-    setText('')
-    setDefaultText('')
-    if (target === null || target.kind !== 'config') return undefined
-    let alive = true
-    void window.api.configInfo(dshId, name, target.id).then((result) => {
-      if (!alive || !result.ok) return
-      setDefaultText(result.value.default)
-      setText(result.value.current)
-    })
-    return () => { alive = false }
-  }, [target, dshId, name])
-
-  const submit = async (): Promise<void> => {
-    if (target === null) return
-    setSaving(true)
-    let result
-    if (target.kind === 'config') {
-      if (text.trim() === '') { void message.warning(t('profile.detail.configEmpty')); setSaving(false); return }
-      result = await window.api.setRowConfig(dshId, name, target.id, text)
-    } else {
-      const items = text.split('\n').map(line => line.trim()).filter(Boolean)
-      if (items.length === 0) { void message.warning(t('profile.detail.insertEmpty')); setSaving(false); return }
-      result = await window.api.addRow(dshId, name, { id: target.id, insert: items })
-    }
-    setSaving(false)
-    if (!result.ok) { void message.error(apiErrorText(result)); return }
-    onClose()
-    void message.success(target.kind === 'config' ? t('profile.detail.savedConfig') : t('profile.detail.savedInsert'))
-    onSaved()
-  }
-
-  return (
-    <Modal title={target !== null ? (target.kind === 'config' ? t('profile.detail.editor.configTitle', { id: target.id }) : t('profile.detail.editor.insertTitle', { id: target.id })) : ''} open={target !== null} okText={t('common.save')} onOk={() => void submit()} onCancel={onClose} confirmLoading={saving} destroyOnHidden width={MODAL.wide}>
-      <Space orientation="vertical" style={{ width: '100%' }} size="small">
-        {target?.overlap !== null && (
-          <Alert type="warning" showIcon title={t('profile.detail.editor.overlap', { owner: target?.overlap })} description={t('profile.detail.editor.overlapDesc')} />
-        )}
-        {target?.kind === 'config' ? (
-          <>
-            <FieldLabel>{t('profile.detail.editor.configReplaces')}</FieldLabel>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: token.paddingSM, marginTop: token.paddingSM }}>
-              <div>
-                <FieldLabel>{t('profile.detail.editor.default')}</FieldLabel>
-                <pre style={{ margin: 0, minHeight: 180, maxHeight: 320, overflowY: 'auto', background: token.colorFillTertiary, padding: token.paddingSM, borderRadius: token.borderRadius, fontSize: token.fontSizeSM, lineHeight: '1.5' }}>
-                  {defaultText === '' ? <span style={{ color: token.colorTextTertiary }}>{t('profile.detail.editor.noDefault')}</span> : defaultText.split('\n').map((line, i) => {
-                    // Highlight the default's lines that the override drops, so the
-                    // replacement is readable at a glance.
-                    const differs = !text.split('\n').includes(line) && text.trim() !== ''
-                    return <div key={i} style={{ background: differs ? 'rgba(255,77,79,0.16)' : undefined, whiteSpace: 'pre' }}>{line}</div>
-                  })}
-                </pre>
-              </div>
-              <div>
-                <FieldLabel>{t('profile.detail.editor.override')}</FieldLabel>
-                <Input.TextArea rows={8} value={text} onChange={e => setText(e.target.value)} placeholder={'key: value\nnested:\n  a: 1'} style={{ maxHeight: 320 }} />
-              </div>
-            </div>
-          </>
-        ) : (
-          <>
-            <FieldLabel>{t('profile.detail.editor.insertList')}</FieldLabel>
-            <Input.TextArea rows={6} value={text} onChange={e => setText(e.target.value)} placeholder={t('profile.detail.editor.insertPlaceholder')} />
-          </>
-        )}
-      </Space>
-    </Modal>
-  )
 }
 
 /** Add a new row to the profile's own patch layer. */
