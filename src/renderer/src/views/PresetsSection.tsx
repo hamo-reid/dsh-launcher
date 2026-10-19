@@ -15,10 +15,16 @@
  * another's. The grade answers the question a version number cannot — can THIS
  * profile resolve the rows this preset would start — since a profile resolves
  * its own `node_modules` on top of the install chain.
+ *
+ * The header states data and nothing else: a title, one line summarising the
+ * roster, and the controls. What the grade means, which model decides the roster
+ * and where definitions are read from are reference material, so they live behind
+ * the header's own 说明 — the page does not spend its top two lines explaining
+ * itself to someone who came here to use a preset.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
-  Alert, Button, Dropdown, List, Popover, Select, Skeleton, Space, Tag, Tooltip, Typography, message, theme,
+  Alert, Button, Divider, Dropdown, List, Popover, Select, Skeleton, Space, Tag, Tooltip, Typography, message, theme,
 } from 'antd'
 import {
   CodeOutlined, DownOutlined, FolderOpenOutlined, InfoCircleOutlined, PlusOutlined,
@@ -31,13 +37,14 @@ import {
 } from '../lib/profileScope.ts'
 import {
   PRESET_SOURCE_KEY as SOURCE_KEY, presetGradeColour, presetGradeLabel, presetReadOnlyHintKey,
-  presetRowActions, type PresetRowAction,
+  presetRosterSummary, presetRowActions, type PresetRowAction,
 } from '../lib/presetRow.ts'
 import { presetTakenIds } from '../lib/presetCreate.ts'
 import AppShell from '../components/AppShell.tsx'
 import ClickRegion from '../components/ClickRegion.tsx'
 import ConfirmMenu, { type MenuAction } from '../components/ConfirmMenu.tsx'
 import EmptyState from '../components/EmptyState.tsx'
+import FieldLabel from '../components/FieldLabel.tsx'
 import NavList from '../components/NavList.tsx'
 import Panel from '../components/Panel.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
@@ -55,9 +62,14 @@ const DESCRIPTION_CLAMP = 78
  * smallest composition, and an id the host's own display table knows by name. */
 const MINIMAL_PRESET_ID = 'minimal'
 
-/** The sources panel scrolls past this many pixels. A 0.2.0-rc.1 profile lists ten
- * places, so the panel would otherwise outgrow the viewport on a short screen. */
-const PLACE_PANEL_MAX_HEIGHT = 420
+/** The sources list scrolls past this many pixels. A 0.2.0-rc.1 profile lists ten
+ * places, so the help popover would otherwise outgrow the viewport on a short
+ * screen — the two paragraphs above it are fixed, the list is what scrolls. */
+const PLACE_LIST_MAX_HEIGHT = 300
+
+/** What the pieces of the summary line are joined with. One separator in one
+ * place, so the line reads as one sentence rather than a row of chips. */
+const SUMMARY_SEPARATOR = ' · '
 
 /** The locale key naming where one definition comes from lives in `presetRow.ts`:
  * the roster row, the sources panel and the contents view all need it. */
@@ -179,7 +191,6 @@ export default function PresetsSection(): JSX.Element {
     void load(selectedId, profile)
   }, [selectedId, profile, load])
 
-  const selected = dshes.find(d => d.id === selectedId)
   const presets = listing?.presets ?? []
   const legacy = listing?.legacy ?? []
   const warnings = listing?.warnings ?? []
@@ -301,6 +312,11 @@ export default function PresetsSection(): JSX.Element {
       </div>
     )
   }
+
+  /** The header's one line about this roster. Resolved through the SAME positional
+   * lookup the rows use, so the line counts the list under it and nothing else —
+   * and an empty roster produces no line at all (`presetRosterSummary`). */
+  const headerSummary = presetRosterSummary(presets.map((preset, index) => gradeOf(preset.id, index)))
 
   /** What the row's menu offers. A preset this page may not write keeps only the
    * copy — a copy lands in the profile's own layer, so it is allowed from any
@@ -504,20 +520,10 @@ export default function PresetsSection(): JSX.Element {
       )
     }
     return (
-      <Panel
-        pad={false}
-        title={t('preset.summary', { presets: presets.length, profile: profile })}
-        description={t(model === 'declaration' ? 'preset.legendDeclaration' : 'preset.legendDirectory')}
-      >
-        {/* antd's List.Item pads itself `12px 0`, so without this the rows would
-            sit flush against the panel while its own header is inset 16px. The
-            inset lives on the body rather than the rows, which keeps the
-            separators inside the same box as the text. */}
-        <div style={{ padding: `0 ${String(token.padding)}px` }}>
-          {warningsBlock()}
-          {legacyBlock()}
-          <List dataSource={presets} rowKey={rowKey} renderItem={row} />
-        </div>
+      <Panel>
+        {warningsBlock()}
+        {legacyBlock()}
+        <List dataSource={presets} rowKey={rowKey} renderItem={row} />
       </Panel>
     )
   }
@@ -541,6 +547,86 @@ export default function PresetsSection(): JSX.Element {
     )
   }
 
+  /** One line per place a definition can come from: what it is, then its path.
+   *
+   * Every path truncates on its own, with the copy control as a SIBLING: putting
+   * `overflow: hidden` on the same element as antd's copy button would clip the
+   * button too, and antd's own ellipsis-with-copyable path measures in JS to
+   * reserve room for it. The hover carries the full path; the copy button keeps
+   * antd's own copy/copied tooltip. */
+  const placeLines = (): ReactNode[] => places.map(place => (
+    <div key={place.path} style={{ minWidth: 0 }}>
+      <div
+        style={{
+          color: token.colorTextSecondary,
+          fontSize: token.fontSizeSM,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {t(SOURCE_KEY[place.source])}
+        {place.bundle === undefined ? '' : ` · ${place.bundle}`}
+        {place.writable ? '' : ` · ${t('preset.sourceSystem')}`}
+        {place.exists ? '' : ` · ${t('preset.placeMissing')}`}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+        <Tooltip title={place.path}>
+          <span
+            style={{
+              flex: '1 1 auto',
+              minWidth: 0,
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+              fontSize: token.fontSizeSM,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {place.path}
+          </span>
+        </Tooltip>
+        <Typography.Text
+          copyable={{ text: place.path }}
+          style={{ flexShrink: 0, fontSize: token.fontSizeSM }}
+        />
+      </div>
+    </div>
+  ))
+
+  /** The header's help: what the grade means, which model decides the roster, and
+   * where definitions are read from.
+   *
+   * This is reference material, so it sits behind one control instead of in a
+   * paragraph under the title. The sources list is the only part that scrolls:
+   * the two answers above it are what someone who opened this came for, and a
+   * 0.2.0-rc.1 profile lists ten places. */
+  const helpContent = (): ReactNode => (
+    <div style={{ width: 460 }}>
+      <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>
+        {t('preset.legendGrade')}
+        {/* Only when a model is known: with none mounted there is no roster for a
+            model sentence to describe. */}
+        {model === 'directory' || model === 'declaration'
+          ? (
+            <div style={{ marginTop: 4 }}>
+              {t(model === 'declaration' ? 'preset.legendDeclaration' : 'preset.legendDirectory')}
+            </div>
+          )
+          : null}
+      </div>
+      <Divider style={{ margin: `${String(token.paddingSM)}px 0` }} />
+      <FieldLabel>{t('preset.helpSources')}</FieldLabel>
+      {/* The scroll container carries its own padding: the scrollbar sits inside,
+          so the content needs a right gutter to clear it. */}
+      <div style={{ maxHeight: PLACE_LIST_MAX_HEIGHT, overflowY: 'auto', paddingRight: 12 }}>
+        <Space direction="vertical" size={10} style={{ width: '100%' }}>
+          {placeLines()}
+        </Space>
+      </div>
+    </div>
+  )
+
   return (
     <AppShell
       sider={(
@@ -558,99 +644,41 @@ export default function PresetsSection(): JSX.Element {
     >
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
         <SectionHeading
-          title={selected === undefined ? t('preset.title') : t('preset.titleFor', { name: selected.name })}
-          description={t('preset.desc')}
+          title={t('preset.title')}
+          description={headerSummary.length === 0
+            ? undefined
+            : headerSummary.map(segment => t(segment.key, segment.options)).join(SUMMARY_SEPARATOR)}
           extra={(
             <Space size={8}>
-              {/* The profile is the page's scope: on a dsh that declares its
-                  presets, each profile composes its own roster. */}
+              {/* The profile IS this page's scope — it decides the roster and the
+                  grade both — and it is the one thing in this header a person can
+                  change, so the field says its own name instead of leaving a bare
+                  profile name in a box. */}
               <Select
                 size="small"
-                style={{ minWidth: 140 }}
+                style={{ minWidth: 150 }}
+                prefix={t('preset.profile')}
                 value={profile}
-                placeholder={t('preset.profile')}
                 aria-label={t('preset.profile')}
                 disabled={names.length === 0}
                 onChange={(value: string) => setScope(prev => (prev === null ? null : { ...prev, chosen: value }))}
                 options={names.map(name => ({ value: name, label: name }))}
               />
-              {/* Long absolute paths belong behind a click, not wrapped across
-                  the header where they would dominate the page. A 0.2.0-rc.1
-                  profile lists ten places and several paths run past 150
-                  characters, so the panel scrolls and both the source line and
-                  the path stay on ONE line with an ellipsis; the full path is a
-                  hover and a copy away. The scroll container carries its own
-                  padding: the scrollbar sits inside, so the content needs a
-                  wider right gutter to clear it. */}
+              {/* Long absolute paths belong behind a click, not wrapped across the
+                  header where they would dominate the page — and what a grade
+                  means has no business sitting above the list either. One control
+                  holds both, as reference material. */}
               <Popover
                 trigger="click"
                 placement="bottomRight"
-                title={t('preset.placesTitle')}
-                content={(
-                  <div style={{
-                    width: 460,
-                    maxHeight: PLACE_PANEL_MAX_HEIGHT,
-                    overflowY: 'auto',
-                    padding: '2px 16px 2px 4px',
-                  }}>
-                    <Space direction="vertical" size={10} style={{ width: '100%' }}>
-                      {places.map(place => (
-                        <div key={place.path} style={{ minWidth: 0 }}>
-                          <div
-                            style={{
-                              color: token.colorTextSecondary,
-                              fontSize: token.fontSizeSM,
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                            }}
-                          >
-                            {t(SOURCE_KEY[place.source])}
-                            {place.bundle === undefined ? '' : ` · ${place.bundle}`}
-                            {place.writable ? '' : ` · ${t('preset.sourceSystem')}`}
-                            {place.exists ? '' : ` · ${t('preset.placeMissing')}`}
-                          </div>
-                          {/* The path truncates on its own, with the copy control as a
-                              SIBLING: putting `overflow: hidden` on the same element as
-                              antd's copy button would clip the button too, and antd's own
-                              ellipsis-with-copyable path measures in JS to reserve room for
-                              it. The hover carries the full path; the copy button keeps
-                              antd's own copy/copied tooltip. */}
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
-                            <Tooltip title={place.path}>
-                              <span
-                                style={{
-                                  flex: '1 1 auto',
-                                  minWidth: 0,
-                                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-                                  fontSize: token.fontSizeSM,
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  whiteSpace: 'nowrap',
-                                }}
-                              >
-                                {place.path}
-                              </span>
-                            </Tooltip>
-                            <Typography.Text
-                              copyable={{ text: place.path }}
-                              style={{ flexShrink: 0, fontSize: token.fontSizeSM }}
-                            />
-                          </div>
-                        </div>
-                      ))}
-                    </Space>
-                  </div>
-                )}
+                title={t('preset.helpTitle')}
+                content={helpContent()}
               >
-                {/* With no preset model mounted there are no sources either, so
-                    the control is disabled rather than opening an empty list. */}
-                <Button
-                  size="small"
-                  icon={<InfoCircleOutlined />}
-                  disabled={places.length === 0}
-                >
-                  {t('preset.location')}
+                {/* With no preset model mounted there is no roster, no grade and
+                    no source to explain, so the control is disabled rather than
+                    opening a panel with nothing in it. */}
+                <Button size="small" icon={<InfoCircleOutlined />} disabled={places.length === 0}>
+                  {t('preset.help')}
                 </Button>
               </Popover>
               <Button

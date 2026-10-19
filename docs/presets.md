@@ -183,16 +183,21 @@ dsh `0.2.0-rc.1` 删掉了目录 preset，没有兼容读取：`packages/preset/
 
 ## 6. launcher 能做什么
 
+页头只有两层信息：标题「预设」，下面一行**只报数据**的汇总，右侧控件。
+
+- **汇总行**：`N 个 preset` 后接各等级的个数（`X 个可用` / `Y 个不可用` / `Z 个缺行` / `W 个未评级`），问题按严重度排在前面；全可用时收成一句「全部可用」，空名册干脆不出这一行（空态自己会说话）。分段与计数在 `lib/presetRow.ts`（`presetRosterSummary`），一格一个 preset、按**位置**取评级，与行上的标签同一套判据。**「不能挂载」不单列一段**：宿主挂不上的声明拿到的就是 `unusable` 评级（§5），再开一个桶会把同一个 preset 在这条被当作总数的行里数两遍 —— 那件事由行上的标签自己说。
+- **说明**：右侧的「说明」是这一页唯一的解释性文字，点开是三个答案 —— 评级怎么读（按当前 profile 的解析链判定，悬停标签看缺了哪几行）、名册由什么模型决定（目录 / 组合层里的一行声明）、这份名册来自哪些层（组合包的哪个 patch 文件、profile 层、home 层，路径可复制）。`none` 模型下没有名册、没有评级也没有来源，按钮禁用（§1）。**页头不写这些**：解释性文案不占版面，需要时才展开。
+
 每行只有两个控件：「打开」下拉，和一个「…」菜单（编辑描述 / 复制 / 删除）。这一页不写的 preset 菜单少两项（只剩复制），标签上的悬浮说明写出**为什么**：内置的与 home 层的是两种不同原因（见 §3.3）。
 
-- **Profile 选择器**：页面右上角。它决定名册和评级，也是写入目标 —— 声明模型下每个 profile 有自己的名册。选择器只列**本 dsh 确认过**的名字（作用域与"读自哪台 dsh"绑成一个值）：切换 dsh 时旧名字整体作废、重读之后才恢复，所以这一页不会拿着上一台 dsh 的 profile 名去问当前这台（那种请求会被主进程以 `profile.notFound` 拒绝）。名字在页面停留期间没了（改名 / 删除 / home 被改）时，页面重读一次名单再问，而不是把这次拒绝报给用户。
+- **Profile 选择器**：页面右上角，带 `Profile` 前缀。它决定名册和评级，也是写入目标 —— 声明模型下每个 profile 有自己的名册。选择器只列**本 dsh 确认过**的名字（作用域与"读自哪台 dsh"绑成一个值）：切换 dsh 时旧名字整体作废、重读之后才恢复，所以这一页不会拿着上一台 dsh 的 profile 名去问当前这台（那种请求会被主进程以 `profile.notFound` 拒绝）。名字在页面停留期间没了（改名 / 删除 / home 被改）时，页面重读一次名单再问，而不是把这次拒绝报给用户。
 - **新建**：两种起点，在同一个弹窗里切换。最小实例 = 以内置的极简模式（id `minimal`）为起点，那是这个部署自己最小的组合面；复制已有 = 从名册里任选一个。两者的插件列表都来自源、逐字复制，所以新 preset 的可挂载性和它的起点一样。名册里没有内置极简模式时，最小实例这一项不可选。**「已占用」的名册来自名册 + 退役目录**：core 两样都拒（退役目录的 id 一旦迁移就会撞），而名册只显示前者，所以弹窗只按名册判就会给出一个必然失败的「创建」。
 - **改描述**：目录模型写 `preset.yml`；声明模型改声明行里的标量。只对 **profile 层**的 preset 开放（§3.3）：内置的与 home 层的都只读，后者要改请直接编辑 `<home>/cordis.patch.yml`。
 - **复制**：新 id 就是新身份。元数据随之重写：保留源的 description，name 用传入值，丢掉源的 order，否则副本会排进源的位次。id 不能改名，改 id 就是复制成新的。**源可以是只读的**：副本落在 profile 层。
 - **删除**：仅 profile 层的 preset。目录模型进系统回收站（可还原）；声明模型从 profile 补丁里移除行。
 - **打开**：下拉里选「在文件管理器中显示」或用 VS Code。目录模型打开 preset 目录；声明模型打开**承载它的补丁文件**（在文件管理器里显示的是它所在的目录）。VS Code 走 `vscode://file/<path>` 协议，不 spawn `code`。**只定位，不评级**：一次点击不该为了一行路径把整份名册逐行走一遍解析链。
 - **点一行看内容**：行的身份块可点（鼠标 / Enter / Space），弹出这份 preset **由哪些行组成** —— 只读，按**四态**分组：找不到（缺件，评级说的就是它）→ 由运行时决定（`!!js`，launcher 不判）→ 被禁用（`disabled:` 为真，宿主不启动）→ 会启动（能找到）。每行给 `name` 原文（`!!js` 行还原成文件里的写法，不是解析器内部的哨兵）、它属于哪一类（内置 / 相对路径 / 文件 / 包；`!!js` 行**不给**类别，因为类型由 loader 定）、以及宿主自己的位置措辞（`row "id"` / `row N`，group 路径带着）。**行的 `config` 不进这个视图**（插件私有数据，§4.1），视图里也没有任何写入入口 —— 行级编辑仍然不做（§7）；写入只留在行菜单里。分组顺序与判据在 `lib/presetRow.ts`（`presetRowSections`），行状态与徽标来自**同一遍**判定：计数是那个行数组的投影，两边不可能各说一套。
-- **来源**：页面右上角的「来源」列出这份名册来自哪些层（组合包的哪个 patch 文件、profile 层、home 层），路径可复制。`none` 模型下没有来源可列，按钮禁用（§1）。
+- **说明弹层**：把「怎么读评级、名册由谁决定、来源在哪」三件事收在一处（见上）。
 - **旧目录迁移**：在声明模型的 dsh 上，`.agent-presets` 里剩下的目录会被识别为**不会被加载**，并给出「迁移为声明」：往当前 profile 的补丁里写一条同 id 的声明（id 取目录名，name/description/order 取 `preset.yml`，`plugins` 取 `agent.cordis.yml` 逐字）。**旧目录一个字节都不动。** 已经存在同 id 声明（含刚迁移完）的目录标为「已有同 id 的声明」，按钮不可用；组合读不出来的目录标为「内容读不出来」，同样不可迁移。
 
 ## 7. 不做的部分
@@ -223,11 +228,11 @@ dsh `0.2.0-rc.1` 删掉了目录 preset，没有兼容读取：`packages/preset/
 | `src/main/core/store/bundle-manifest.ts` | `dsh.bundle.patch` 声明的唯一读取处（单文件或数组） |
 | `src/main/core/store/combo.ts` | 组合层读取（一个组合包声明的全部 patch 文件） |
 | `src/main/ipc/presets/presets.ts` | `preset:*` 七个通道 |
-| `src/renderer/src/views/PresetsSection.tsx` | 一级「预设」页（行可点开内容；弹窗只收**位置 + 行身份**，grade 恒按位置对齐取） |
+| `src/renderer/src/views/PresetsSection.tsx` | 一级「预设」页（页头 = 标题 + 一行数据汇总 + 控件；行可点开内容；弹窗只收**位置 + 行身份**，grade 恒按位置对齐取） |
 | `src/renderer/src/views/presets/PresetDetailModal.tsx` | 内容详情弹窗；导出的 `PresetDetailBody` 是断言入口（`Modal` 走 portal，server render 里看不到） |
 | `src/renderer/src/views/presets/PresetModals.tsx` | 改描述 / 新建两个弹窗 |
 | `src/renderer/src/components/ClickRegion.tsx` | 「这块可点」的契约（鼠标 + Enter/Space，且不放自己的控件）；`PluginCard` 与 preset 行共用 |
-| `src/renderer/src/lib/presetRow.ts` | 行级决策（菜单项、「为什么不能改」的原因键）+ 内容视图的分组与评级标签 + 来源键映射（`Dropdown`/`Tooltip` 在 server render 里看不到，见 [`TESTING.md`](./TESTING.md) §4） |
+| `src/renderer/src/lib/presetRow.ts` | 行级决策（菜单项、「为什么不能改」的原因键）+ 内容视图的分组与评级标签 + 页头汇总行的分段（`presetRosterSummary`）+ 来源键映射（`Dropdown`/`Tooltip` 在 server render 里看不到，见 [`TESTING.md`](./TESTING.md) §4） |
 | `src/renderer/src/lib/presetCreate.ts` | 新建弹窗的判定：「已占用」的 id 集合（名册 + 退役目录）与草稿能否提交 |
 
 ## 9. 真机核对

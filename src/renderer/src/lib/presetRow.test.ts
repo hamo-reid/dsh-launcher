@@ -1,6 +1,7 @@
 /**
- * What a preset row offers, the reason it may offer less, and how one preset's own
- * rows are grouped and labelled when they are listed.
+ * What a preset row offers, the reason it may offer less, how one preset's own
+ * rows are grouped and labelled when they are listed, and what the page header
+ * says about the whole roster.
  *
  * Claims that cannot be rendered in this repo's tests: the kebab menu is an antd
  * `Dropdown` (a portal — its items are absent from a server render) and the reason
@@ -9,7 +10,8 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
-  presetGradeColour, presetGradeLabel, presetReadOnlyHintKey, presetRowActions, presetRowSections,
+  presetGradeColour, presetGradeLabel, presetReadOnlyHintKey, presetRosterSummary, presetRowActions,
+  presetRowSections,
 } from './presetRow.ts'
 import type { PresetCompositionRow, PresetGrade } from '../../../shared/types.ts'
 
@@ -81,5 +83,49 @@ describe('presetGradeLabel / presetGradeColour', () => {
     expect(presetGradeColour(cell())).toBe('success')
     expect(presetGradeColour(cell({ level: 'incomplete' }))).toBe('warning')
     expect(presetGradeColour(cell({ level: 'unusable', reason: 'x' }))).toBe('error')
+  })
+})
+
+describe('presetRosterSummary', () => {
+  const cell = (level: PresetGrade['level']): PresetGrade => ({
+    presetId: 'x', profile: 'alpha', level, checked: 0, skipped: 0, conditional: 0, missing: [], rows: [],
+  })
+
+  it('says how many there are and that all of them work', () => {
+    // The four state counts would all read zero here: the tally a person wants is
+    // the one that fits in one word.
+    expect(presetRosterSummary([cell('ok'), cell('ok')]))
+      .toEqual([{ key: 'preset.head.count', options: { count: 2 } }, { key: 'preset.head.allOk' }])
+  })
+
+  it('counts each level, worst first, and leaves out the zeroes', () => {
+    expect(presetRosterSummary([cell('ok'), cell('ok'), cell('unusable'), cell('incomplete')])).toEqual([
+      { key: 'preset.head.count', options: { count: 4 } },
+      { key: 'preset.head.ok', options: { count: 2 } },
+      { key: 'preset.head.unusable', options: { count: 1 } },
+      { key: 'preset.head.incomplete', options: { count: 1 } },
+    ])
+  })
+
+  it('counts a roster with no working preset without inventing an "ok 0"', () => {
+    expect(presetRosterSummary([cell('unusable'), cell('incomplete')])).toEqual([
+      { key: 'preset.head.count', options: { count: 2 } },
+      { key: 'preset.head.unusable', options: { count: 1 } },
+      { key: 'preset.head.incomplete', options: { count: 1 } },
+    ])
+  })
+
+  it('says a preset the page could not judge is ungraded, not fine', () => {
+    expect(presetRosterSummary([cell('ok'), undefined])).toEqual([
+      { key: 'preset.head.count', options: { count: 2 } },
+      { key: 'preset.head.ok', options: { count: 1 } },
+      { key: 'preset.head.unknown', options: { count: 1 } },
+    ])
+  })
+
+  it('leaves the header with nothing to say about an empty roster', () => {
+    // The empty state below the header is the answer there; "0 preset(s)" above it
+    // would only repeat it.
+    expect(presetRosterSummary([])).toEqual([])
   })
 })
