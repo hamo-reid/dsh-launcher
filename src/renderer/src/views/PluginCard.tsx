@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { Button, Space, Tag, theme } from 'antd'
 import { useTranslation } from 'react-i18next'
 import ConfirmMenu, { type MenuAction } from '../components/ConfirmMenu.tsx'
+import ClickRegion from '../components/ClickRegion.tsx'
 import { fmtBytes } from '../lib/format.ts'
 import type {
   InstalledOverviewRow, MarketAnnotation, PluginKind, PluginProvenance, PluginUpdateInfo,
@@ -108,15 +109,10 @@ export default function PluginCard(p: PluginCardProps): JSX.Element {
     >
       {/* Upper region — the clickable / keyboard-openable part (sibling of the
           action footer, so no interactive element is nested inside it). */}
-      <div
-        role="button"
-        tabIndex={0}
-        aria-label={row.name}
-        onClick={open}
-        onKeyDown={event => {
-          if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open() }
-        }}
-        style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8, cursor: 'pointer', outline: 'none' }}
+      <ClickRegion
+        onOpen={open}
+        label={row.name}
+        style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8, outline: 'none' }}
       >
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
           <span
@@ -150,7 +146,7 @@ export default function PluginCard(p: PluginCardProps): JSX.Element {
             {t('plugin.overview.dshN', { count: dshCount })}
           </span>
         </div>
-      </div>
+      </ClickRegion>
 
       {/* Footer actions. */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: token.paddingSM, paddingTop: token.paddingSM, borderTop: `1px solid ${token.colorSplit}` }}>
