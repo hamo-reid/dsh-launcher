@@ -328,10 +328,13 @@ describe('preset:list (declaration model)', () => {
         id: 'standard', trust: 'system', source: 'bundle', bundle: '@deepseek-ai/dsh-web-app',
         order: 1, editable: false,
         location: join(bundleDir(), 'presets', 'standard.patch.yml'), locationKind: 'file',
+        // The loader row that carries it: the host loads THAT row, not the id.
+        rowId: 'preset-standard',
       },
       {
         id: 'mine', trust: 'user', source: 'profile', name: 'My mode', description: 'Only bash.',
         order: 3, editable: true, location: patchPath('decl'), locationKind: 'file',
+        rowId: 'local-preset-mine',
       },
     ])
     // The bundle's SECOND patch file is where the declaration lives, so a

@@ -126,6 +126,11 @@ function declarationItem(preset: DeclaredPreset): PresetListItem {
     // that carries the definition is the thing worth opening.
     location: preset.sourcePath,
     locationKind: 'file',
+    // What the host actually loads. Worth naming: it is the row a person edits in
+    // that file, and on a declaration carrying no `config.id` it is also where the
+    // id in the roster came from.
+    rowId: preset.rowId,
+    ...(preset.idFromRow ? { idFromRow: true } : {}),
   }
 }
 

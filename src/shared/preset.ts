@@ -55,3 +55,44 @@ export const DECLARATION_REGISTRY_PLUGIN = '@deepseek-ai/dsh-agent-preset-regist
 /** Which preset model a profile's composition mounts. */
 export type PresetModel = 'directory' | 'declaration' | 'none'
 
+/**
+ * Where one composition row's `name` reaches a module — the host's own
+ * classification, which both preset models are judged by.
+ *
+ * It lives here rather than in `core/presets/rows.ts` because the renderer
+ * LABELS these rows and may not import from main; `rows.ts` therefore aliases
+ * this union instead of declaring a second one.
+ */
+export type PresetRowKind =
+  /** A `cordis:` builtin the Loader supplies; nothing is resolved. */
+  | 'builtin'
+  /** A path relative to the declaring file: the preset ships that file. */
+  | 'preset'
+  /** An absolute path, or a `file:` URL — which is ALSO absolute by definition,
+   * never a base-relative spelling of one (measured against the host; see
+   * docs/presets.md section 4.3). */
+  | 'file'
+  /** A package name, resolved from the installed harness and the profile. */
+  | 'package'
+
+/**
+ * What one row amounts to under one profile. The four states are exclusive, and
+ * they are the sections the preset contents view shows.
+ *
+ * The order they are decided in matters and is the host's: a row the host would
+ * not start is `skipped` even when its specifier is a `!!js` expression, because
+ * that specifier is never evaluated. `conditional` comes next, and only a row that
+ * actually starts is judged against the profile — reporting a `!!js` row as
+ * missing would call a preset the loader accepts broken, which is the failure the
+ * host's own check goes out of its way to avoid.
+ */
+export type PresetRowState =
+  /** The host starts it, and this profile's resolver chain finds it. */
+  | 'found'
+  /** No resolver on this profile finds it. */
+  | 'missing'
+  /** `disabled:` is truthy, so the host does not start this row at all. */
+  | 'skipped'
+  /** The specifier is a `!!js` expression only the loader can evaluate. */
+  | 'conditional'
+

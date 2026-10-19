@@ -98,8 +98,9 @@
 />
 ```
 
-### 3.4 ActionCard(`ActionCard.tsx`) 与 ScrollModal(`ScrollModal.tsx`)
-- **`ActionCard`**:块状可点 / 可选中 / 可悬停 / 可选 `disabled` 的卡片,取代手写的 `Card` 入口卡与行条目。`selected` 显示主色左侧指示条,`hoverable` 悬停提升底色。
+### 3.4 ActionCard(`ActionCard.tsx`)、ClickRegion(`ClickRegion.tsx`) 与 ScrollModal(`ScrollModal.tsx`)
+- **`ActionCard`**:块状可点 / 可选中 / 可悬停 / 可选 `disabled` 的卡片,取代手写的 `Card` 入口卡与行条目。`selected` 显示主色左侧指示条,`hoverable` 悬停提升底色。它自带外壳,整张卡就是落点,**尾部槽(`extra`)里的节点在可点父节点内** —— 要塞控件就用 `ClickRegion`,或把控件放在卡片外面做兄弟。
+- **`ClickRegion`**:「这块可点、点开的是某个东西」的**契约**,给自带外壳的面用(卡片的上半区、列表行里那段身份信息)。它只负责三件事:鼠标可点、Enter/Space 可点(`role="button"` + `tabIndex`,与按钮一致)、**不放任何自己的控件**。同一行的按钮必须是它的**兄弟节点**,否则一次点击会同时触发两者(`PluginCard` 的注释最早写了这条)。聚焦轮廓**不要**关掉(antd 的控件自己画,而一个没有轮廓的可点区域会让键盘用户不知道自己在哪)。要悬停底色就加 `className="pm-click-region"`(颜色走 `--pm-hover`,见 §5.1)。现在两个消费方:`views/PluginCard.tsx`、`views/PresetsSection.tsx`。
 - **`ScrollModal`**:带滚动体的 Modal,`bodyMax: 'md' | 'lg' | px` 封装各处重复的 `maxHeight + overflowY:auto` 弹窗;宽度传 `MODAL.wide` / `MODAL.narrow`。长表单优先用它而不是裸 `Modal`,让 footer 常驻、内容在弹窗内滚动。
 - **`useFileDrop` / `DropOverlay`**（`DropZone.tsx`）：文件拖拽导入。hook 只挂容器（hook 与可见提示分离，一次落点只触发一次）；**可见提示是覆盖层**，只在拖拽中或导入进行时出现，并带 `pointerEvents: none` —— 否则覆盖层自己会变成第二个落点，落不到容器的 handler 上。**不要**再做一个常驻的虚线方块：拖拽是瞬时手势，而常驻方块要占掉近百像素版面（dsh 技能面板与技能库两处都按覆盖层改过）。`dragover` 必须 `preventDefault`（否则浏览器把文件导航成页面）；`dragleave` 用计数配对防闪烁；`App.tsx` 另有全局守卫，落在非拖拽区的文件不会导航走应用。
 
@@ -153,6 +154,7 @@
 | `--pm-bg` | `#eaeef6` | `rgba(0,0,0,0.28)` | `global.css` body 背景 |
 | `--pm-surface-border` | `#e4e7f0` | `rgba(255,255,255,0.16)` | 预留(当前无消费方) |
 | `--pm-scrollbar` | `rgba(0,0,0,0.22)` | `rgba(255,255,255,0.24)` | `global.css` 滚动条 thumb |
+| `--pm-hover` | `rgba(0,0,0,0.03)` | `rgba(255,255,255,0.06)` | `global.css` `.pm-click-region:hover`(见 §3.4) |
 
 > **已知缺口**:`global.css` 还使用了 `--pm-text`、`--pm-selection`、`--pm-scrollbar-hover`,但 `cssVars()` 尚未提供,目前走 fallback(亮色值)。其中 **`--pm-text` 在暗色下会回落深色 `#1f2430`**,导致 body 直接文字在暗色下对比度不足。新增页面 chrome 前,先在 `cssVars()` 补齐这三个变量的暗色值,再引用,而不是直接叠加新的 fallback 使用。
 

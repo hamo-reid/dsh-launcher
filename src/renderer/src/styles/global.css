@@ -59,6 +59,13 @@ body .ant-modal-wrap {
   top: var(--pm-header-top, 52px) !important;
 }
 
+/* A clickable region inside a card or list row that antd does not style itself
+   (components/ClickRegion.tsx). The cursor says it is clickable; this says where
+   the target is. `--pm-hover` is mirrored on <html> by ThemeProvider. */
+.pm-click-region:hover {
+  background: var(--pm-hover, rgba(0, 0, 0, 0.03));
+}
+
 /* A Tabs instance that fills its parent height, with each pane owning its own
    scroll. Used by the Run page's 启动 / 进程管理 tabs so the process pane can
    host a full-height AppShell. antd v6 structure:

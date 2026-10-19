@@ -191,12 +191,14 @@ dsh `0.2.0-rc.1` 删掉了目录 preset，没有兼容读取：`packages/preset/
 - **复制**：新 id 就是新身份。元数据随之重写：保留源的 description，name 用传入值，丢掉源的 order，否则副本会排进源的位次。id 不能改名，改 id 就是复制成新的。**源可以是只读的**：副本落在 profile 层。
 - **删除**：仅 profile 层的 preset。目录模型进系统回收站（可还原）；声明模型从 profile 补丁里移除行。
 - **打开**：下拉里选「在文件管理器中显示」或用 VS Code。目录模型打开 preset 目录；声明模型打开**承载它的补丁文件**（在文件管理器里显示的是它所在的目录）。VS Code 走 `vscode://file/<path>` 协议，不 spawn `code`。**只定位，不评级**：一次点击不该为了一行路径把整份名册逐行走一遍解析链。
+- **点一行看内容**：行的身份块可点（鼠标 / Enter / Space），弹出这份 preset **由哪些行组成** —— 只读，按**四态**分组：找不到（缺件，评级说的就是它）→ 由运行时决定（`!!js`，launcher 不判）→ 被禁用（`disabled:` 为真，宿主不启动）→ 会启动（能找到）。每行给 `name` 原文（`!!js` 行还原成文件里的写法，不是解析器内部的哨兵）、它属于哪一类（内置 / 相对路径 / 文件 / 包；`!!js` 行**不给**类别，因为类型由 loader 定）、以及宿主自己的位置措辞（`row "id"` / `row N`，group 路径带着）。**行的 `config` 不进这个视图**（插件私有数据，§4.1），视图里也没有任何写入入口 —— 行级编辑仍然不做（§7）；写入只留在行菜单里。分组顺序与判据在 `lib/presetRow.ts`（`presetRowSections`），行状态与徽标来自**同一遍**判定：计数是那个行数组的投影，两边不可能各说一套。
 - **来源**：页面右上角的「来源」列出这份名册来自哪些层（组合包的哪个 patch 文件、profile 层、home 层），路径可复制。`none` 模型下没有来源可列，按钮禁用（§1）。
 - **旧目录迁移**：在声明模型的 dsh 上，`.agent-presets` 里剩下的目录会被识别为**不会被加载**，并给出「迁移为声明」：往当前 profile 的补丁里写一条同 id 的声明（id 取目录名，name/description/order 取 `preset.yml`，`plugins` 取 `agent.cordis.yml` 逐字）。**旧目录一个字节都不动。** 已经存在同 id 声明（含刚迁移完）的目录标为「已有同 id 的声明」，按钮不可用；组合读不出来的目录标为「内容读不出来」，同样不可迁移。
 
 ## 7. 不做的部分
 
 - 不写 `plugins` 列表：没有行级编辑，也没有组装/骨架/素材挑选。插件列表就是 preset，交给外部编辑器。
+  - **看内容 ≠ 组装**：「点一行看内容」只**列**宿主会加载的行与它们的判定（四态 + 类别），不挑零件、不加行、不改行、不改 `disabled`，也不枚举 preset 贡献的 skill 根（`!!js` 根只能按随包约定枚举，那个答案在技能页，这里再造一份就是第二个答案）。
   - **例外（尚未实现）**：[`design/assembly.md`](./design/assembly.md) 计划引入独立的「组装面」，届时本条收窄为「组装面只落地零件，不替用户挑 preset」。**组装本身一行未实现** —— 已经发货的只有四个与组装解耦的 skill 侧缺陷（`6b80b84` / `db83573` / `f652479` / `4fe1e65`，规则见 [`specs/extensions.md`](./specs/extensions.md) §3.1、§3.4）—— 所以**本条现在仍然有效**。
 - 不装组合包（`plugin_manager install_bundle`）—— 那条路是 Creator 模式在对话里做的；launcher 只声明在 profile 补丁里的行。
 - 不做 launcher 全局 preset 库、商店、跨 dsh 汇总。
@@ -207,7 +209,7 @@ dsh `0.2.0-rc.1` 删掉了目录 preset，没有兼容读取：`packages/preset/
 
 | 文件 | 职责 |
 |---|---|
-| `src/shared/preset.ts` | 两边共用的词汇（id 规则、两套模型的文件名与包名、模型枚举） |
+| `src/shared/preset.ts` | 两边共用的词汇（id 规则、两套模型的文件名与包名、模型枚举、**行类别与行状态** —— 行类别在渲染层要用来打标签，所以定义在 shared、由 `rows.ts` 别名） |
 | `src/main/core/presets/index.ts` | 门面：读一份名册、写入、打开位置、迁移 —— 上层只认它 |
 | `src/main/core/presets/layers.ts` | 按 profile 读补丁层并判定模型 |
 | `src/main/core/presets/declaration.ts` | 声明模型的折叠读、渲染、写入（`plugins` 逐字保留） |
@@ -215,14 +217,17 @@ dsh `0.2.0-rc.1` 删掉了目录 preset，没有兼容读取：`packages/preset/
 | `src/main/core/presets/roots.ts` | 目录模型的两个根、扫描、名册（健康标记、排序、first-root-wins） |
 | `src/main/core/presets/metadata.ts` | `preset.yml` 读取、渲染、写入 |
 | `src/main/core/presets/rows.ts` | 组合行的形状校验与行分类（复刻 host），两个模型共用 |
-| `src/main/core/presets/rating.ts` | 按 profile 判分（模型无关的 target 入口） |
+| `src/main/core/presets/rating.ts` | 按 profile 判分（模型无关的 target 入口）：一遍遍历产出**每行的四态**，四个计数是那个数组的投影 |
 | `src/main/core/presets/authoring.ts` | 目录模型：存元数据、复制、回收站删除 |
 | `src/main/core/patch/patch.ts` | 补丁文本的行级读写：entry 位置的唯一判定（`positionedRows`）、只改 config 标量的 `setConfigScalar` |
 | `src/main/core/store/bundle-manifest.ts` | `dsh.bundle.patch` 声明的唯一读取处（单文件或数组） |
 | `src/main/core/store/combo.ts` | 组合层读取（一个组合包声明的全部 patch 文件） |
 | `src/main/ipc/presets/presets.ts` | `preset:*` 七个通道 |
-| `src/renderer/src/views/PresetsSection.tsx` | 一级「预设」页 |
-| `src/renderer/src/lib/presetRow.ts` | 行级决策：菜单项与「为什么不能改」的原因键（`Dropdown`/`Tooltip` 在 server render 里看不到，见 [`TESTING.md`](./TESTING.md) §4） |
+| `src/renderer/src/views/PresetsSection.tsx` | 一级「预设」页（行可点开内容；弹窗只收**位置 + 行身份**，grade 恒按位置对齐取） |
+| `src/renderer/src/views/presets/PresetDetailModal.tsx` | 内容详情弹窗；导出的 `PresetDetailBody` 是断言入口（`Modal` 走 portal，server render 里看不到） |
+| `src/renderer/src/views/presets/PresetModals.tsx` | 改描述 / 新建两个弹窗 |
+| `src/renderer/src/components/ClickRegion.tsx` | 「这块可点」的契约（鼠标 + Enter/Space，且不放自己的控件）；`PluginCard` 与 preset 行共用 |
+| `src/renderer/src/lib/presetRow.ts` | 行级决策（菜单项、「为什么不能改」的原因键）+ 内容视图的分组与评级标签 + 来源键映射（`Dropdown`/`Tooltip` 在 server render 里看不到，见 [`TESTING.md`](./TESTING.md) §4） |
 | `src/renderer/src/lib/presetCreate.ts` | 新建弹窗的判定：「已占用」的 id 集合（名册 + 退役目录）与草稿能否提交 |
 
 ## 9. 真机核对

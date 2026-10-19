@@ -7,9 +7,9 @@
  * import directly from here.
  */
 
-import type { PresetModel } from './preset.ts'
+import type { PresetModel, PresetRowKind, PresetRowState } from './preset.ts'
 
-export type { PresetModel }
+export type { PresetModel, PresetRowKind, PresetRowState }
 
 // ── patch / profile layering ────────────────────────────────────────────────
 
@@ -1414,6 +1414,13 @@ export interface PresetListItem {
   location: string
   /** Whether `location` is a directory or a file. */
   locationKind: 'dir' | 'file'
+  /** The loader row id that declares this preset (declaration model only). The
+   * host loads THAT row, so it is what a person edits in the patch file. */
+  rowId?: string
+  /** The row's `config.id` is absent, so its identity is borrowed from the loader
+   * row id. Such a row is kept in the roster with a reason and never takes the id
+   * away from a preset that names itself (docs/presets.md section 3.2). */
+  idFromRow?: boolean
 }
 
 /** One place a profile's roster can come from, for the page's location list. */
@@ -1451,6 +1458,32 @@ export interface PresetMissingRow {
   name: string
 }
 
+/**
+ * One row of a preset's composition, as one profile judges it.
+ *
+ * These rows ARE the preset: the host starts them in order, so this is what the
+ * contents view lists. `label` keeps the host's own wording for where the row
+ * sits (`row "id"`, else `row N`, a group's path prefixed) — the launcher flattens
+ * groups the way the host applies them, so nesting is visible there and nowhere
+ * else. The row's `config` is deliberately absent: it is plugin-private data
+ * (docs/presets.md section 4.1), not something this page reports on.
+ */
+export interface PresetCompositionRow {
+  /**
+   * The specifier exactly as the row wrote it. A `!!js` row carries its
+   * expression back in its own spelling (`!!js pickTool()`), not the private
+   * sentinel the parser holds it as: that encoding is main's business, and this
+   * string is displayed.
+   */
+  name: string
+  label: string
+  /** Which base the specifier belongs to, or `null` when the specifier is a
+   * `!!js` expression — the loader decides what it names, so neither the base nor
+   * the kind is decidable from here, and claiming one would be a guess. */
+  kind: PresetRowKind | null
+  state: PresetRowState
+}
+
 /** One preset's usability under one profile. */
 export interface PresetGrade {
   presetId: string
@@ -1465,6 +1498,23 @@ export interface PresetGrade {
   missing: PresetMissingRow[]
   /** Why the preset is unusable, set on an `unusable` grade. */
   reason?: string
+  /**
+   * Every row of the composition, in composition order, as THIS profile judges
+   * it — the whole contents view, read with the grade so no second resolution
+   * pass (and no second verdict) is needed.
+   *
+   * The four counts above are PROJECTIONS of this one array, computed from it in
+   * the same pass that builds it: `checked` is `found` plus `missing`, `missing`
+   * repeats those rows as label/name pairs, and `skipped` / `conditional` are the
+   * other two states. They are kept because the list tag and its hover read them
+   * without walking the rows. Empty on an `unusable` grade, where there are no
+   * rows to judge — the `reason` is the answer there.
+   *
+   * A preset's rows are the same in every profile's cell (they are the
+   * composition); only the `state` differs. The one caller grades a single
+   * profile, so this costs one copy per preset.
+   */
+  rows: PresetCompositionRow[]
 }
 
 /** Everything the presets tab renders for one profile, read in one call. */

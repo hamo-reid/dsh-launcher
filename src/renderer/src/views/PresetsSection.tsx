@@ -29,17 +29,22 @@ import { apiErrorText } from '../lib/ipc.ts'
 import {
   canReaskProfile, profileScope, scopeNames, scopeProfile, type ProfileScope,
 } from '../lib/profileScope.ts'
-import { presetReadOnlyHintKey, presetRowActions, type PresetRowAction } from '../lib/presetRow.ts'
+import {
+  PRESET_SOURCE_KEY as SOURCE_KEY, presetGradeColour, presetGradeLabel, presetReadOnlyHintKey,
+  presetRowActions, type PresetRowAction,
+} from '../lib/presetRow.ts'
 import { presetTakenIds } from '../lib/presetCreate.ts'
 import AppShell from '../components/AppShell.tsx'
+import ClickRegion from '../components/ClickRegion.tsx'
 import ConfirmMenu, { type MenuAction } from '../components/ConfirmMenu.tsx'
 import EmptyState from '../components/EmptyState.tsx'
 import NavList from '../components/NavList.tsx'
 import Panel from '../components/Panel.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
+import PresetDetailModal from './presets/PresetDetailModal.tsx'
 import { PresetCreateModal, PresetMetaModal, type PresetCreateMode } from './presets/PresetModals.tsx'
 import type {
-  DshEntry, PresetGrade, PresetLegacyItem, PresetListItem, PresetListing, PresetMetaInput, PresetSource,
+  DshEntry, PresetGrade, PresetLegacyItem, PresetListItem, PresetListing, PresetMetaInput,
 } from '../../../shared/types.ts'
 
 /** Beyond this the description is cut short and offered in full on hover, so a
@@ -54,15 +59,8 @@ const MINIMAL_PRESET_ID = 'minimal'
  * places, so the panel would otherwise outgrow the viewport on a short screen. */
 const PLACE_PANEL_MAX_HEIGHT = 420
 
-/** The locale key naming where one definition comes from. `as const` keeps the
- * values literal, which is what lets `t()` typecheck a looked-up key. */
-const SOURCE_KEY = {
-  package: 'preset.source.package',
-  bundle: 'preset.source.bundle',
-  profile: 'preset.source.profile',
-  home: 'preset.source.home',
-  'user-dir': 'preset.source.userDir',
-} as const satisfies Record<PresetSource, string>
+/** The locale key naming where one definition comes from lives in `presetRow.ts`:
+ * the roster row, the sources panel and the contents view all need it. */
 
 /** The label each row action wears. `as const` keeps the values literal, which is
  * what lets `t()` typecheck a looked-up key. */
@@ -97,6 +95,10 @@ export default function PresetsSection(): JSX.Element {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState('')
+  // The preset whose contents are open, held as the ROSTER POSITION plus that row's
+  // identity rather than as the object: every reload rebuilds the roster, and the
+  // position is what the grade is aligned by.
+  const [detail, setDetail] = useState<{ index: number; key: string } | null>(null)
   const [editing, setEditing] = useState<PresetListItem | null>(null)
   // The open create dialog and what it opens on, or null while it is closed.
   const [create, setCreate] = useState<{ mode: PresetCreateMode; from: string } | null>(null)
@@ -254,6 +256,13 @@ export default function PresetsSection(): JSX.Element {
     if (!r.ok) void message.error(apiErrorText(r))
   }
 
+  // The open dialog's preset, resolved against the CURRENT roster: a reload (a
+  // copy, a refresh, a profile switch) rebuilds the roster, and the dialog must
+  // show the same row or nothing — never the previous roster's object measured
+  // against this roster's grade.
+  const detailAt = detail === null ? undefined : presets[detail.index]
+  const detailPreset = detailAt !== undefined && detail !== null && rowKey(detailAt) === detail.key ? detailAt : null
+
   /** This preset's grade under the profile the page is showing.
    *
    * By POSITION first: the listing grades exactly one profile, so its cells line
@@ -267,20 +276,14 @@ export default function PresetsSection(): JSX.Element {
       ? listing.grades[index]
       : listing?.grades.find(cell => cell.presetId === presetId)
 
-  /** What a grade reads as. An `incomplete` grade leads with the count, which is
-   * the whole reason the tag is worth looking at. */
+  /** What a grade reads as, and the Tag colour it wears: both come from the one
+   * mapping the contents view also uses, so the two cannot drift apart. */
   const gradeText = (cell: PresetGrade | undefined): string => {
-    if (cell === undefined) return t('preset.grade.unknown')
-    if (cell.level === 'ok') return t('preset.grade.ok')
-    if (cell.level === 'unusable') return t('preset.grade.unusable')
-    return t('preset.grade.incomplete', { count: cell.missing.length })
+    const label = presetGradeLabel(cell)
+    return t(label.key, label.options)
   }
 
-  const gradeColor = (cell: PresetGrade | undefined): string => {
-    if (cell === undefined) return 'default'
-    if (cell.level === 'ok') return 'success'
-    return cell.level === 'incomplete' ? 'warning' : 'error'
-  }
+  const gradeColor = presetGradeColour
 
   /** The hover text of a grade: why it is unusable, or which rows are missing
    * and what the counting left out. */
@@ -317,7 +320,9 @@ export default function PresetsSection(): JSX.Element {
   }
 
   /** One row: what the preset says about itself, how it grades here, and the two
-   * controls the launcher offers on it — open it, or act on it. */
+   * controls the launcher offers on it — open it, or act on it. The identity block
+   * is clickable and opens the contents; the controls are its SIBLINGS, so a click
+   * on one never also opens the dialog. */
   const row = (preset: PresetListItem, index: number): ReactNode => {
     const description = preset.description ?? t('preset.noDescription')
     const text = (
@@ -342,7 +347,21 @@ export default function PresetsSection(): JSX.Element {
     return (
       <List.Item key={rowKey(preset)}>
         <div style={{ display: 'flex', gap: token.paddingLG, width: '100%', alignItems: 'flex-start' }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
+          {/* The padding is cancelled by the negative margin, so the hover tint
+              has room around the text without moving anything: the row's geometry
+              is exactly what it was before it became clickable. */}
+          <ClickRegion
+            onOpen={() => setDetail({ index, key: rowKey(preset) })}
+            label={preset.name ?? preset.id}
+            className="pm-click-region"
+            style={{
+              flex: 1,
+              minWidth: 0,
+              padding: `${String(token.paddingXS)}px ${String(token.paddingSM)}px`,
+              margin: `-${String(token.paddingXS)}px -${String(token.paddingSM)}px`,
+              borderRadius: token.borderRadius,
+            }}
+          >
             <Space size={8} wrap>
               <Typography.Text strong style={{ fontSize: token.fontSizeLG }}>
                 {preset.name ?? preset.id}
@@ -367,7 +386,7 @@ export default function PresetsSection(): JSX.Element {
                 : <Tooltip title={preset.broken}><Tag color="error">{t('preset.broken')}</Tag></Tooltip>}
             </Space>
             {description.length > DESCRIPTION_CLAMP ? <Tooltip title={description}>{text}</Tooltip> : text}
-          </div>
+          </ClickRegion>
           <Space size={4} style={{ flexShrink: 0 }}>
             {/* One entry point for the two editors: opening a preset is one
                 decision, and the row should not spend two icons on it. */}
@@ -657,6 +676,17 @@ export default function PresetsSection(): JSX.Element {
         />
         {body()}
       </Space>
+
+      <PresetDetailModal
+        preset={detailPreset}
+        // The dialog's grade comes from the SAME positional lookup the roster row
+        // uses, at the position the dialog was opened at: an id lookup could hand
+        // it another row's verdict when two rows carry one id.
+        grade={detailPreset === null ? undefined : gradeOf(detailPreset.id, detail?.index ?? -1)}
+        onOpen={editor => { if (detailPreset !== null) void open(detailPreset, editor) }}
+        onCopy={() => { if (detailPreset !== null) setCreate({ mode: 'copy', from: detailPreset.id }) }}
+        onClose={() => setDetail(null)}
+      />
 
       <PresetMetaModal
         preset={editing}

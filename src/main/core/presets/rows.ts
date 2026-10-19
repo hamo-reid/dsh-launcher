@@ -20,18 +20,12 @@
 
 import { isAbsolute } from 'node:path'
 import { isJsExpr, loadYaml } from '../patch/yaml.ts'
+import type { PresetRowKind } from '../../../shared/preset.ts'
 
-/** Where one row's `name` reaches a module. */
-export type RowKind =
-  /** A `cordis:` builtin the Loader supplies; nothing is resolved. */
-  | 'builtin'
-  /** A path relative to the preset's own directory; the preset ships the file. */
-  | 'preset'
-  /** An absolute path, or a `file:` URL — which is ALSO absolute by definition,
-   * never a base-relative spelling of one. */
-  | 'file'
-  /** A package name, resolved from the installed harness and the profile. */
-  | 'package'
+/** Where one row's `name` reaches a module. The union lives in shared/preset.ts:
+ * the renderer labels these rows and may not import from main, so aliasing it
+ * here keeps one definition of what a row's specifier can mean. */
+export type RowKind = PresetRowKind
 
 /** One composition row worth judging. */
 export interface CompositionRow {

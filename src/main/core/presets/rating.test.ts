@@ -80,8 +80,32 @@ describe('gradePresets', () => {
   it('grades a preset that only names installed harness packages as ok everywhere', () => {
     mkPreset('standard', row("'@deepseek-ai/dsh-tool-fs'") + row('cordis:group'))
     expect(gradePresets(ctx(), roster(), ['alpha', 'beta'])).toEqual([
-      { presetId: 'standard', profile: 'alpha', level: 'ok', checked: 2, skipped: 0, conditional: 0, missing: [] },
-      { presetId: 'standard', profile: 'beta', level: 'ok', checked: 2, skipped: 0, conditional: 0, missing: [] },
+      {
+        presetId: 'standard',
+        profile: 'alpha',
+        level: 'ok',
+        checked: 2,
+        skipped: 0,
+        conditional: 0,
+        missing: [],
+        rows: [
+          { label: 'row 1', name: '@deepseek-ai/dsh-tool-fs', kind: 'package', state: 'found' },
+          { label: 'row 2', name: 'cordis:group', kind: 'builtin', state: 'found' },
+        ],
+      },
+      {
+        presetId: 'standard',
+        profile: 'beta',
+        level: 'ok',
+        checked: 2,
+        skipped: 0,
+        conditional: 0,
+        missing: [],
+        rows: [
+          { label: 'row 1', name: '@deepseek-ai/dsh-tool-fs', kind: 'package', state: 'found' },
+          { label: 'row 2', name: 'cordis:group', kind: 'builtin', state: 'found' },
+        ],
+      },
     ])
   })
 
@@ -149,15 +173,61 @@ describe('gradePresets', () => {
   it('never judges a row the host would not start', () => {
     mkPreset('off', "- id: off\n  name: '@acme/absent'\n  disabled: true\n")
     expect(gradePresets(ctx(), roster(), ['alpha'])).toEqual([
-      { presetId: 'off', profile: 'alpha', level: 'ok', checked: 0, skipped: 1, conditional: 0, missing: [] },
+      {
+        presetId: 'off',
+        profile: 'alpha',
+        level: 'ok',
+        checked: 0,
+        skipped: 1,
+        conditional: 0,
+        missing: [],
+        rows: [{ label: 'row "off"', name: '@acme/absent', kind: 'package', state: 'skipped' }],
+      },
     ])
   })
 
   it('leaves a !!js specifier undecided instead of missing', () => {
     mkPreset('gated', '- id: gated\n  name: !!js pickTool()\n')
     expect(gradePresets(ctx(), roster(), ['alpha'])).toEqual([
-      { presetId: 'gated', profile: 'alpha', level: 'ok', checked: 0, skipped: 0, conditional: 1, missing: [] },
+      {
+        presetId: 'gated',
+        profile: 'alpha',
+        level: 'ok',
+        checked: 0,
+        skipped: 0,
+        conditional: 1,
+        missing: [],
+        // The row travels with the expression in the file's own spelling, not as
+        // the sentinel the parser holds it in, and claims no kind: the loader is
+        // the one that decides what it names.
+        rows: [{ label: 'row "gated"', name: '!!js pickTool()', kind: null, state: 'conditional' }],
+      },
     ])
+  })
+
+  // The counts are projections of the rows, so a reader of either gets the same
+  // answer — and a `!!js` gate that is ALSO disabled stays `skipped`, because the
+  // host never evaluates the specifier of a row it does not start.
+  it('keeps the counts and the rows saying the same thing', () => {
+    mkPreset('mixed', [
+      row("'@deepseek-ai/dsh-tool-fs'"),
+      "- id: gone\n  name: '@acme/absent'\n",
+      "- id: off\n  name: '@acme/absent'\n  disabled: true\n",
+      '- id: off-gate\n  name: !!js pickTool()\n  disabled: true\n',
+      '- id: gate\n  name: !!js pickTool()\n',
+      row('./helper.mjs'),
+    ].join(''))
+    writeFileSync(join(userRoot(), 'mixed', 'helper.mjs'), 'export default 1\n')
+    const [cell] = gradePresets(ctx(), roster(), ['alpha'])
+    const count = (state: string): number => cell.rows.filter(row => row.state === state).length
+    expect(cell.rows.map(row => row.state)).toEqual([
+      'found', 'missing', 'skipped', 'skipped', 'conditional', 'found',
+    ])
+    expect(cell.checked).toBe(count('found') + count('missing'))
+    expect(cell.skipped).toBe(count('skipped'))
+    expect(cell.conditional).toBe(count('conditional'))
+    expect(cell.missing).toEqual(cell.rows.filter(row => row.state === 'missing').map(row => ({ label: row.label, name: row.name })))
+    expect(cell.level).toBe('incomplete')
   })
 
   it('grades every preset against every profile in roster order', () => {
@@ -205,6 +275,13 @@ describe('gradeTargets', () => {
       skipped: 0,
       conditional: 0,
       missing: [{ label: 'row "gone"', name: '@acme/absent' }],
+      rows: [
+        // A `.`-relative row is anchored to the declaring FILE's directory here,
+        // which is why this one is found even though no package ships it.
+        { label: 'row "local"', name: './local.mjs', kind: 'preset', state: 'found' },
+        { label: 'row "pkg"', name: '@deepseek-ai/dsh-tool-fs', kind: 'package', state: 'found' },
+        { label: 'row "gone"', name: '@acme/absent', kind: 'package', state: 'missing' },
+      ],
     }])
   })
 
@@ -221,6 +298,8 @@ describe('gradeTargets', () => {
       skipped: 0,
       conditional: 0,
       missing: [],
+      // Nothing to list: the reason is the whole answer on this grade.
+      rows: [],
       reason: 'the declaration carries no `config` map',
     }])
   })

@@ -142,6 +142,8 @@ config.plugins     ← parts 里所有 kind ∈ {bundle, plugin, dev, mcp} 的�
 - preset 卡片上多一条「它需要的 skill」：已装 / 待更新 / 未装，后两个直接给出装到当前 dsh 的动作（复用 `InstallSkillModal`，不新写弹窗）；
 - `blocked` 的判定直接复用 `preSnapshotChecks` 的两条 blocker 文案，**不产生第二套措辞**。
 
+> **不要和「preset 内容」混为一谈**：preset 页已经可以点开一行、只读地列出这份 preset 由哪些行组成（四态 + 类别，见 [presets.md](../presets.md) §6）。那是**读**一个已有 preset 的组合行；本文的 `Part` / `Plan` / `materialize` 是**写**一个 assembly 的落地判定（哪些零件齐了、缺的该装什么）。两者会共用 `PresetListing` 的行类型，但一个是报告、一个是计划 —— 组装视图不要做进那个弹窗里。
+
 ## 7. 落点与不变式
 
 `assembly.yml` 放 `<dataRoot>/assemblies/<id>/assembly.yml`，与 `plugins/`、`skill-library/`、`dsh/` 同级。

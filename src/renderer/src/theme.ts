@@ -94,5 +94,8 @@ export function cssVars(isDark: boolean): Record<string, string> {
       ? (darkToken.colorBorder ?? 'rgba(255,255,255,0.16)')
       : (lightToken.colorBorder ?? '#e4e7f0'),
     '--pm-scrollbar': isDark ? 'rgba(255,255,255,0.24)' : 'rgba(0,0,0,0.22)',
+    // Hover tint for a click region antd does not style itself (a list row's
+    // clickable block). CSS cannot read antd's tokens, so it travels here.
+    '--pm-hover': isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.03)',
   }
 }

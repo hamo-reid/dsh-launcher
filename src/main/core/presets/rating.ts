@@ -21,10 +21,11 @@
 import { readFileSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { isJsExpr, jsExprText } from '../patch/yaml.ts'
 import { resolveModule } from '../store/module-resolve.ts'
 import { readComposition, type CompositionRead, type CompositionRow } from './rows.ts'
 import type { DshContext } from '../profile/appState.ts'
-import type { PresetGrade, PresetMissingRow, PresetRow } from '../../../shared/types.ts'
+import type { PresetCompositionRow, PresetGrade, PresetMissingRow, PresetRow } from '../../../shared/types.ts'
 
 /** Whether `path` names an existing regular file (any stat failure is a no). */
 function isFile(path: string): boolean {
@@ -116,30 +117,53 @@ function gradeOne(
   const read = target.read
   if (!read.ok) {
     return {
-      ...identity, level: 'unusable', checked: 0, skipped: 0, conditional: 0, missing: [], reason: read.problem,
+      ...identity,
+      level: 'unusable',
+      checked: 0,
+      skipped: 0,
+      conditional: 0,
+      missing: [],
+      // No rows to show: the reason IS the answer on an unusable grade.
+      rows: [],
+      reason: read.problem,
     }
   }
-  const enabled = read.rows.filter(row => !row.skipped)
-  const missing: PresetMissingRow[] = []
-  let conditional = 0
-  for (const row of enabled) {
-    // A `!!js` specifier is the loader's to decide; reporting it as missing
-    // would call a preset the loader accepts broken, which is the failure the
-    // host's own check goes out of its way to avoid.
-    if (row.conditional) {
-      conditional += 1
-      continue
-    }
-    if (rowResolves(ctx, profile, target.baseDir, row, cache)) continue
-    missing.push({ label: row.label, name: row.name })
-  }
+  // One pass, and the row states ARE the verdict: everything the contents view
+  // shows, and the four counts are projections of this one array, so a count can
+  // never disagree with the rows beside it.
+  //
+  // The order of the three questions is the host's, and load-bearing twice over:
+  // a row the host would not start is `skipped` even when its specifier is a
+  // `!!js` expression (that specifier is never evaluated), and a `!!js` row that
+  // WOULD start is the loader's to decide rather than missing — reporting it as
+  // missing would call a preset the loader accepts broken.
+  const rows: PresetCompositionRow[] = read.rows.map(row => ({
+    label: row.label,
+    // The parser holds a `!!js` value as a sentinel-prefixed string; the page
+    // shows this one, so it travels back in the file's own spelling.
+    name: isJsExpr(row.name) ? `!!js ${jsExprText(row.name)}` : row.name,
+    // A `!!js` specifier has no decidable kind: what it names (and from which
+    // base) is the loader's answer, so neither is claimed here.
+    kind: row.conditional ? null : row.kind,
+    state: row.skipped
+      ? 'skipped'
+      : row.conditional
+        ? 'conditional'
+        : rowResolves(ctx, profile, target.baseDir, row, cache) ? 'found' : 'missing',
+  }))
+  const missing: PresetMissingRow[] = rows
+    .filter(row => row.state === 'missing')
+    .map(row => ({ label: row.label, name: row.name }))
   return {
     ...identity,
     level: missing.length === 0 ? 'ok' : 'incomplete',
-    checked: enabled.length - conditional,
-    skipped: read.rows.length - enabled.length,
-    conditional,
+    // Judged rows, which is what the tag's wording means: the ones that were
+    // statically decided, missing ones included.
+    checked: rows.filter(row => row.state === 'found' || row.state === 'missing').length,
+    skipped: rows.filter(row => row.state === 'skipped').length,
+    conditional: rows.filter(row => row.state === 'conditional').length,
     missing,
+    rows,
   }
 }
 
