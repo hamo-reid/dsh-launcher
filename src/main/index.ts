@@ -22,6 +22,7 @@ import { registerPresetsIpc } from './ipc/presets/presets.ts'
 import { hookWindowMaximize, registerWindowIpc } from './ipc/app/window.ts'
 import { registerLogsIpc } from './ipc/app/logs.ts'
 import { child, initLogger, logger, printBanner } from './core/shared/logger.ts'
+import { bannerLines, hookConsoleEncoding } from './core/shared/console.ts'
 import {
   askOnCloseEnabled, closeToTrayEnabled, flushSettings, openDatabase, patchSettings,
 } from './core/settings/settings.ts'
@@ -349,16 +350,7 @@ app.whenReady().then(async () => {
   logger.info('app starting', { version: app.getVersion() != null ? `v${app.getVersion()}` : '' })
   // Signature launch logo — the first thing on the console, colour-graded so a
   // startup is instantly recognisable against the log stream that follows.
-  printBanner([
-    ' ',
-    ' ██████╗ ███████╗██╗  ██╗',
-    ' ██╔══██╗██╔════╝██║  ██║',
-    ' ██║  ██║███████╗███████║',
-    ' ██║  ██║╚════██║██╔══██║',
-    ' ██████╔╝███████║██║  ██║',
-    ' ╚═════╝ ╚══════╝╚═╝  ╚═╝',
-    `         LAUNCHER · v${app.getVersion()}`,
-  ], '96')
+  printBanner(bannerLines(app.getVersion()), '96')
 
   // Show the startup splash as early as possible — before the DB open / renderer
   // load that a cold start must wait on.
@@ -413,3 +405,5 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
+
+hookConsoleEncoding()

@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { child, closeLoggerForTest, initLogger, logger, logsDirectory } from './logger.ts'
+import { child, closeLoggerForTest, initLogger, logger, logsDirectory, printBanner } from './logger.ts'
 
 let dirs: string[] = []
 
@@ -68,6 +68,17 @@ function captureConsole(fn: () => void): string {
   }
   return chunks.join('')
 }
+
+/** The banner is one write followed by a newline of its own, so the next log line
+ * can never be decoded together with the logo (Windows terminals pick one code
+ * page per write, and the logo is the part that gives up). */
+describe('printBanner', () => {
+  it('ends with its own newline so the next log line is a separate write', () => {
+    // console.log only appends \n when the text does not already end with one.
+    const written = captureConsole(() => { printBanner(['LOGO']) })
+    expect(written.endsWith('LOGO\n\n')).toBe(true)
+  })
+})
 
 describe('logger', () => {
   it('logsDirectory is empty before init and set after', () => {

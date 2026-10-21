@@ -220,10 +220,14 @@ export function child(domain: string): LoggerApi {
 /** Print a multi-line startup banner straight to the terminal — no `[dsh]` /
  * level decoration, so the launch logo reads clean against the log stream.
  * `code` is the ANSI SGR foreground for the whole banner (default bright cyan);
- * colouring is dropped entirely when the terminal doesn't support it. Logger-
- * aware build of an ASCII brand signature at app start. */
+ * colouring is dropped entirely when the terminal doesn't support it. */
 export function printBanner(lines: readonly string[], code = '96'): void {
-  console.log(paint(code, lines.join('\n')))
+  // The trailing newline is load-bearing, not tidiness: `console.log` appends one
+  // only when the text doesn't already end with `\n`, so without it the banner and
+  // the next log line share one write. A terminal decodes a write in a single
+  // code page, so that would drag the logo's mis-decode onto the `[dsh] app
+  // starting` line right after it.
+  console.log(`${paint(code, lines.join('\n'))}\n`)
 }
 
 /**
