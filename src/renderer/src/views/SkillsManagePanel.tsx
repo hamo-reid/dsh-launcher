@@ -274,7 +274,7 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
         style={{ position: 'relative', width: '100%', borderRadius: token.borderRadiusLG }}
       >
         <Panel title={t('dsh.skills')} extra={actionRow}>
-          <Space direction="vertical" size={token.padding} style={{ width: '100%' }}>
+          <Space orientation="vertical" size={token.padding} style={{ width: '100%' }}>
             {profile === undefined && (
               <Alert
                 type="info"

@@ -214,7 +214,7 @@ export default function McpView(): JSX.Element {
       }, [modal.editing])
 
   return (
-    <Space direction="vertical" style={{ width: '100%' }} size="middle">
+    <Space orientation="vertical" style={{ width: '100%' }} size="middle">
       <SectionHeading
         title={t('ext.tab.mcp')}
         description={(

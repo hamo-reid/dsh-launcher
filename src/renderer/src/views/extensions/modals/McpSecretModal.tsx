@@ -39,7 +39,7 @@ export function McpSecretModal(props: McpSecretModalProps): JSX.Element {
       width={480}
       destroyOnHidden
     >
-      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      <Space orientation="vertical" size={12} style={{ width: '100%' }}>
         <div style={{ color: 'inherit', fontSize: 'inherit' }}>
           {t('ext.secrets.addHint')}
         </div>

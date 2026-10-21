@@ -24,7 +24,7 @@
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
-  Alert, Button, Divider, Dropdown, List, Popover, Select, Skeleton, Space, Tag, Tooltip, Typography, message, theme,
+  Alert, Button, Divider, Dropdown, Popover, Select, Skeleton, Space, Tag, Tooltip, Typography, message, theme,
 } from 'antd'
 import {
   CodeOutlined, DownOutlined, FolderOpenOutlined, InfoCircleOutlined, PlusOutlined,
@@ -361,7 +361,7 @@ export default function PresetsSection(): JSX.Element {
     // here, so the reason has to be the row's own.
     const readOnlyHint = presetReadOnlyHintKey(preset)
     return (
-      <List.Item key={rowKey(preset)}>
+      <div className="pm-preset-row" key={rowKey(preset)}>
         <div style={{ display: 'flex', gap: token.paddingLG, width: '100%', alignItems: 'flex-start' }}>
           {/* The padding is cancelled by the negative margin, so the hover tint
               has room around the text without moving anything: the row's geometry
@@ -425,7 +425,7 @@ export default function PresetsSection(): JSX.Element {
             <ConfirmMenu actions={actionsFor(preset)} onAction={key => act(preset, key)} />
           </Space>
         </div>
-      </List.Item>
+      </div>
     )
   }
 
@@ -443,7 +443,7 @@ export default function PresetsSection(): JSX.Element {
         style={{ marginBottom: token.padding }}
         title={t('preset.legacyTitle')}
         description={(
-          <Space direction="vertical" size={10} style={{ width: '100%' }}>
+          <Space orientation="vertical" size={10} style={{ width: '100%' }}>
             <span>{t('preset.legacyDesc')}</span>
             {legacy.map(item => (
               <div key={item.id} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -488,7 +488,7 @@ export default function PresetsSection(): JSX.Element {
           showIcon
           title={t('preset.loadFailed')}
           description={(
-            <Space direction="vertical" size={8}>
+            <Space orientation="vertical" size={8}>
               <span>{error}</span>
               <Button size="small" onClick={() => void reload()}>{t('common.refresh')}</Button>
             </Space>
@@ -513,7 +513,7 @@ export default function PresetsSection(): JSX.Element {
       // Nothing to list, but the retired root or a duplicate id still has
       // something to say — that IS the page's content in this state.
       return (
-        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+        <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
           {warningsBlock()}
           {legacyBlock()}
         </Space>
@@ -523,7 +523,12 @@ export default function PresetsSection(): JSX.Element {
       <Panel>
         {warningsBlock()}
         {legacyBlock()}
-        <List dataSource={presets} rowKey={rowKey} renderItem={row} />
+        {/* Plain rows, not antd's `List`. Deprecated in antd 6 and gone in the
+            next major, while the row here is a click region plus two buttons —
+            exactly what `List` was wrapping, and nothing of what it added. */}
+        <div className="pm-preset-list">
+          {presets.map((preset, index) => row(preset, index))}
+        </div>
       </Panel>
     )
   }
@@ -620,7 +625,7 @@ export default function PresetsSection(): JSX.Element {
       {/* The scroll container carries its own padding: the scrollbar sits inside,
           so the content needs a right gutter to clear it. */}
       <div style={{ maxHeight: PLACE_LIST_MAX_HEIGHT, overflowY: 'auto', paddingRight: 12 }}>
-        <Space direction="vertical" size={10} style={{ width: '100%' }}>
+        <Space orientation="vertical" size={10} style={{ width: '100%' }}>
           {placeLines()}
         </Space>
       </div>
@@ -642,7 +647,7 @@ export default function PresetsSection(): JSX.Element {
         />
       )}
     >
-      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
         <SectionHeading
           title={t('preset.title')}
           description={headerSummary.length === 0

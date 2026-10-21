@@ -53,7 +53,7 @@ export function PresetMetaModal(props: PresetMetaModalProps): JSX.Element {
         </Space>
       )}
     >
-      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
         <div>
           <FieldLabel>{t('preset.meta.name')}</FieldLabel>
           <Input
@@ -135,7 +135,7 @@ export function PresetCreateFields(props: PresetCreateFieldsProps): JSX.Element 
   const { t } = useTranslation()
   const { token } = theme.useToken()
   return (
-    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+    <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
       <Segmented
         block
         value={props.mode}

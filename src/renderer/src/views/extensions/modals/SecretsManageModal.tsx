@@ -26,7 +26,7 @@ export function SecretsManageModal(props: SecretsManageModalProps): JSX.Element 
       width={520}
       destroyOnHidden
     >
-      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      <Space orientation="vertical" size={12} style={{ width: '100%' }}>
         <Typography.Text type="secondary">{t('ext.secrets.hint')}</Typography.Text>
         {props.names.length === 0 ? (
           <Typography.Text type="secondary">{t('ext.secrets.empty')}</Typography.Text>

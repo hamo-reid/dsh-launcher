@@ -88,7 +88,7 @@ export default function DevDetachModal({ pkg, hosts, usedIn, onClose, onDetached
             ? <span style={{ color: token.colorTextSecondary }}>{t('plugin.dev.detachNoProfiles')}</span>
             : (
               <Checkbox.Group value={selected} onChange={v => setPicked(v as string[])} style={{ width: '100%' }}>
-                <Space direction="vertical" style={{ width: '100%' }}>
+                <Space orientation="vertical" style={{ width: '100%' }}>
                   {profiles.map(p => (
                     <Checkbox key={p} value={p}>{p}</Checkbox>
                   ))}

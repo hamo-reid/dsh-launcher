@@ -8,7 +8,7 @@
  * searches the current query, and sitting on the overview still searches nothing.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Alert, Button, List, Space, Skeleton, Tag, theme, message } from 'antd'
+import { Alert, Button, Empty, Space, Skeleton, Tag, theme, message } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../../lib/ipc.ts'
 import { fmtDate } from '../../lib/format.ts'
@@ -89,51 +89,49 @@ export default function PluginsDownloadView({ dirMissing, storeMap, onDownloadVe
             <Space orientation="vertical" style={{ width: '100%' }} size="middle">
               {Array.from({ length: 5 }, (_, i) => <Skeleton key={i} active title paragraph={{ rows: 2 }} />)}
             </Space>
+          ) : hits.length === 0 ? (
+            // The empty slot `List` used to render for us.
+            <Empty description={query === 'dsh' ? t('plugin.download.emptyHint') : t('plugin.download.noMatch')} />
           ) : (
-            <List
-              dataSource={hits}
-              rowKey="name"
-              locale={{
-                emptyText: query === 'dsh' ? t('plugin.download.emptyHint') : t('plugin.download.noMatch'),
-              }}
-              renderItem={(hit) => {
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {hits.map((hit) => {
                 const inStore = storeMap.has(hit.name)
                 return (
-                  <List.Item
-                    actions={[
-                      <Button key="dl" size="small" disabled={dirMissing} onClick={() => onDownloadVersion(hit.name)}>{t('plugin.version.download')}</Button>,
-                      ...(inStore ? [<Button key="install" type="primary" size="small" onClick={() => onInstallToProfile(hit.name)}>{t('plugin.download.installToProfile')}</Button>] : []),
-                    ]}
+                  <div
+                    key={hit.name}
+                    style={{
+                      display: 'flex', alignItems: 'flex-start', gap: token.padding,
+                      padding: `${String(token.paddingSM)}px 0`,
+                      borderBottom: `1px solid ${token.colorSplit}`,
+                    }}
                   >
-                    <List.Item.Meta
-                      title={(
-                        <span>
-                          {hit.name}
-                          {inStore && <Tag color="blue" style={{ marginInlineStart: 6 }}>{t('plugin.download.inStore')}</Tag>}
-                          <Tag style={{ marginInlineStart: 6 }}>{hit.version}</Tag>
-                        </span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div>
+                        {hit.name}
+                        {inStore && <Tag color="blue" style={{ marginInlineStart: 6 }}>{t('plugin.download.inStore')}</Tag>}
+                        <Tag style={{ marginInlineStart: 6 }}>{hit.version}</Tag>
+                      </div>
+                      <div style={{ wordBreak: 'break-word', color: token.colorTextSecondary, marginTop: 2 }}>{hit.description || t('plugin.download.noDesc')}</div>
+                      {(hit.author !== undefined || hit.date !== undefined) && (
+                        <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, marginTop: 2 }}>
+                          {hit.author !== undefined && <span>@{hit.author}</span>}
+                          {hit.date !== undefined && fmtDate(hit.date) !== '' && <span>{hit.author !== undefined ? ' · ' : ''}{t('plugin.download.updatedAt', { date: fmtDate(hit.date) })}</span>}
+                        </div>
                       )}
-                      description={(
-                        <>
-                          <div style={{ wordBreak: 'break-word' }}>{hit.description || t('plugin.download.noDesc')}</div>
-                          {(hit.author !== undefined || hit.date !== undefined) && (
-                            <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, marginTop: 2 }}>
-                              {hit.author !== undefined && <span>@{hit.author}</span>}
-                              {hit.date !== undefined && fmtDate(hit.date) !== '' && <span>{hit.author !== undefined ? ' · ' : ''}{t('plugin.download.updatedAt', { date: fmtDate(hit.date) })}</span>}
-                            </div>
-                          )}
-                          {hit.keywords !== undefined && hit.keywords.length > 0 && (
-                            <div style={{ marginTop: 4 }}>
-                              {hit.keywords.slice(0, 6).map(k => <Tag key={k} style={{ marginBottom: 2, marginInlineEnd: 4 }}>{k}</Tag>)}
-                            </div>
-                          )}
-                        </>
+                      {hit.keywords !== undefined && hit.keywords.length > 0 && (
+                        <div style={{ marginTop: 4 }}>
+                          {hit.keywords.slice(0, 6).map(k => <Tag key={k} style={{ marginBottom: 2, marginInlineEnd: 4 }}>{k}</Tag>)}
+                        </div>
                       )}
-                    />
-                  </List.Item>
+                    </div>
+                    <Space size={8} style={{ flexShrink: 0 }}>
+                      <Button size="small" disabled={dirMissing} onClick={() => onDownloadVersion(hit.name)}>{t('plugin.version.download')}</Button>
+                      {inStore && <Button key="install" type="primary" size="small" onClick={() => onInstallToProfile(hit.name)}>{t('plugin.download.installToProfile')}</Button>}
+                    </Space>
+                  </div>
                 )
-              }}
-            />
+              })}
+            </div>
           )}
 
           {!searching && hits.length > 0 && hits.length < total && (

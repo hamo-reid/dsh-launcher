@@ -3,7 +3,7 @@
  * its version and home before being added to the registry.
  */
 import { useEffect, useState } from 'react'
-import { Alert, Button, Checkbox, Input, List, Modal, Space, Tag, message, theme } from 'antd'
+import { Alert, Button, Checkbox, Input, Modal, Space, Tag, message, theme } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../../../lib/ipc.ts'
 import FieldLabel from '../../../components/FieldLabel.tsx'
@@ -119,12 +119,11 @@ export function AddDshModal(p: AddDshModalProps): JSX.Element {
         {candidates.length > 0 && (
           <>
             <Checkbox.Group value={checked} onChange={values => setChecked(values)} style={{ width: '100%' }}>
-              <List
-                dataSource={candidates}
-                size="small"
-                style={{ maxHeight: 260, overflowY: 'auto', border: `1px solid ${token.colorSplit}`, borderRadius: token.borderRadius }}
-                renderItem={c => (
-                  <List.Item key={c.key} style={{ padding: '6px 12px' }}>
+              {/* Plain rows: antd's `List` is deprecated in v6 and its whole job
+                  here was a border, a scroll cap and one row per candidate. */}
+              <div style={{ maxHeight: 260, overflowY: 'auto', border: `1px solid ${token.colorSplit}`, borderRadius: token.borderRadius }}>
+                {candidates.map(c => (
+                  <div key={c.key} style={{ padding: '6px 12px' }}>
                     <Checkbox value={c.key}>
                       <span>
                         {c.name} <Tag>{sourceTag(c.from)}</Tag>
@@ -132,9 +131,9 @@ export function AddDshModal(p: AddDshModalProps): JSX.Element {
                       </span>
                       <div style={{ fontSize: token.fontSizeSM, color: token.colorTextSecondary }}>{c.execPath}</div>
                     </Checkbox>
-                  </List.Item>
-                )}
-              />
+                  </div>
+                ))}
+              </div>
             </Checkbox.Group>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <Button onClick={() => { setCandidates([]); setChecked([]) }}>{t('dsh.add.clear')}</Button>

@@ -169,7 +169,7 @@ export default function SkillsView(): JSX.Element {
   const paged = filtered.slice((currentPage - 1) * CARDS_PER_PAGE, currentPage * CARDS_PER_PAGE)
 
   return (
-    <Space direction="vertical" style={{ width: '100%' }} size="middle">
+    <Space orientation="vertical" style={{ width: '100%' }} size="middle">
       <SectionHeading
         title={t('ext.tab.skills')}
         description={(

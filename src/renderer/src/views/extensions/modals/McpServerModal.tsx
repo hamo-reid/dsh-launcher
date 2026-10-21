@@ -55,7 +55,7 @@ function KVEditor(props: {
       {props.hint !== undefined && (
         <div style={{ color: token.colorTextTertiary, fontSize: token.fontSizeSM, marginBottom: 4 }}>{props.hint}</div>
       )}
-      <Space direction="vertical" size={4} style={{ width: '100%' }}>
+      <Space orientation="vertical" size={4} style={{ width: '100%' }}>
         {props.entries.map((entry, i) => {
           const stored = entry.mode === 'env' && (props.storedNames ?? []).includes(entry.name)
           return (
@@ -204,7 +204,7 @@ export default function McpServerModal(props: McpServerModalProps): JSX.Element 
       // expanded advanced section never grow the dialog past the viewport.
       bodyMax="lg"
     >
-      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      <Space orientation="vertical" size={12} style={{ width: '100%' }}>
         {props.editing?.rawConfig !== undefined && (
           <Alert
             type="warning"
@@ -325,7 +325,7 @@ export default function McpServerModal(props: McpServerModalProps): JSX.Element 
             key: 'advanced',
             label: t('ext.mcp.form.advanced'),
             children: (
-              <Space direction="vertical" size={10} style={{ width: '100%' }}>
+              <Space orientation="vertical" size={10} style={{ width: '100%' }}>
                 <div>
                   <FieldLabel>{t('ext.mcp.form.timeout')}</FieldLabel>
                   <InputNumber

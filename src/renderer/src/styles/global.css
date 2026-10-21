@@ -66,6 +66,23 @@ body .ant-modal-wrap {
   background: var(--pm-hover, rgba(0, 0, 0, 0.03));
 }
 
+/* The page's own vertical rhythm for a list of presets (views/PresetsSection.tsx),
+   which antd's List no longer provides once its Split/Row wrappers are gone: the
+   rows are plain siblings, so the gap lives here instead of on every row. */
+.pm-preset-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* One preset: the clickable region and its controls sit on one line, controls
+   last and never squeezed by a long name. */
+.pm-preset-row {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
 /* A Tabs instance that fills its parent height, with each pane owning its own
    scroll. Used by the Run page's 启动 / 进程管理 tabs so the process pane can
    host a full-height AppShell. antd v6 structure:

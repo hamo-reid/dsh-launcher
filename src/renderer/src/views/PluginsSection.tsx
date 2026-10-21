@@ -300,7 +300,7 @@ export default function PluginsSection() {
               style={{ marginBottom: token.marginSM }}
               title={t('plugin.brokenRefsTitle', { count: broken.length })}
               description={
-                <Space direction="vertical" size={2} style={{ width: '100%' }}>
+                <Space orientation="vertical" size={2} style={{ width: '100%' }}>
                   {describeBroken(broken).map(line => (
                     <div key={line.name}>
                       <Typography.Link onClick={() => setTarget(overview.find(r => r.name === line.name) ?? null)}>

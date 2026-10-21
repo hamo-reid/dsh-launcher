@@ -155,7 +155,7 @@ export default function McpManagePanel(p: McpManagePanelProps): JSX.Element {
   )
 
   const content = (
-    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+    <Space orientation="vertical" size={8} style={{ width: '100%' }}>
       {!p.withPanel && actionRow}
       {(servers ?? []).length === 0 && !loading && (
         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t(homeOnly ? 'ext.mcp.homeEmpty' : 'ext.mcp.profileEmpty')} />

@@ -64,7 +64,7 @@ export function ApplyMcpModal(props: {
       {props.scopes.length === 0 ? (
         <EmptyState title={t('ext.target.noDsh')} />
       ) : (
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+        <Space orientation="vertical" size={12} style={{ width: '100%' }}>
           <div>
             <FieldLabel>{t('ext.target.dsh')}</FieldLabel>
             <Select
@@ -136,7 +136,7 @@ export function PickLibMcpModal(props: {
       {props.entries.length === 0 ? (
         <EmptyState title={t('ext.mcp.libEmpty')} description={t('ext.mcp.libEmptyDesc')} />
       ) : (
-        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+        <Space orientation="vertical" size={8} style={{ width: '100%' }}>
           {props.entries.map(entry => {
             const applied = props.appliedNames.includes(entry.serverName)
             return (
@@ -203,7 +203,7 @@ export function PickLibSkillModal(props: {
       {props.rows.length === 0 ? (
         <EmptyState title={t('ext.skills.libEmpty')} description={t('ext.skills.libEmptyDesc')} />
       ) : (
-        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+        <Space orientation="vertical" size={8} style={{ width: '100%' }}>
           {props.rows.map(row => {
             const current = row.installs.find(install => install.dshId === props.dshId)
             const installed = current?.installed === true
@@ -275,7 +275,7 @@ export function InstallSkillFields(props: {
         : t('ext.skills.installUpToDateHint')
 
   return (
-    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+    <Space orientation="vertical" size={12} style={{ width: '100%' }}>
       <div>
         <FieldLabel>{t('ext.target.dsh')}</FieldLabel>
         <Select
