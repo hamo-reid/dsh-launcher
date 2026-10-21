@@ -11,15 +11,18 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { PluginSource } from '../../../shared/types.ts'
+import { parseSource } from './git-source.ts'
 
-/** Classify a download source into the store's origin kind. A `github:` spec is a
- * GitHub-source install; `file:` is a locally-added plugin; anything else (a bare
- * name, `name@ver`, `@scope/pk@ver`) is an npm install. */
+/** Classify a download source into the store's origin kind. Delegates to the
+ * shared multi-forge parser, so `github:`/`gitlab:`/`gitea:`/`gitee:` shorthands
+ * and git URLs on a named or unnamed host each keep their own identity instead
+ * of collapsing to "github". A `file:` source is a locally-added plugin;
+ * anything else is a registry install. */
 export function sourceKindOf(source: string): PluginSource {
-  const s = source.trim()
-  if (s.startsWith('github:')) return 'github'
-  if (s.startsWith('file:')) return 'local'
-  return 'npm'
+  const kind = parseSource(source).kind
+  if (kind === 'git') return 'github'
+  if (kind === 'unknown') return 'npm'
+  return kind
 }
 
 /** One archived version's origin record. */

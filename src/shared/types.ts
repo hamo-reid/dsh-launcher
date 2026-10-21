@@ -138,12 +138,14 @@ export interface PluginUsagePoint {
 
 /** How an archived plugin version got into the store. `dsh` = shipped with the
  * harness (never archived); `store` = archived but its origin predates source
- * tracking (unresolved). */
-export type PluginSource = 'github' | 'npm' | 'local' | 'dsh' | 'store'
+ * tracking (unresolved). The git forges are kept apart rather than folded into
+ * `github` so the UI can say where a version really came from. */
+export type PluginSource =
+  | 'github' | 'gitlab' | 'gitea' | 'gitee' | 'npm' | 'local' | 'dsh' | 'store'
 
 /** The origin dimension, distinct from the kind/role dimension: how a plugin
  * entered the store. `unknown` = archived before origin tracking existed. */
-export type PluginOrigin = 'npm' | 'github' | 'local' | 'unknown'
+export type PluginOrigin = 'npm' | 'github' | 'gitlab' | 'gitea' | 'gitee' | 'local' | 'unknown'
 
 /** What role a plugin currently plays for profiles.
  * - `template`   — a dsh-shipped bundle (used but never in the store)

@@ -149,7 +149,7 @@ SectionHeading（全宽，只放全局操作）
 
 | 路径 | 段 | 取值来源 | 守卫 |
 |---|---|---|---|
-| `archive/<name>/<version>/` | name / version | IPC 入参；`github:` / 本地 zip / 文件夹包的 `package.json`；dev 包 | `pathIdentifierInvalid` / `versionInvalid`（`store/install.ts`） |
+| `archive/<name>/<version>/` | name / version | IPC 入参；任意 git 源（`github:` / `gitlab:` / `gitea:` / `gitee:` / `git+https://…`）/ 本地 zip / 文件夹包的 `package.json`；dev 包 | `pathIdentifierInvalid` / `versionInvalid`（`store/install.ts`） |
 | `.trash/<name>@<version>` | name / version | 同上 | 同上（与 `dest` 同一变量、同一处校验） |
 | `.pack/<name>/<version>/` | name / version | dev 包自己的 `package.json`（`packDevPackage`） | `pathIdentifierInvalid` / `versionInvalid` |
 | `.import/<stem>` | stem | 用户所选 zip 的**文件名**去掉 `.zip` 后缀（`addLocalPlugin`） | `pathIdentifierInvalid` |
@@ -180,12 +180,6 @@ SectionHeading（全宽，只放全局操作）
 因为版本成了路径段而该目录随后被递归删除，版本**同样**必须过 `versionInvalid`（空串会让路径塌回
 "所有版本"那层，`..` 会走出去 —— 与 P7 同一条判据、同一个理由）。
 
-**P11** 更新检查的**缓存键必须覆盖答案依赖的每一个输入**，registry 是其中之一：「最新版本」来自某个
-HOST，换源（私有镜像 / 内网源）会同时改变每一行的答案，而缓存默认走 `peek`（调用方不传 `refresh`）。
-少了这一项，切源之后的整个 TTL 里都在拿**旧源**的结论回答新源的问题 —— 错的方向还偏偏是"没有更新"
-这种看起来像事实的答案。落点：`store/updates.ts` 的 `cacheKey` 含 `registryBase()`（该函数不缓存，
-读一次即可）。
-
 **P12** **"这个路径在不在那个路径里面"必须用平台的路径语义判定，不能用字符串前缀**（`startsWith(root + sep)`）。
 两侧的拼写来源不同：被比较的一方是**清单里写下的**（上一次的设置、另一台机器、手工编辑），另一方是
 **当前设置**算出来的；Windows 上 `C:\Data\plugins` 与 `c:\data\plugins\x` 是同一个目录，而前缀比较说不是 ——
@@ -203,3 +197,12 @@ profile 的 `file:` 仍然指向它（`refstate.ts` 解析得出的悬空引用�
 > `dsh/versions` 三个目录与 dsh 注册表条目，**profile 清单不在范围内**（迁移是复制，旧库原地保留，
 > 所以清单里的旧路径仍然有效），也不改变任何路径的大小写。真正的触发点是**存储位置被重新拼写**
 > 之后（设置里选了同一目录的另一种写法），或者清单来自另一台机器 / 手工编辑。
+
+**P13** 从**外部字符串推出来的包名只是假设**，必须由安装结果反证，不能当成事实往下传：`installSource`
+拿推出来的名字去 `node_modules/<name>` 读版本，读不到就是失败 —— 但那句失败话必须**点出真实包名**
+（从 `node_modules` 里实际装到的包读出），因为用户从头到尾没输入过包名，只说「包名不匹配」等于把
+猜测的锅丢给他。同一条判据管着源的类型识别：源怎么读只有一个实现（`store/git-source.ts`，纯函数、
+不触网），`packageNameFromSource`、`sourceKindOf`、`repoFromSpec` 都从它取答案，渲染进程那份只用于
+**输入时的即时说明**（每敲一个字走一次 IPC 不现实），两处共用同一批用例，免得「标签说 Gitee、
+装的却是 npm」这种分裂。**没认出来的 git 主机仍按 git 源装**（pnpm 照单收下 URL），只是按既有的
+git 归宿记账 —— 认不出来的是标签，不是可装性。

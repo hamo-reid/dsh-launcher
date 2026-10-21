@@ -16,6 +16,13 @@ describe('originOf', () => {
     [['local'], 'local'],
     [['github', 'npm'], 'npm'],
     [['local', 'npm', 'github'], 'npm'],
+    // Each forge keeps its own identity; npm still outranks all of them.
+    [['gitlab'], 'gitlab'],
+    [['gitea'], 'gitea'],
+    [['gitee'], 'gitee'],
+    [['gitlab', 'npm'], 'npm'],
+    [['gitee', 'gitea'], 'gitea'],
+    [['gitee', 'local'], 'gitee'],
   ]
   it.each(cases)('%j → %s', (sources, expected) => {
     expect(originOf(sources)).toBe(expected)
@@ -65,7 +72,16 @@ describe('repoFromSpec', () => {
     expect(repoFromSpec('github:owner/repo')).toBe('owner/repo')
     expect(repoFromSpec('github:owner/repo#path:/packages/thing')).toBe('owner/repo')
   })
-  it('is undefined for a non-github or malformed spec', () => {
+
+  it('extracts the repo from every other forge and from a git URL', () => {
+    expect(repoFromSpec('gitlab:group/project')).toBe('group/project')
+    expect(repoFromSpec('gitea:o/r')).toBe('o/r')
+    expect(repoFromSpec('gitee:o/r')).toBe('o/r')
+    expect(repoFromSpec('git+https://gitlab.com/g/p.git')).toBe('g/p')
+    expect(repoFromSpec('git@github.com:o/r.git')).toBe('o/r')
+  })
+
+  it('is undefined for a non-git or malformed spec', () => {
     expect(repoFromSpec('@scope/pkg@1.0.0')).toBeUndefined()
     expect(repoFromSpec('file:/x')).toBeUndefined()
     expect(repoFromSpec(undefined)).toBeUndefined()

@@ -22,13 +22,16 @@ import type {
 /** Management precedence, most-manageable first. */
 const PROVENANCE_ORDER: readonly PluginProvenance[] = ['store', 'official', 'sub-bundle', 'local-link', 'external']
 
+/** The git-forge origin kinds, in the order `originOf` prefers them. */
+export const FORGE_KINDS = ['github', 'gitlab', 'gitea', 'gitee'] as const satisfies readonly PluginOrigin[]
+
 /** Derive the origin dimension from an origin-kind list. Prefers the concrete
- * sources in order npm → github → local; a built-in/untracked one maps to
- * `unknown`. Pure — unit-testable. */
+ * sources in order npm → the git forges → local; a built-in/untracked one maps
+ * to `unknown`. Pure — unit-testable. */
 export function originOf(sources: PluginSource[]): PluginOrigin {
-  if (sources.includes('npm')) return 'npm'
-  if (sources.includes('github')) return 'github'
-  if (sources.includes('local')) return 'local'
+  for (const kind of ['npm', ...FORGE_KINDS, 'local'] as const) {
+    if (sources.includes(kind)) return kind
+  }
   return 'unknown'
 }
 

@@ -13,6 +13,7 @@ import { fetchPackageVersions } from './npm.ts'
 import { registryBase } from './registry.ts'
 import { buildInstalledOverview } from './overview.ts'
 import { readPluginSourceSpec } from './sources.ts'
+import { parseSource } from './git-source.ts'
 import { compareVersionsLoose, latestPackageVersion } from '../shared/version.ts'
 import { githubAuthHeaders, noteGithubResponse, resetGithubRateLimit } from '../github/auth.ts'
 import { createKeyedCache } from '../shared/keyed-cache.ts'
@@ -34,23 +35,30 @@ export function isUpdateAvailable(latest: string | undefined, versions: string[]
   return versions.every(v => v.trim() === '' || compareVersionsLoose(latest, v) > 0)
 }
 
-/** The `owner/repo` of a `github:owner/repo[#path:…]` spec, or `undefined`. Pure. */
+/** The `owner/repo` of a git source spec — `github:o/r[#path:…]`, a `gitlab:` /
+ * `gitea:` / `gitee:` shorthand, or a `git+https://…` URL — or `undefined`. Pure.
+ * Only the repo path is returned: which API answers for it is decided by the
+ * caller from the spec's own forge. */
 export function repoFromSpec(spec: string | undefined): string | undefined {
   if (spec === undefined) return undefined
-  const m = /^github:([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)/.exec(spec.trim())
-  return m?.[1]
+  return parseSource(spec).repo
+}
+
+/** Whether an origin is a git forge — the origins that have no registry entry. */
+function isForgeOrigin(origin: PluginOrigin): origin is 'github' | 'gitlab' | 'gitea' | 'gitee' {
+  return origin === 'github' || origin === 'gitlab' || origin === 'gitea' || origin === 'gitee'
 }
 
 /** Build one plugin's update info from its overview row + resolved latest. Pure.
- * `manual` means the origin cannot be auto-checked (local, or a github install
- * whose tags could not be resolved). */
+ * `manual` means the origin cannot be auto-checked (local, or a git install whose
+ * tags could not be resolved — only GitHub has a tag API we call today). */
 export function toUpdateInfo(
   row: Pick<InstalledOverviewRow, 'name' | 'versions' | 'usage'> & { origin: PluginOrigin },
   latest: string | undefined,
 ): PluginUpdateInfo {
   const applied = [...new Set(row.usage.map(u => u.version).filter((v): v is string => v !== undefined && v !== ''))]
   const archived = [...row.versions]
-  const manual = row.origin === 'local' || (row.origin === 'github' && latest === undefined)
+  const manual = row.origin === 'local' || (isForgeOrigin(row.origin) && latest === undefined)
   return {
     name: row.name,
     origin: row.origin,
@@ -145,10 +153,12 @@ export async function checkPluginUpdates(
         // `unknown` = a pre-tracking archive, usually npm.
         latest = await latestNpmVersion(row.name)
       } else if (origin === 'github') {
+        // Only GitHub exposes a tags API we consume; GitLab/Gitea/Gitee installs
+        // stay `manual` rather than being asked for a version we cannot read.
         const repo = repoFromSpec(readPluginSourceSpec(storeDir, row.name))
         if (repo !== undefined) latest = await latestGithubTag(repo)
       }
-      // `local` — and a github install whose repo cannot be resolved — stay manual.
+      // `local` — and a git install whose repo cannot be resolved — stay manual.
       list[i] = toUpdateInfo({ ...row, origin }, latest)
     }
   }

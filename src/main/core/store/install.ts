@@ -14,6 +14,7 @@ import {
   versionStagingDir, versionsRoot, type ProfileManifestShape,
 } from './layout.ts'
 import { recordPluginSource, sourceKindOf } from './sources.ts'
+import { installNameFor } from './git-source.ts'
 import { pathIdentifierInvalid, versionInvalid } from '../profile/name-guard.ts'
 import { migrateLegacyStore } from './migration.ts'
 import { isLegacyPkg } from './uninstall.ts'
@@ -41,19 +42,13 @@ function writeHoistedWorkspace(verDir: string): boolean {
   return true
 }
 
-/** Derive a package-name hint from a download source (`name@ver`, `name`, or a
- * `github:owner/repo` spec — brand guess for the repo tail). */
+/** Derive a package-name hint from a download source. Delegates to the shared
+ * multi-forge parser (`git-source.ts`), so an npm spec, a `github:`/`gitlab:`/
+ * `gitea:`/`gitee:` shorthand, a git URL on any host, or a `file:` path all
+ * answer consistently. The hint is only a HINT: `installSource` re-reads the
+ * real name from `node_modules` and reports a mismatch rather than trusting it. */
 export function packageNameFromSource(source: string): string {
-  const trimmed = source.trim()
-  const pure = trimmed.replace(/^github:/, '')
-  if (trimmed.startsWith('github:')) {
-    return pure.split('#')[0].split('/')[1] ?? 'plugin'
-  }
-  // @scope/pk@ver | pk@ver | @scope/pk | pk
-  const scoped = pure.startsWith('@')
-  const body = scoped ? pure.slice(1) : pure
-  const nameOnly = body.split('@')[0]
-  return (scoped ? '@' : '') + nameOnly
+  return installNameFor(source) ?? 'plugin'
 }
 
 /** Install one source (npm package or git spec) into the store. Downloads into a
@@ -64,6 +59,35 @@ export function packageNameFromSource(source: string): string {
 export async function addPlugin(dir: string, source: string, name?: string): Promise<PnpmResult> {
   if (dir === '') return { ok: false, text: '未配置插件保存位置 —— 请在「设置」中指定' }
   return installSource(dir, name ?? packageNameFromSource(source), source)
+}
+
+/** The package names a staging project actually installed, most-likely-first.
+ * Reads `node_modules` (one level, plus `@scope/name` inside a scope dir) and
+ * keeps the ones that look like the plugin itself: a package with a `.dsh`
+ * manifest key or a name matching the install hint. Used only to explain a
+ * mismatch, so it is deliberately forgiving — an empty list just means the
+ * generic message is shown. */
+function installedPackageNames(staging: string): string[] {
+  const mods = join(staging, 'node_modules')
+  if (!existsSync(mods)) return []
+  const out: string[] = []
+  const consider = (dir: string, name: string): void => {
+    // Peer/host packages are what a plugin DEPENDS on, never what it installs as.
+    if (name === '.pnpm' || name === '.bin' || name.startsWith('@deepseek-ai/')) return
+    if (!existsSync(join(dir, 'package.json'))) return
+    out.push(name)
+  }
+  for (const entry of readdirSync(mods, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    if (entry.name.startsWith('@')) {
+      for (const inner of readdirSync(join(mods, entry.name), { withFileTypes: true })) {
+        if (inner.isDirectory()) consider(join(mods, entry.name, inner.name), `${entry.name}/${inner.name}`)
+      }
+      continue
+    }
+    consider(join(mods, entry.name), entry.name)
+  }
+  return out.sort((a, b) => a.localeCompare(b))
 }
 
 /** A store install's outcome. `version` is the version actually ARCHIVED by this
@@ -130,9 +154,19 @@ export async function installSource(
     // pnpm may have reported success while the package never landed (e.g. a
     // resolution failure whose `added 0` slipped the fallible check above). Keep
     // pnpm's own tail so the user sees the real reason, not a guess at it.
+    //
+    // The guessed name is the usual cause when it does not match the guess: a
+    // repo whose `package.json` declares a scoped/different name installs fine
+    // under THAT name, so the check above looks in the wrong directory. Name the
+    // real package(s) pnpm did install — the user never typed a package name, so
+    // "package name mismatch" alone explains nothing.
     const tail = result.text.trim().split(/\r?\n/).slice(-4).join(' ')
+    const landed = installedPackageNames(staging)
     rmSync(staging, { recursive: true, force: true })
-    return { ok: false, text: `未在 node_modules 中找到 ${name}（包名不匹配，或依赖解析失败）${tail !== '' ? `\n${tail}` : ''}` }
+    const hint = landed.length === 0
+      ? `包名不匹配，或依赖解析失败`
+      : `来源声明的包名是 ${landed.slice(0, 3).map(n => `\`${n}\``).join(' / ')}，与按来源推测的 ${name} 不一致`
+    return { ok: false, text: `未在 node_modules 中找到 ${name}（${hint}）${tail !== '' ? `\n${tail}` : ''}` }
   }
   // The version becomes an `archive/<name>/<version>/` path segment AND a `.trash`
   // leaf name. A registry source is semver-enforced by the registry, but a

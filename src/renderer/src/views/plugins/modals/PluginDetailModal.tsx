@@ -17,6 +17,9 @@ import type { InstalledOverviewRow, PluginUpdateInfo, PluginUsagePoint } from '.
 
 const SOURCE_COLORS: Record<string, string> = {
   github: 'green',
+  gitlab: 'geekblue',
+  gitea: 'lime',
+  gitee: 'red',
   npm: 'blue',
   local: 'cyan',
   dsh: 'purple',
