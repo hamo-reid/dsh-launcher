@@ -93,10 +93,15 @@ export type ProfileFileKind = 'manifest' | 'patch'
 export interface ProfileValidation {
   /** True when nothing blocks a boot. */
   ok: boolean
-  /** `package.json` parse/shape error, when malformed. */
+  /** `package.json` parse/shape error, when malformed (a profile that does not
+   * exist at all lands here — an absent manifest is never "clean"). */
   manifestError?: string
-  /** `cordis.patch.yml` parse/shape error, when malformed. */
+  /** The first `cordis.patch.yml` parse/shape error — the one to show inline. */
   patchError?: string
+  /** Every patch file a boot reads that does not parse, prefixed with the bundle
+   * that ships it. One broken bundle file is one line here; a check that stops at
+   * the first would make repairing a profile a guessing game. */
+  patchErrors?: string[]
   /** Entry ids inserted by more than one layer (boot-blocking). */
   conflicts: InsertConflict[]
   /** Listed bundles whose patch cannot be resolved (missing install). */

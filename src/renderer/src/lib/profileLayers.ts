@@ -155,12 +155,12 @@ export function lastSeenByRow(layers: readonly ProfileLayer[]): Map<string, Laye
   return seen
 }
 
-/** Every problem the inspector counts for its badge: the boot-blocking conflicts
- * plus each finding of the last validation run. */
+/** Every problem the diagnostics report counts for its badge: the boot-blocking
+ * conflicts plus each finding of the last validation run. */
 export function issueCount(conflicts: readonly InsertConflict[], validation: ProfileValidation | null): number {
   return conflicts.length
     + (validation?.manifestError !== undefined ? 1 : 0)
-    + (validation?.patchError !== undefined ? 1 : 0)
+    + (validation?.patchErrors?.length ?? (validation?.patchError !== undefined ? 1 : 0))
     + (validation?.missingBundles.length ?? 0)
     + (validation?.unclaimedBundles.length ?? 0)
 }

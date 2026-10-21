@@ -18,7 +18,6 @@ import DepsSection from './profile-detail/DepsSection.tsx'
 import BundlesSection from './profile-detail/BundlesSection.tsx'
 import PatchSection from './profile-detail/PatchSection.tsx'
 import DiagnosticsSection from './profile-detail/DiagnosticsSection.tsx'
-import ProfileInspector from './profile-detail/ProfileInspector.tsx'
 import type { SectionKey } from './profile-detail/sections.ts'
 import { NewRowModal, SourceEditModal } from './profile-detail/PatchModals.tsx'
 import type { InsertConflict, ProfileDetail, ProfileLayer, ProfileValidation } from '../../../shared/types.ts'
@@ -99,7 +98,6 @@ export default function ProfileDetailView({ dshId, name, onChanged, onRenamed }:
   const [transferOpen, setTransferOpen] = useState(false)
 
   // Workspace chrome.
-  const [inspectorOpen, setInspectorOpen] = useState(true)
   const [depsAddOpen, setDepsAddOpen] = useState(false)
   const [bundleActivateOpen, setBundleActivateOpen] = useState(false)
 
@@ -246,7 +244,7 @@ const loadSeq = useRef(0)
   }, [section, dshId])
 
   // Re-run the composition check after any structural edit (the layer list
-  // changes) and on mount, so the inspector is always current.
+  // changes) and on mount, so the diagnostics report is always current.
   useEffect(() => {
     let alive = true
     setValidating(true)
@@ -444,7 +442,7 @@ const loadSeq = useRef(0)
   ]
 
   // Section-local actions live in the panel header; the page header keeps only
-  // the global ones (validate / rename / reveal / inspector).
+  // the global ones (validate / rename / reveal).
   const sectionActions = (): ReactNode => {
     if (section === 'deps') {
       return (
@@ -489,9 +487,15 @@ const loadSeq = useRef(0)
         </Space>
       )
     }
-    // Diagnostics adds no action of its own: "validate" is a page-level action,
-    // shown in the header from every section, so a second copy here was the same
-    // button twice on one screen.
+    if (section === 'diagnostics') {
+      // The report owns "重新检查" itself, next to its own verdict — a second copy
+      // in the panel header would be the same button twice on one screen.
+      return (
+        <Space size={8}>
+          <Button size="small" icon={<FolderOpenOutlined />} onClick={() => void revealProfile()}>{t('profile.workspace.reveal')}</Button>
+        </Space>
+      )
+    }
     return null
   }
 
@@ -510,7 +514,6 @@ const loadSeq = useRef(0)
           <Button size="small" onClick={revalidate} loading={validating}>{t('profile.workspace.validate')}</Button>
           <Button size="small" onClick={() => setRenameOpen(true)}>{t('profile.workspace.rename')}</Button>
           <Button size="small" icon={<FolderOpenOutlined />} onClick={() => void revealProfile()}>{t('profile.workspace.reveal')}</Button>
-          <Button size="small" type={inspectorOpen ? 'primary' : 'default'} onClick={() => setInspectorOpen(v => !v)}>{t('profile.workspace.inspector')}</Button>
         </Space>
       )} />
 
@@ -635,26 +638,18 @@ const loadSeq = useRef(0)
         <DiagnosticsSection
           validation={validation}
           validating={validating}
+          bundleCount={bundles.length}
+          patchRowCount={profileLayer === undefined ? 0 : layerRowCount(profileLayer)}
+          depCount={dependencies.length}
           conflictsOpen={conflictsOpen}
           onToggleConflicts={() => setConflictsOpen(open => !open)}
+          onValidate={revalidate}
+          onJump={(target, expandConflicts) => { setSection(target); if (expandConflicts === true) setConflictsOpen(true) }}
         />
       )}
             </div>
           </Panel>
         </div>
-
-        {inspectorOpen && (
-          <ProfileInspector
-            validation={validation}
-            validating={validating}
-            bundleCount={bundles.length}
-            patchRowCount={profileLayer === undefined ? 0 : layerRowCount(profileLayer)}
-            depCount={dependencies.length}
-            onValidate={revalidate}
-            onReveal={() => void revealProfile()}
-            onJump={(target, expandConflicts) => { setSection(target); if (expandConflicts === true) setConflictsOpen(true) }}
-          />
-        )}
       </div>
 
       <ScrollModal title={activeLayer !== undefined ? labelText(layerLabel(activeLayer)) : ''} open={openLayer !== null} footer={null} onCancel={() => setOpenLayer(null)} width={MODAL.wide} bodyMax={460}>

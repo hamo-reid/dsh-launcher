@@ -7,6 +7,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { homePatchPath, profileDir, profilePatchPath } from '../profile/home.ts'
 import { readManifest } from '../profile/manifest.ts'
+import { MANIFEST_FILE_NAME } from '../profile/manifest-file.ts'
 import { moduleSearchRoots } from './module-resolve.ts'
 import { bundlePatchRels, declaredBundlePatches } from './bundle-manifest.ts'
 import {
@@ -300,27 +301,70 @@ export function listMissingBundles(ctx: DshContext, profile: string): string[] {
   return bundles.filter(bundle => !bundlePatchesResolve(ctx, bundle, profile, roots))
 }
 
+/** Every patch file the host would actually load for this profile, with the layer
+ * it belongs to: the profile's own user patch, then each bundle's patch files in
+ * manifest order.
+ *
+ * This is the ONE list {@link validateComposition} parses, so its verdict cannot
+ * disagree with what the host composes — the check used to look at the profile
+ * patch alone, and a bundle whose patch did not even parse came back `ok`. */
+function bootPatchFiles(ctx: DshContext, profile: string): { layer: string; path: string }[] {
+  const files: { layer: string; path: string }[] = []
+  const own = profilePatchPath(ctx, profile)
+  files.push({ layer: 'profile', path: own })
+  // An absent profile has no bundles to enumerate, and the bundle list would
+  // throw before `validateComposition` can turn that into a verdict.
+  if (!existsSync(join(profileDir(ctx, profile), MANIFEST_FILE_NAME))) return files
+  const roots = moduleSearchRoots(ctx, profile)
+  for (const bundle of readManifest(ctx, profile).bundles) {
+    for (const path of resolveBundlePatches(ctx, bundle, profile, roots)) files.push({ layer: bundle, path })
+  }
+  return files
+}
+
 /**
- * Pre-launch composition check for one profile: manifest/patch parse errors,
- * duplicate inserted entry ids, missing bundles and unclaimed (installed but
- * inactive) bundles. `extraPatches` are the `--patch` overlays a launch would
- * add, so the check reflects what would actually boot.
+ * Pre-launch composition check for one profile.
+ *
+ * "Can it boot" is judged by the files a boot actually reads — the profile's user
+ * patch AND every bundle patch — plus the manifest's structural contracts:
+ * manifest/patch parse errors, duplicate inserted entry ids, missing bundles and
+ * unclaimed (installed but inactive) bundles. `extraPatches` are the `--patch`
+ * overlays a launch would add, so the check reflects what would actually boot.
+ *
+ * A profile that does not exist at all is NOT clean: an absent manifest is a
+ * manifest error, never an empty profile that passes.
  */
 export function validateComposition(
   ctx: DshContext, profile: string, extraPatches: readonly string[] = [],
 ): ProfileValidation {
   const result: ProfileValidation = { ok: true, conflicts: [], missingBundles: [], unclaimedBundles: [] }
 
-  const patchPath = profilePatchPath(ctx, profile)
-  try {
-    assertPatchDocValid(existsSync(patchPath) ? readFileSync(patchPath, 'utf8') : '[]')
-  } catch (error) {
-    result.patchError = error instanceof Error ? error.message : String(error)
+  // Every unparseable patch file is reported, not just the first: fixing one and
+  // re-running to find the next is how a broken profile turns into a chore.
+  const patchErrors: string[] = []
+  for (const { layer, path } of bootPatchFiles(ctx, profile)) {
+    try {
+      assertPatchDocValid(existsSync(path) ? readFileSync(path, 'utf8') : '[]')
+    } catch (error) {
+      const why = error instanceof Error ? error.message : String(error)
+      patchErrors.push(layer === 'profile' ? why : `${layer}: ${why}`)
+    }
+  }
+  if (patchErrors.length > 0) {
+    result.patchErrors = patchErrors
+    result.patchError = patchErrors[0]
   }
 
   try {
-    result.missingBundles = listMissingBundles(ctx, profile)
-    result.unclaimedBundles = listUnclaimedBundles(ctx, profile)
+    // An absent profile is a manifest error, not an empty composition: checked
+    // before anything walks the directory, because the walker throws a message
+    // that reads like a crash rather than a verdict.
+    if (!existsSync(join(profileDir(ctx, profile), MANIFEST_FILE_NAME))) {
+      result.manifestError = `profile 不存在：${profile}`
+    } else {
+      result.missingBundles = listMissingBundles(ctx, profile)
+      result.unclaimedBundles = listUnclaimedBundles(ctx, profile)
+    }
   } catch (error) {
     result.manifestError = error instanceof Error ? error.message : String(error)
   }
@@ -329,7 +373,7 @@ export function validateComposition(
   if (result.manifestError === undefined) result.conflicts = findInsertConflicts(ctx, profile, extraPatches)
 
   result.ok = result.manifestError === undefined
-    && result.patchError === undefined
+    && result.patchErrors === undefined
     && result.conflicts.length === 0
     && result.missingBundles.length === 0
   return result

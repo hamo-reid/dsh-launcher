@@ -316,6 +316,51 @@ describe('listMissingBundles / validateComposition', () => {
     expect(v.ok).toBe(false)
     expect(v.manifestError).toBeDefined()
   })
+
+  // The check used to parse the profile's OWN patch file only. A bundle whose
+  // cordis.patch.yml did not parse came back `ok`, so the screen said "will boot"
+  // about a profile the host refuses to load — the worst possible answer, because
+  // the user only finds out by launching.
+  it('reads every bundle patch a boot would load, not just the profile patch', () => {
+    mkProfile('p', ['b1'], {})
+    mkBundle('p', 'b1', '- insert:\n    - id: x\n      name: [unclosed\n')
+    const v = validateComposition(ctx(), 'p')
+    expect(v.ok).toBe(false)
+    expect(v.patchError).toBeDefined()
+    // Named by the bundle that ships it: with many bundles, "patch 不是合法 YAML"
+    // alone does not say which file to open.
+    expect(v.patchErrors?.[0]).toMatch(/^b1: /)
+  })
+
+  it('reports every unparseable patch file at once', () => {
+    mkProfile('p', ['b1', 'b2'], {})
+    mkBundle('p', 'b1', '- insert:\n    - id: x\n      name: [unclosed\n')
+    mkBundle('p', 'b2', ':\n  - nope\n')
+    const v = validateComposition(ctx(), 'p')
+    expect(v.patchErrors).toHaveLength(2)
+    expect(v.patchErrors?.join('\n')).toMatch(/b1: /)
+    expect(v.patchErrors?.join('\n')).toMatch(/b2: /)
+    // The inline field stays the first one, so a caller that shows one line still
+    // shows something true.
+    expect(v.patchError).toBe(v.patchErrors?.[0])
+  })
+
+  it('leaves a healthy multi-bundle profile clean', () => {
+    // Control for the two tests above: reading bundle patches must not invent a
+    // problem on a profile that boots.
+    mkProfile('p', ['b1', 'b2'], {})
+    mkBundle('p', 'b1', '- insert:\n    - id: a\n      name: pkg\n')
+    mkBundle('p', 'b2', '- insert:\n    - id: b\n      name: pkg\n')
+    const v = validateComposition(ctx(), 'p')
+    expect(v.ok).toBe(true)
+    expect(v.patchErrors).toBeUndefined()
+  })
+
+  it('flags a profile that does not exist instead of calling it clean', () => {
+    const v = validateComposition(ctx(), 'never-created')
+    expect(v.ok).toBe(false)
+    expect(v.manifestError).toBeDefined()
+  })
 })
 
 describe('listMcpServers', () => {

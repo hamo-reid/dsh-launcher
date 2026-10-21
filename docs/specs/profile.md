@@ -219,3 +219,14 @@ git 归宿记账 —— 认不出来的是标签，不是可装性。
 
 落点：`store/overview.ts` 的 `versionSizes` / `attachPluginSizes`，渲染侧换算在
 `renderer/src/lib/versionSizes.ts`（纯函数、有用例，覆盖负共享、无总量、未测到三种退化）。
+
+**P15** **「能不能启动」必须按启动真正会读的东西来判**，不能按最方便读到的那一个文件来判：
+`validateComposition` 解析的是 profile 自己的 patch **加上每个 bundle 的每个 patch 文件**
+（启动时会加载的那些），不是只看 profile 层。曾经只看 profile 层，于是 bundle 的
+`cordis.patch.yml` 根本不是 YAML 时它照样回 `ok: true` —— 界面上写着「可以启动」，用户点了启动才炸，
+这是最糟的一种回答。两条具体后果：①每个坏文件都要报，并且**带上它来自哪个 bundle**（只有一个文件时
+那行话还得能读），修完一个再跑一次才知道下一个坏文件在哪，等于把修 profile 变成猜谜；②profile
+**根本不存在**时报的是 manifest 错误，不是一份「空组合」的通过结论 —— 没有 manifest 从来不是干净。
+
+界面侧同一条：诊断报告里**每一条发现都要能点到能修它的地方**，报告和「一个独立的检查器面板」
+不能都声称自己说的是全部问题（两个面板说同一件事，就是一个多余的）。
