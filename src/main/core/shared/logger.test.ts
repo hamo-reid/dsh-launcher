@@ -74,9 +74,22 @@ function captureConsole(fn: () => void): string {
  * page per write, and the logo is the part that gives up). */
 describe('printBanner', () => {
   it('ends with its own newline so the next log line is a separate write', () => {
-    // console.log only appends \n when the text does not already end with one.
-    const written = captureConsole(() => { printBanner(['LOGO']) })
-    expect(written.endsWith('LOGO\n\n')).toBe(true)
+    // Asserts the argument, not what some transport ended up doing with it:
+    // `console.log` only appends `\n` when the text does not already end with one,
+    // and which streams the console sink actually writes to varies by environment
+    // (a CI run without a tty writes elsewhere than a developer's terminal), so
+    // capturing output made this test pass locally and fail in the release build.
+    const seen: string[] = []
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      seen.push(args.map(a => String(a)).join(' '))
+    })
+    try {
+      printBanner(['LOGO'])
+    } finally {
+      spy.mockRestore()
+    }
+    expect(seen).toHaveLength(1)
+    expect(seen[0]?.endsWith('LOGO\n')).toBe(true)
   })
 })
 
