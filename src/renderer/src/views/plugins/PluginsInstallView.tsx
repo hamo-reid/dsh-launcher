@@ -104,29 +104,36 @@ export default function PluginsInstallView({ dir, dirMissing, onInstalled }: Pro
     await onInstalled()
   }
 
-  const renderSession = (d: DownloadSessionInfo): JSX.Element => (
-    <div key={d.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '6px 0' }}>
-      <span style={{ paddingTop: 2 }}><StatusIcon status={d.status} /></span>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <Space size={8} wrap>
-          <Typography.Text strong>{d.name}</Typography.Text>
-          <Tag
-            color={d.status === 'running' ? 'processing' : d.status === 'done' ? 'success' : d.status === 'failed' ? 'error' : 'default'}
-            style={{ marginInlineEnd: 0 }}
-          >
-            {t(STATUS_LABEL[d.status])}
-          </Tag>
-        </Space>
-        <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, wordBreak: 'break-all' }}>{d.source}</div>
-        {d.status === 'failed' && d.message !== undefined && d.message !== '' && (
-          <div style={{ color: token.colorError, fontSize: token.fontSizeSM, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{d.message}</div>
+  const renderSession = (d: DownloadSessionInfo): JSX.Element => {
+    // The cause, not the log: a failed install's reason belongs here, its whole
+    // output belongs in the download center's detail view.
+    const cause = d.failure !== undefined
+      ? (t as unknown as (key: string, options?: Record<string, string>) => string)(d.failure.headlineKey, d.failure.params ?? {})
+      : d.message
+    return (
+      <div key={d.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '6px 0' }}>
+        <span style={{ paddingTop: 2 }}><StatusIcon status={d.status} /></span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <Space size={8} wrap>
+            <Typography.Text strong>{d.name}</Typography.Text>
+            <Tag
+              color={d.status === 'running' ? 'processing' : d.status === 'done' ? 'success' : d.status === 'failed' ? 'error' : 'default'}
+              style={{ marginInlineEnd: 0 }}
+            >
+              {t(STATUS_LABEL[d.status])}
+            </Tag>
+          </Space>
+          <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, wordBreak: 'break-all' }}>{d.source}</div>
+          {d.status === 'failed' && cause !== undefined && cause !== '' && (
+            <div style={{ color: token.colorError, fontSize: token.fontSizeSM, wordBreak: 'break-word' }}>{cause}</div>
+          )}
+        </div>
+        {d.status === 'running' && (
+          <Button size="small" danger type="text" onClick={() => void cancel(d.id)}>{t('download.panel.cancel')}</Button>
         )}
       </div>
-      {d.status === 'running' && (
-        <Button size="small" danger type="text" onClick={() => void cancel(d.id)}>{t('download.panel.cancel')}</Button>
-      )}
-    </div>
-  )
+    )
+  }
 
   return (
     <Space orientation="vertical" style={{ width: '100%' }} size="middle">

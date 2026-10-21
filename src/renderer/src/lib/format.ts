@@ -41,3 +41,17 @@ const numberFormat = new Intl.NumberFormat()
 export function fmtNum(n: number): string {
   return numberFormat.format(n)
 }
+
+/** A duration for a task row: `850 ms`, `3.2 s`, `1 分 05 秒`. Sub-second stays in
+ * milliseconds because that is the range where the exact number matters (a
+ * cached install finished in 300 ms, a hung one took 40 s — the magnitude IS the
+ * diagnosis). */
+export function fmtDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return ''
+  if (ms < 1000) return `${String(Math.round(ms))} ms`
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`
+  const total = Math.round(ms / 1000)
+  const minutes = Math.floor(total / 60)
+  const seconds = total % 60
+  return `${String(minutes)} 分 ${String(seconds).padStart(2, '0')} 秒`
+}

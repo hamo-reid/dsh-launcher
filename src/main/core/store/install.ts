@@ -15,6 +15,7 @@ import {
 } from './layout.ts'
 import { recordPluginSource, sourceKindOf } from './sources.ts'
 import { installNameFor } from './git-source.ts'
+import { diagnoseFailure, type AdviceKey, type FailureKind, type FailureReport } from './failure.ts'
 import { pathIdentifierInvalid, versionInvalid } from '../profile/name-guard.ts'
 import { migrateLegacyStore } from './migration.ts'
 import { isLegacyPkg } from './uninstall.ts'
@@ -94,8 +95,36 @@ function installedPackageNames(staging: string): string[] {
  * call, which is not always the one a caller would re-derive afterwards:
  * `latestStoreVersion` answers "highest in store", so asking it which build a
  * snapshot just produced silently picks a different one when a higher version is
- * already archived. Optional only so existing `PnpmResult` callers keep working. */
-export type InstallResult = PnpmResult & { version?: string }
+ * already archived. Optional only so existing `PnpmResult` callers keep working.
+ *
+ * `failure` is present on every failed result: the classified reason plus the
+ * evidence it was read from. `text` stays the human-facing message, but a caller
+ * that shows a failure to a person should prefer `failure` — it carries the kind
+ * (so the UI can suggest a fix) and keeps `text` short instead of dumping a log. */
+export type InstallResult = PnpmResult & {
+  version?: string
+  failure?: FailureReport
+  /** The complete pnpm output of the attempt, retained on failure/cancel. */
+  log?: string
+}
+
+/** Build a failed `InstallResult` from a pre-known cause (a guard clause). The
+ * guards below reject before pnpm runs, so there is no log to read — the reason
+ * is the message, and the advice is whatever that reason implies. */
+function refusal(text: string, kind: FailureKind, advice: AdviceKey[], params?: Record<string, string>): InstallResult {
+  return {
+    ok: false,
+    text,
+    failure: {
+      kind,
+      headlineKey: text,
+      headline: text,
+      advice,
+      evidence: [text],
+      ...(params !== undefined ? { params } : {}),
+    },
+  }
+}
 
 /** Shared download path: build the source into a staging project, read the real
  * version, then hoist the whole project to `archive/<name>/<version>/`.
@@ -108,14 +137,14 @@ export type InstallResult = PnpmResult & { version?: string }
 export async function installSource(
   storeDir: string, name: string, source: string, signal?: AbortSignal, opts?: { replace?: boolean },
 ): Promise<InstallResult> {
-  if (name.trim() === '') return { ok: false, text: '未能确定插件包名' }
+  if (name.trim() === '') return refusal('未能确定插件包名', 'name-mismatch', ['checkPackageJson'])
   // The name becomes an `archive/<name>/` path segment; refuse anything that
   // could escape the store tree (`..`, `\`, drive/absolute, `//`). Deliberately
   // looser than npm's name rules so local/legacy package names (uppercase, …)
   // still install.
-  if (pathIdentifierInvalid(name)) return { ok: false, text: `插件包名不合法：${name}` }
+  if (pathIdentifierInvalid(name)) return refusal(`插件包名不合法：${name}`, 'name-mismatch', ['checkPackageJson'])
   // A source starting with `-` would be parsed by pnpm as a flag, not a package.
-  if (source.trim().startsWith('-')) return { ok: false, text: `插件来源不合法：${source}` }
+  if (source.trim().startsWith('-')) return refusal(`插件来源不合法：${source}`, 'not-a-package', ['checkName'])
   // Never add a version alongside a legacy flat package for the same plugin —
   // absorb old packages into the versioned layout first (and retarget any
   // profiles that link into a moved package).
@@ -141,32 +170,56 @@ export async function installSource(
   const result = await runPnpm(staging, ['add', source, '--fetch-retries=3', '--fetch-retry-maxtimeout=60000'], signal, { storeDir })
   // A user cancel: drop the half-downloaded staging dir and surface it as a
   // cancel, not a failure — the download task manager treats it as cancelled.
+  // The log is still carried: a cancelled session can be opened in the detail
+  // view, and knowing how far it got is the useful part.
   if (result.aborted === true) {
     rmSync(staging, { recursive: true, force: true })
-    return { ok: false, aborted: true, text: 'cancelled' }
+    return {
+      ok: false, aborted: true, text: 'cancelled',
+      ...(result.command !== undefined ? { command: result.command } : {}),
+      ...(result.code !== undefined ? { code: result.code } : {}),
+      ...(result.durMs !== undefined ? { durMs: result.durMs } : {}),
+      log: result.text,
+      failure: diagnoseFailure({ log: result.text, source, name, aborted: true }),
+    }
   }
   if (!result.ok) {
     rmSync(staging, { recursive: true, force: true })
-    return result
+    // The log is classified into a cause plus the evidence it was read from. The
+    // raw output travels with it, untruncated: the detail view shows the whole
+    // thing, and a tail-only copy cannot answer "why".
+    return {
+      ...result,
+      log: result.text,
+      failure: diagnoseFailure({
+        log: result.text, source, name,
+        ...(result.code !== undefined ? { code: result.code } : {}),
+      }),
+    }
   }
   const version = readVersion(join(staging, 'node_modules', name))
   if (version === undefined) {
     // pnpm may have reported success while the package never landed (e.g. a
-    // resolution failure whose `added 0` slipped the fallible check above). Keep
-    // pnpm's own tail so the user sees the real reason, not a guess at it.
+    // resolution failure whose `added 0` slipped the fallible check above).
     //
     // The guessed name is the usual cause when it does not match the guess: a
     // repo whose `package.json` declares a scoped/different name installs fine
     // under THAT name, so the check above looks in the wrong directory. Name the
     // real package(s) pnpm did install — the user never typed a package name, so
     // "package name mismatch" alone explains nothing.
-    const tail = result.text.trim().split(/\r?\n/).slice(-4).join(' ')
     const landed = installedPackageNames(staging)
+    const log = result.text
     rmSync(staging, { recursive: true, force: true })
     const hint = landed.length === 0
       ? `包名不匹配，或依赖解析失败`
-      : `来源声明的包名是 ${landed.slice(0, 3).map(n => `\`${n}\``).join(' / ')}，与按来源推测的 ${name} 不一致`
-    return { ok: false, text: `未在 node_modules 中找到 ${name}（${hint}）${tail !== '' ? `\n${tail}` : ''}` }
+      : `来源实际安装的包名是 ${landed.slice(0, 3).join(' / ')}，与按来源推测的 ${name} 不一致`
+    return {
+      ...result,
+      ok: false,
+      text: `未在 node_modules 中找到 ${name}（${hint}）`,
+      log,
+      failure: diagnoseFailure({ log, source, name, hint }),
+    }
   }
   // The version becomes an `archive/<name>/<version>/` path segment AND a `.trash`
   // leaf name. A registry source is semver-enforced by the registry, but a
@@ -177,7 +230,7 @@ export async function installSource(
   // same guard the IPC boundary applies, applied where the path is actually built.
   if (versionInvalid(version)) {
     rmSync(staging, { recursive: true, force: true })
-    return { ok: false, text: `插件包声明的版本号不可用：${version}` }
+    return { ok: false, text: `插件包声明的版本号不可用：${version}`, failure: refusal(`插件包声明的版本号不可用：${version}`, 'version', ['checkPackageJson']).failure }
   }
   const dest = pluginVersionDir(storeDir, name, version)
   if (existsSync(dest) && opts?.replace !== true) {

@@ -33,6 +33,11 @@ interface DownloadSession {
   steps: DownloadStep[]
   /** Cancellation signal — present only for cancellable (plugin) sessions. */
   controller?: AbortController
+  failure?: DownloadSessionInfo['failure']
+  log?: string
+  command?: string
+  startedAt: string
+  durMs?: number
 }
 
 /** Live sessions by id. Kept only while installing; removed on completion. */
@@ -55,8 +60,15 @@ export function onDownloadsSettled(fn: (session: DownloadSessionInfo) => void): 
   emitSettled = fn
 }
 
-function toInfo({ id, kind, name, source, detail, status, message, steps }: DownloadSession): DownloadSessionInfo {
-  return { id, kind, name, source, detail, status, message, steps }
+function toInfo({ id, kind, name, source, detail, status, message, steps, failure, log, command, startedAt, durMs }: DownloadSession): DownloadSessionInfo {
+  return {
+    id, kind, name, source, detail, status, message, steps,
+    ...(failure !== undefined ? { failure } : {}),
+    ...(log !== undefined ? { log } : {}),
+    ...(command !== undefined ? { command } : {}),
+    startedAt,
+    ...(durMs !== undefined ? { durMs } : {}),
+  }
 }
 
 function snapshot(): DownloadSessionInfo[] {
@@ -87,20 +99,30 @@ export function startPluginDownload(storeDir: string, source: string, name?: str
     status: 'running',
     steps: [],
     controller,
+    startedAt: new Date().toISOString(),
   }
   active.set(id, session)
   notify()
 
   void (async () => {
+    const started = Date.now()
     try {
       const res = await installSource(storeDir, installName === '' ? source : installName, source, controller.signal)
       if (controller.signal.aborted) { session.status = 'cancelled'; session.message = 'cancelled' }
       else if (res.ok) { session.status = 'done'; session.message = res.text }
       else { session.status = 'failed'; session.message = res.text }
+      // A failure and a cancel both keep their log: one explains why nothing
+      // installed, the other how far it got before the user stopped it.
+      if (session.status !== 'done') {
+        if (res.failure !== undefined) session.failure = res.failure
+        if (res.log !== undefined && res.log !== '') session.log = res.log
+      }
+      if (res.command !== undefined) session.command = res.command
     } catch (error) {
       session.status = 'failed'
       session.message = error instanceof Error ? error.message : String(error)
     } finally {
+      session.durMs = Date.now() - started
       active.delete(id)
       notify()
       emitSettled?.(toInfo(session))
@@ -131,6 +153,7 @@ export function startDshDownload(
     detail,
     status: 'running',
     steps,
+    startedAt: new Date().toISOString(),
   }
   active.set(id, session)
   notify()
@@ -143,6 +166,7 @@ export function startDshDownload(
   }
 
   void (async () => {
+    const started = Date.now()
     try {
       await job(patchStep)
       session.status = 'done'
@@ -150,6 +174,7 @@ export function startDshDownload(
       session.status = 'failed'
       session.message = error instanceof Error ? error.message : String(error)
     } finally {
+      session.durMs = Date.now() - started
       active.delete(id)
       notify()
       emitSettled?.(toInfo(session))

@@ -268,10 +268,38 @@ export interface DownloadSessionInfo {
   /** Secondary line: plugin = the source spec; dsh = target version / description. */
   detail?: string
   status: DownloadStatus
-  /** Failure/cancel detail, when any. */
+  /** One-line failure/cancel summary, safe to render in a row: the cause, not the
+   * log (see `download.cause.*`). The raw output lives in `log`. */
   message?: string
   /** Live progress steps (dsh only; plugins run as a single front-and-back step). */
   steps?: DownloadStep[]
+  /** What went wrong, classified — present only for a failed session. */
+  failure?: DownloadFailure
+  /** The COMPLETE pnpm output of the attempt, verbatim (ANSI stripped). Absent
+   * while running and on success. Kept whole so the detail view can answer "why"
+   * instead of quoting whichever four lines happened to be last. */
+  log?: string
+  /** The exact command that was run, for copying into a shell. */
+  command?: string
+  /** When the session started (ISO) and how long the attempt took, in ms. */
+  startedAt?: string
+  durMs?: number
+}
+
+/** A classified failure. `kind` and `advice` are keys the renderer localizes;
+ * `evidence` is the verbatim pnpm lines the verdict was read from. */
+export interface DownloadFailure {
+  kind: string
+  /** i18n key for the headline (`download.cause.*`). */
+  headlineKey: string
+  /** Interpolation for the headline, when it names the offending thing. */
+  params?: Record<string, string>
+  /** Concrete next steps, most-likely-fix first (`download.advice.*`). */
+  advice: string[]
+  /** Verbatim lines from the log that led to this verdict. */
+  evidence: string[]
+  /** pnpm's own error identifier, when it printed one (`ERR_PNPM_*`). */
+  code?: string
 }
 
 /** One row of the installed-plugin overview. */

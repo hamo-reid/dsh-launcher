@@ -1,7 +1,7 @@
 /** Run pnpm in a directory, capturing output. Async (non-blocking the UI thread).
  *
- * Runs pnpm on Electron's OWN bundled Node â€” `process.execPath` under
- * `ELECTRON_RUN_AS_NODE` is a plain Node runtime â€” instead of relying on a
+ * Runs pnpm on Electron's OWN bundled Node â€?`process.execPath` under
+ * `ELECTRON_RUN_AS_NODE` is a plain Node runtime â€?instead of relying on a
  * system `node` and a global pnpm from PATH. That way a user without Node/pnpm
  * (or with a mismatched pnpm version) still works, and the pnpm version is
  * locked to the app's dependency. */
@@ -17,7 +17,7 @@ import { nodeEnvironment } from './node-env.ts'
 import { nodePreferenceValue } from '../settings/settings.ts'
 import { killProcessTree } from '../shared/process-kill.ts'
 
-/** The pnpm workspace settings an out-of-tree-plugin tree needs â€” identical to
+/** The pnpm workspace settings an out-of-tree-plugin tree needs â€?identical to
  * dsh's own `initProfile`, and required in two places for the same reason: the
  * default `nodeLinker: isolated` stows every dependency behind `.pnpm/` and leaves
  * only the top package visible, so an aggregate bundle's sub-bundles would be
@@ -29,19 +29,26 @@ nodeLinker: hoisted
 autoInstallPeers: false
 `
 
-/** Domain-tagged logger for anything pnpm-related â€” grep `{domain:"pnpm"}`. */
+/** Domain-tagged logger for anything pnpm-related â€?grep `{domain:"pnpm"}`. */
 const plog = child('pnpm')
 
 const require = createRequire(import.meta.url)
 
 export interface PnpmResult {
   ok: boolean
-  /** Trimmed combined stdout+stderr. */
+  /** Trimmed combined stdout+stderr â€?everything pnpm said, in order. This is the
+   * raw material a diagnosis is read from; callers that show it to a person must
+   * summarise it first (`summarizePnpmOut`), and callers that STORE it on a
+   * failure must keep it whole (a tail-only log cannot answer "why"). */
   text: string
   /** True when the run was cut short via the caller's AbortSignal. */
   aborted?: boolean
   /** The exact invocation (`pnpm <args>`, space-quoted), for showing in the UI. */
   command?: string
+  /** Exit code, when the child actually exited (`undefined` for a spawn failure). */
+  code?: number
+  /** Wall-clock duration of the run, in ms. */
+  durMs?: number
 }
 
 /** pnpm's JS entry, resolved from node_modules (inside the packaged asar at
@@ -50,7 +57,7 @@ let pnpmEntry: string | null = null
 function resolvePnpmEntry(): string {
   if (pnpmEntry === null) {
     // Packaged, pnpm (with its native `fastlist` executable) is relocated to
-    // `app.asar.unpacked` â€” Electron can't `require` it from inside `app.asar`, so
+    // `app.asar.unpacked` â€?Electron can't `require` it from inside `app.asar`, so
     // resolve it there by `process.resourcesPath`. In dev there is no unpacked
     // pnpm, so fall back to a normal `require.resolve`.
     // `process.resourcesPath` only exists under Electron; guard it so the node-side
@@ -70,15 +77,16 @@ function resolvePnpmEntry(): string {
  * present in the output). Key on the install-output markers, not the exit code. */
 export function installSucceeded(text: string): boolean {
   // At least one package must actually have been added. `added 0` (e.g. pnpm's
-  // progress lines after a resolution failure) is NOT success â€” matching it would
+  // progress lines after a resolution failure) is NOT success â€?matching it would
   // hide the real error and let a failed install fall through to a false ok.
   return /added [1-9][0-9]*|Done in/.test(text)
 }
 
 /** Collapse ANSI colours, progress carriage-returns and blank lines, then keep
- * the tail â€” enough to read the install result (`added N packages`, `Done in`)
- * or the failure reason. */
-function summarizePnpmOut(out: string): string {
+ * the tail â€?enough to read the install result (`added N packages`, `Done in`)
+ * or the failure reason. Exported because a caller with a full log stored on a
+ * session needs the same treatment to show a one-line headline from it. */
+export function summarizePnpmOut(out: string): string {
   return out
     .replace(/\x1b\[[0-9;]*m/g, '')
     .replace(/\r/g, '\n')
@@ -99,7 +107,7 @@ function resolvePnpmNode(): NodeTarget {
 
 /** The shared, content-addressed pnpm store for the plugin library. Lives INSIDE
  * the plugin dir (`<pluginDir>/.pnpm-store`) so it is always on the same volume as
- * the archived node_modules â€” that is what lets multiple stack versions hard-link
+ * the archived node_modules â€?that is what lets multiple stack versions hard-link
  * the same dependency to one on-disk copy instead of copying it per version. Keep
  * it with the plugin dir so moving the library moves the cache with it. */
 export function pnpmStoreDir(storeDir: string): string {
@@ -161,8 +169,8 @@ function mirrorStoreLinks(src: string, dst: string): void {
 
 /** Ensure the library-scoped store dir exists and (when the store is empty and the
  * default pnpm store is on the SAME volume) seed it by hard-linking the default
- * store's content. Same-drive â†’ zero re-download and the default store stays
- * untouched for other projects. Cross-drive â†’ skipped, letting pnpm create an empty
+ * store's content. Same-drive â†?zero re-download and the default store stays
+ * untouched for other projects. Cross-drive â†?skipped, letting pnpm create an empty
  * store and fetch from the network once. Idempotent via `existsSync`. */
 export function ensurePnpmStore(storeDir: string | undefined): void {
   if (storeDir === undefined || storeDir === '') return
@@ -182,8 +190,8 @@ export function ensurePnpmStore(storeDir: string | undefined): void {
 /** Run `pnpm <args>` with cwd, resolving on process exit. When `signal` is given
  * and the caller aborts it, the pnpm child (and its sub-process tree) is killed
  * and the promise resolves with `{ ok: false, aborted: true }`. A
- * `--store-dir <pluginDir>/.pnpm-store` is injected by default â€” the caller's
- * explicit `storeDir` when given, else the configured library store â€” so installs
+ * `--store-dir <pluginDir>/.pnpm-store` is injected by default â€?the caller's
+ * explicit `storeDir` when given, else the configured library store â€?so installs
  * share one plugin-library store regardless of cwd and pnpm never computes its own
  * (which, on a volume different from the user's home, would drop an unmanaged
  * `<drive>\.pnpm-store` at the drive root).
@@ -258,14 +266,14 @@ export function runPnpm(
     child.on('error', (error) => {
       signal?.removeEventListener('abort', onAbort)
       plog.warn(`pnpm failed to run: ${error.message}`)
-      resolve({ ok: false, text: error.message, command })
+      resolve({ ok: false, text: error.message, command, durMs: Date.now() - started })
     })
     child.on('close', (code) => {
       signal?.removeEventListener('abort', onAbort)
       const durMs = Date.now() - started
       const last = partial.trimEnd()
       if (last !== '') plog.debug(`pnpm[out] ${last}`) // final line lacking a newline
-      // A user-cancel is distinct from a genuine failure â€” the caller may want to
+      // A user-cancel is distinct from a genuine failure â€?the caller may want to
       // clean up its staging dir and surface "cancelled", not an error.
       const aborted = signal !== undefined && signal.aborted
       if (aborted) {
@@ -273,7 +281,10 @@ export function runPnpm(
         const tail = summarizePnpmOut(out)
         plog.warn(`pnpm aborted @ ${cwd}`, { durMs })
         if (tail !== '') plog.warn(`pnpm partial output:\n${tail}`)
-        resolve({ ok: false, text: 'cancelled', aborted: true, command })
+        // The FULL output, not the tail: a cancelled session can still be opened
+        // in the detail view, and a tail-only log would answer "we were in the
+        // middle of something" without saying what.
+        resolve({ ok: false, text: out.trim(), aborted: true, command, ...(code !== null ? { code } : {}), durMs })
         return
       }
       // Real installs (even when exit != 0, e.g. ignored build scripts) count as ok.
@@ -285,7 +296,7 @@ export function runPnpm(
         plog.warn(`pnpm failed (exit ${String(code)}, ${durMs}ms) @ ${cwd}`)
         if (tail !== '') plog.warn(`pnpm output:\n${tail}`)
       }
-      resolve({ ok, text: out.trim(), command })
+      resolve({ ok, text: out.trim(), command, ...(code !== null ? { code } : {}), durMs })
     })
   })
 }

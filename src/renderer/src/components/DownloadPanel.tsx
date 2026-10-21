@@ -1,139 +1,22 @@
 import { useEffect, useState, type CSSProperties } from 'react'
-import { Badge, Button, Drawer, Empty, Modal, Space, Spin, Tabs, Tag, theme, message } from 'antd'
-import {
-  CheckCircleFilled, CloseCircleFilled, CloudDownloadOutlined, LoadingOutlined, MinusCircleFilled,
-} from '@ant-design/icons'
+import { Badge, Button, Drawer, Empty, Spin, Tabs, message } from 'antd'
+import { CloudDownloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { useDownloads } from '../hooks/useDownloads.ts'
-import { StepIcon } from './StepIcon.tsx'
-import { LAYOUT, MODAL } from '../theme.ts'
+import { DownloadDetailModal, DownloadRow } from './DownloadReport.tsx'
+import { LAYOUT } from '../theme.ts'
 import type { DownloadSessionInfo } from '../../../shared/types.ts'
 
-const STATUS_COLOR: Record<DownloadSessionInfo['status'], string> = {
-  running: 'processing',
-  done: 'success',
-  failed: 'error',
-  cancelled: 'default',
-}
-
-/** Status icon for the leading column: spinner / check / cross / (cancelled) dash. */
-function StatusIcon({ status }: { status: DownloadSessionInfo['status'] }): JSX.Element {
-  const { token } = theme.useToken()
-  if (status === 'running') return <LoadingOutlined spin style={{ fontSize: 18, color: token.colorWarning }} />
-  if (status === 'done') return <CheckCircleFilled style={{ fontSize: 18, color: token.colorSuccess }} />
-  if (status === 'failed') return <CloseCircleFilled style={{ fontSize: 18, color: token.colorError }} />
-  return <MinusCircleFilled style={{ fontSize: 18, color: token.colorBorderSecondary }} />
-}
-
-/** One download row: status icon + two-line info on the left, actions on the right. */
-function DownloadRow({ d, onDetail, onCancel, onDismiss }: {
-  d: DownloadSessionInfo
-  onDetail: (id: string) => void
-  onCancel: (id: string) => void
-  onDismiss: (id: string) => void
-}): JSX.Element {
-  const { t } = useTranslation()
-  const { token } = theme.useToken()
-  return (
-    <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 4px', borderRadius: 6 }}>
-      <StatusIcon status={d.status} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</span>
-          <Tag color={STATUS_COLOR[d.status]} style={{ marginInlineEnd: 0, flexShrink: 0, fontSize: token.fontSizeSM }}>
-            {t(`download.status.${d.status}`)}
-          </Tag>
-        </div>
-        <div
-          style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-          title={d.detail ?? d.source}
-        >
-          {d.detail ?? d.source}
-        </div>
-        {d.status === 'failed' && d.message !== undefined && d.message !== '' && (
-          <div style={{ color: token.colorError, fontSize: token.fontSizeSM }}>{d.message}</div>
-        )}
-      </div>
-      <Space size={4}>
-        {d.kind === 'plugin' && d.status === 'running' && (
-          <Button size="small" danger type="text" onClick={() => onCancel(d.id)}>{t('download.panel.cancel')}</Button>
-        )}
-        {d.status !== 'running' && (
-          <Button size="small" type="text" onClick={() => onDismiss(d.id)}>{t('download.panel.dismiss')}</Button>
-        )}
-        <Button size="small" type="text" onClick={() => onDetail(d.id)}>{t('download.detail')}</Button>
-      </Space>
-    </div>
-  )
-}
-
-/** Detail modal: dsh installs show all steps; plugins show their log (source + message). */
-function DownloadDetailModal({ session, onClose }: {
-  session: DownloadSessionInfo | null
-  onClose: () => void
-}): JSX.Element {
-  const { t } = useTranslation()
-  const { token } = theme.useToken()
-  const steps = session?.steps ?? []
-  const showSteps = session?.kind === 'dsh' && steps.length > 0
-
-  const stepText = (key: string): string => {
-    switch (key) {
-      case 'version': return t('dsh.official.step.version')
-      case 'install': return t('dsh.official.step.install')
-      case 'register': return t('dsh.official.step.register')
-      default: return key
-    }
-  }
-  return (
-    <Modal
-      title={session?.name ?? ''}
-      open={session !== null}
-      onCancel={onClose}
-      footer={<Button onClick={onClose}>{t('common.close')}</Button>}
-      width={MODAL.wide}
-    >
-      {session !== null && (
-        showSteps ? (
-          <div>
-            {steps.map(step => (
-              <div key={step.key} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0' }}>
-                <StepIcon status={step.status} />
-                <span style={{ flex: 1, minWidth: 0 }}>{stepText(step.key)}</span>
-                {step.meta !== undefined && (
-                  <span style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' }}>{step.meta}</span>
-                )}
-              </div>
-            ))}
-            {session.message !== undefined && session.message !== '' && (
-              <div style={{ color: token.colorError, fontSize: token.fontSizeSM, marginTop: 8 }}>{session.message}</div>
-            )}
-          </div>
-        ) : (
-          <Space orientation="vertical" size="small" style={{ width: '100%' }}>
-            <div>
-              <Tag color={STATUS_COLOR[session.status]}>{t(`download.status.${session.status}`)}</Tag>
-            </div>
-            {session.source !== '' && (
-              <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, wordBreak: 'break-all' }}>{session.source}</div>
-            )}
-            {session.message !== undefined && session.message !== '' && (
-              <div style={{ color: token.colorError, fontSize: token.fontSizeSM, wordBreak: 'break-word' }}>{session.message}</div>
-            )}
-          </Space>
-        )
-      )}
-    </Modal>
-  )
-}
+/** Cross the compile-time i18n key check for a key chosen at runtime (the
+ * failure classifier's own vocabulary, which comes from the main process). */
+type Translate = (key: string, options?: Record<string, string>) => string
 
 /**
- * Global download center: a **always-present** header entrance (badge with the
- * task count; spinners while anything runs) that opens a right-side Drawer split
- * into DSH / plugin tabs. Each task row shows status + two-line info + a detail
- * button; plugins additionally get a cancel while running, and a settled row a
- * dismiss. Failed sessions are retained by `useDownloads` (and toasted) so an
- * error never disappears with the row.
+ * Global download center: an always-present header entrance (badge with the task
+ * count; a spinner while anything runs) that opens a right-side Drawer split into
+ * DSH / plugin tabs. Each row shows status + name + a one-line cause when it
+ * failed; "详情" opens the full report (`DownloadDetailModal`) — cause, advice,
+ * evidence, command and the untruncated log.
  */
 export default function DownloadPanel(): JSX.Element {
   const { t } = useTranslation()
@@ -144,12 +27,16 @@ export default function DownloadPanel(): JSX.Element {
 
   // A settled session leaves the live list, so its failure would otherwise be
   // silent — announce it (the retained row is easy to miss with the panel shut).
+  // The toast names the cause when there is one; the row and its detail view keep
+  // the evidence, so the toast does not need to.
   useEffect(() => window.api.downloads.onSettled(s => {
-    if (s.status === 'failed') void message.error(t('download.failed', { name: s.name }))
+    if (s.status !== 'failed') return
+    const translate = t as unknown as Translate
+    const cause = s.failure !== undefined ? translate(s.failure.headlineKey, s.failure.params ?? {}) : s.name
+    void message.error(t('download.failed', { name: s.name, cause }))
   }), [t])
 
   const running = downloads.some(d => d.status === 'running')
-  const detail = downloads.find(d => d.id === detailId) ?? null
 
   const cleanupLeftovers = async (): Promise<void> => {
     const removed = await cleanup()
@@ -179,9 +66,6 @@ export default function DownloadPanel(): JSX.Element {
         // its mask never darkens (nor click-dismisses over) the header while the
         // tab bar below stays normally masked. Official `styles` (not global css)
         // because antd6's mask is position:absolute inside the drawer root.
-        // antd6 deprecated Drawer `width` (custom px) in favour of the `size`
-        // preset; the 440px panel is trimmed to the default width to stay warning-
-        // free. Offset below the brand row remains via the official `styles` keys.
         styles={{
           mask: { top: LAYOUT.headerHeight },
           wrapper: { top: LAYOUT.headerHeight },
@@ -193,23 +77,15 @@ export default function DownloadPanel(): JSX.Element {
           activeKey={activeTab}
           onChange={setActiveTab}
           items={[
-            {
-              key: 'plugin',
-              label: t('download.tab.plugins'),
-              children: renderList(pluginDownloads),
-            },
-            {
-              key: 'dsh',
-              label: t('download.tab.dsh'),
-              children: renderList(dshDownloads),
-            },
+            { key: 'plugin', label: t('download.tab.plugins'), children: renderList(pluginDownloads) },
+            { key: 'dsh', label: t('download.tab.dsh'), children: renderList(dshDownloads) },
           ]}
         />
         <div style={{ textAlign: 'right', paddingTop: 12 }}>
           <Button size="small" onClick={() => void cleanupLeftovers()}>{t('download.panel.cleanup')}</Button>
         </div>
       </Drawer>
-      <DownloadDetailModal session={detail} onClose={() => setDetailId(null)} />
+      <DownloadDetailModal id={detailId} onClose={() => setDetailId(null)} />
     </>
   )
 }
