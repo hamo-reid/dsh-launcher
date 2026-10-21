@@ -69,16 +69,16 @@ function captureConsole(fn: () => void): string {
   return chunks.join('')
 }
 
-/** The banner is one write followed by a newline of its own, so the next log line
- * can never be decoded together with the logo (Windows terminals pick one code
- * page per write, and the logo is the part that gives up). */
+/** The banner is one line-batch of its own, so the next log line can never be
+ * decoded together with the logo (Windows terminals pick one code page per write,
+ * and the logo is the part that gives up). */
 describe('printBanner', () => {
-  it('ends with its own newline so the next log line is a separate write', () => {
-    // Asserts the argument, not what some transport ended up doing with it:
-    // `console.log` only appends `\n` when the text does not already end with one,
-    // and which streams the console sink actually writes to varies by environment
-    // (a CI run without a tty writes elsewhere than a developer's terminal), so
-    // capturing output made this test pass locally and fail in the release build.
+  it('ships its own trailing newline, whatever the colour settings are', () => {
+    // The contract is the ARGUMENT printBanner hands to `console.log`: its text
+    // already ends with `\n`, so `console.log` leaves it alone. Asserting the
+    // rendered stream instead made this pass on a terminal and fail in the release
+    // run, where `NO_COLOR` is set — without colour the text is `...LOGO\n`, and
+    // `console.log` appends nothing because the text already ends with a newline.
     const seen: string[] = []
     const spy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
       seen.push(args.map(a => String(a)).join(' '))
@@ -89,7 +89,9 @@ describe('printBanner', () => {
       spy.mockRestore()
     }
     expect(seen).toHaveLength(1)
-    expect(seen[0]?.endsWith('LOGO\n')).toBe(true)
+    // `\n\n` with colour (the SGR reset sits between the text and its newline) and
+    // `\n` without — both mean "console.log will not add another one".
+    expect(seen[0]).toMatch(/LOGO(\x1b\[0m)?\n$/)
   })
 })
 
