@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { linkSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { dirUniqueBytes, buildInstalledOverview } from './overview.ts'
+import { dirUniqueBytes, buildInstalledOverview, versionSizes } from './overview.ts'
 import type { DshScope } from '../profile/appState.ts'
 
 let root: string
@@ -44,6 +44,77 @@ describe('dirUniqueBytes', () => {
 
   it('handles a missing dir as zero', () => {
     expect(dirUniqueBytes(join(root, 'nope'))).toBe(0)
+  })
+})
+
+describe('versionSizes', () => {
+  /** Lay out an archived version at `archive/<name>/<version>/node_modules/<name>`. */
+  const archived = (store: string, name: string, version: string, files: Record<string, number>): string => {
+    const dir = join(store, 'archive', name, version, 'node_modules', name)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name, version }))
+    for (const [file, size] of Object.entries(files)) writeFileSync(join(dir, file), Buffer.alloc(size, 7))
+    return dir
+  }
+
+  it('reports each archived version separately, keyed by version', () => {
+    const store = mkdtempSync(join(tmpdir(), 'pm-vsizes-'))
+    try {
+      archived(store, 'p', '1.0.0', { 'a.bin': 1000 })
+      archived(store, 'p', '2.0.0', { 'b.bin': 4000 })
+      const sizes = versionSizes(store, 'p')
+      // Each includes its own package.json, so compare against the walk, not the
+      // raw payload, and keep the assertion about the RELATIONSHIP.
+      expect(Object.keys(sizes).sort()).toEqual(['1.0.0', '2.0.0'])
+      expect(sizes['2.0.0']).toBeGreaterThan(sizes['1.0.0'] ?? 0)
+    } finally {
+      rmSync(store, { recursive: true, force: true })
+    }
+  })
+
+  it('counts a hard-linked file in EACH version that holds it', () => {
+    // This is the honest per-version answer and the reason the values cannot be
+    // summed into the plugin total, which dedupes the shared inode.
+    const store = mkdtempSync(join(tmpdir(), 'pm-vsizes-'))
+    try {
+      const one = archived(store, 'p', '1.0.0', { 'own.bin': 100 })
+      const two = archived(store, 'p', '2.0.0', { 'own.bin': 100 })
+      const shared = join(one, 'shared.bin')
+      writeFileSync(shared, Buffer.alloc(5000, 1))
+      try {
+        linkSync(shared, join(two, 'shared.bin'))
+      } catch { return } // a filesystem without hard links: nothing to assert
+      const sizes = versionSizes(store, 'p')
+      // Both versions report the shared bytes…
+      expect(sizes['1.0.0']).toBe((sizes['2.0.0'] ?? 0))
+      // …so their sum exceeds the deduplicated total for the same files.
+      const total = dirUniqueBytes(join(store, 'archive', 'p', '1.0.0', 'node_modules'))
+      expect((sizes['1.0.0'] ?? 0) + (sizes['2.0.0'] ?? 0)).toBeGreaterThan(total)
+    } finally {
+      rmSync(store, { recursive: true, force: true })
+    }
+  })
+
+  it('omits a version with no readable body rather than reporting 0', () => {
+    const store = mkdtempSync(join(tmpdir(), 'pm-vsizes-'))
+    try {
+      archived(store, 'p', '1.0.0', { 'a.bin': 10 })
+      // A version dir exists but its node_modules body is missing.
+      mkdirSync(join(store, 'archive', 'p', '9.9.9'), { recursive: true })
+      expect(versionSizes(store, 'p')['9.9.9']).toBeUndefined()
+    } finally {
+      rmSync(store, { recursive: true, force: true })
+    }
+  })
+
+  it('is empty for an unconfigured store or an unknown plugin', () => {
+    expect(versionSizes('', 'p')).toEqual({})
+    const store = mkdtempSync(join(tmpdir(), 'pm-vsizes-'))
+    try {
+      expect(versionSizes(store, 'never-installed')).toEqual({})
+    } finally {
+      rmSync(store, { recursive: true, force: true })
+    }
   })
 })
 

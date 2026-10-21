@@ -287,6 +287,12 @@ const en: typeof zh = {
     'dsh.legacyProfilesDirDesc': 'That directory is no longer used: profiles now always live at <home>/profiles, exactly where a direct dsh launch reads them. If it holds profiles worth keeping, move them into the fixed directory above.',
 
     'plugin.detail.size': 'Size',
+    'plugin.detail.versionSize': '{{size}}',
+    'plugin.detail.versionSizeTip': 'Deleting this version frees about this much; {{shared}} of the {{total}} total is shared (hard-linked) with other versions and may not go away with it.',
+    'plugin.detail.versionSizeTipSimple': 'This version’s own disk usage. Versions share hard-linked files, so their sizes can add up to more than the plugin total.',
+    'plugin.detail.sizeMeasuring': 'measuring…',
+    'plugin.detail.sizeUnknown': 'size unavailable',
+    'plugin.detail.sizesOverlap': 'Measured separately the versions add up to {{sum}}, more than the deduplicated total of {{total}} — versions share hard-linked files, so they do not sum.',
     'plugin.detail.usageTab': 'Usage',
     'plugin.detail.versionsLabel': 'Versions',
     'plugin.detail.readmeTab': 'README',

@@ -306,6 +306,10 @@ export interface WindowApi {
     overview: () => Promise<IpcResult<InstalledOverviewRow[]>>
     /** Size of each plugin (inode-dedup) — manual, triggered by the calc button. */
     calcSizes: () => Promise<IpcResult<Record<string, number>>>
+    /** Each archived VERSION's own on-disk bytes, keyed by version. Each version is
+     * walked separately, so values may sum to more than the deduplicated plugin
+     * total (archived versions share hard-linked files in the pnpm store). */
+    calcVersionSizes: (name: string) => Promise<IpcResult<Record<string, number>>>
     /** Check store-installed plugins for a newer npm release (manual; cached). */
     checkUpdates: (opts?: { refresh?: boolean }) => Promise<IpcResult<PluginUpdateInfo[]>>
     /** Apply plugin version updates to a profile (refused while it runs). */

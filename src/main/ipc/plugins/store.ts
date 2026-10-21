@@ -12,7 +12,8 @@ import { listComboPlugins } from '../../core/store/combo.ts'
 import { dshScopes, pluginDir, profilesRootFor, type DshScope } from '../../core/profile/appState.ts'
 import { inlineRelativeImages } from '../../core/shared/app-util.ts'
 import { fetchPackageVersions, npmSearch } from '../../core/store/npm.ts'
-import { attachPluginSizes } from '../../core/store/overview.ts'
+import { attachPluginSizes, versionSizes } from '../../core/store/overview.ts'
+import { storeVersions } from '../../core/store/layout.ts'
 import { fail, failFromError, E } from '../../core/shared/errors.ts'
 import { pathIdentifierInvalid, versionInvalid } from '../validate.ts'
 import { ctxOf } from '../ctxOf.ts'
@@ -258,6 +259,23 @@ export function registerStoreIpc(): void {
       const sizes: Record<string, number> = {}
       for (const row of rows) if (row.sizeBytes !== undefined) sizes[row.name] = row.sizeBytes
       return { ok: true, value: sizes }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Per-VERSION sizes for the detail modal. Kept separate from the whole-overview
+  // total because that one is inode-deduped across versions: dividing it, or
+  // reporting each version's own walk as if the parts summed to the total, would
+  // publish an arithmetic lie. Measured only when a plugin's detail is opened.
+  handle('plugins:calcVersionSizes', (_event, name: string): IpcResult<Record<string, number>> => {
+    try {
+      const store = pluginDir()
+      if (store === '') return { ok: true, value: {} }
+      if (pathIdentifierInvalid(name)) return fail(E.nameInvalid)
+      // An unarchived (builtin / official-only) plugin has no versions to measure.
+      if (storeVersions(store, name).length === 0) return { ok: true, value: {} }
+      return { ok: true, value: versionSizes(store, name) }
     } catch (error) {
       return failFromError(error)
     }

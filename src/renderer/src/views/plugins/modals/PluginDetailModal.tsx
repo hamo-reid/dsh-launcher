@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react'
 import { Button, Modal, Popconfirm, Space, Tabs, Tag, Tooltip, theme } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { fmtBytes } from '../../../lib/format.ts'
+import { versionSizeReading, sumVersionSizes } from '../../../lib/versionSizes.ts'
 import FieldLabel from '../../../components/FieldLabel.tsx'
 import PluginReadme from '../PluginReadme.tsx'
 import { MODAL } from '../../../theme.ts'
@@ -65,6 +66,21 @@ export function PluginDetailModal(p: PluginDetailModalProps): JSX.Element {
   const [tab, setTab] = useState<'usage' | 'readme'>('usage')
   const [readmeText, setReadmeText] = useState('')
   const [readmeDir, setReadmeDir] = useState('')
+  // Per-version sizes, measured when the dialog opens for a plugin. `null` while
+  // in flight so the rows can say "measuring" rather than showing nothing.
+  const [versionSizes, setVersionSizes] = useState<Record<string, number> | null>(null)
+
+  useEffect(() => {
+    setVersionSizes(null)
+    if (p.target === null || p.storeVersions.length === 0) return
+    let alive = true
+    void window.api.plugins.calcVersionSizes(p.target.name).then(result => {
+      if (alive) setVersionSizes(result.ok ? result.value : {})
+    })
+    return () => { alive = false }
+    // Re-measure when the version set changes (a download or a delete landed).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.target?.name, p.storeVersions.join(',')])
 
   useEffect(() => {
     if (p.target === null) { setReadmeText(''); setReadmeDir(''); setTab('usage'); return }
@@ -168,10 +184,30 @@ export function PluginDetailModal(p: PluginDetailModalProps): JSX.Element {
                       {p.storeVersions.length > 0 && p.storeVersions.map(v => {
                         const users = (target?.usage ?? []).filter(u => u.version === v).map(u => u.profile)
                         const inUse = users.length > 0
+                        const reading = versionSizeReading(v, versionSizes ?? undefined, p.sizeBytes)
                         return (
                           <div key={v} style={{ display: 'flex', alignItems: 'center', padding: '4px 0', borderBottom: `1px solid ${token.colorSplit}` }}>
                             <Tag color="blue" style={{ flexShrink: 0 }}>{t('plugin.detail.storeTag')}</Tag>
                             <span style={{ fontFamily: 'monospace', marginInline: 6, color: token.colorText }}>{v}</span>
+                            {/* This version's own size. It is NOT the plugin total divided
+                                up: archived versions share hard-linked files, so the row
+                                reads "what deleting this one frees" and the tooltip says
+                                how much of it is shared with the other versions. */}
+                            {versionSizes === null
+                              ? <span style={{ color: token.colorTextTertiary, fontSize: token.fontSizeSM }}>{t('plugin.detail.sizeMeasuring')}</span>
+                              : reading.bytes !== undefined
+                                ? (
+                                  <Tooltip
+                                    title={reading.shared !== undefined
+                                      ? t('plugin.detail.versionSizeTip', { shared: fmtBytes(reading.shared), total: fmtBytes(p.sizeBytes ?? 0) })
+                                      : t('plugin.detail.versionSizeTipSimple')}
+                                  >
+                                    <span style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>
+                                      {t('plugin.detail.versionSize', { size: fmtBytes(reading.bytes) })}
+                                    </span>
+                                  </Tooltip>
+                                )
+                                : <span style={{ color: token.colorTextTertiary, fontSize: token.fontSizeSM }}>{t('plugin.detail.sizeUnknown')}</span>}
                             {inUse
                               ? (
                                 <Tooltip title={t('plugin.detail.inUseBy', { profiles: users.join(t('common.listSep')) })}>
@@ -190,6 +226,18 @@ export function PluginDetailModal(p: PluginDetailModalProps): JSX.Element {
                           </div>
                         )
                       })}
+                      {/* The per-version numbers must not be read as adding up to the
+                          plugin total (they share hard-linked files). Say what the
+                          measurements actually amount to when they do not match. */}
+                      {versionSizes !== null && p.storeVersions.length > 1 && p.sizeBytes !== undefined
+                        && sumVersionSizes(p.storeVersions, versionSizes) > p.sizeBytes && (
+                        <div style={{ color: token.colorTextTertiary, fontSize: token.fontSizeSM, paddingTop: 4 }}>
+                          {t('plugin.detail.sizesOverlap', {
+                            sum: fmtBytes(sumVersionSizes(p.storeVersions, versionSizes)),
+                            total: fmtBytes(p.sizeBytes),
+                          })}
+                        </div>
+                      )}
                       {/* 非 store 的已解析版本（内置 bundle / 本地 link）—— 只读展示 */}
                       {(target?.versions ?? []).filter(v => !p.storeVersions.includes(v)).map(v => (
                         <div key={v} style={{ display: 'flex', alignItems: 'center', padding: '4px 0', borderBottom: `1px solid ${token.colorSplit}` }}>

@@ -285,6 +285,12 @@ const zh = {
     'dsh.legacyProfilesDirDesc': '该目录已不再生效：profile 现在固定放在 <home>/profiles，与直接运行 dsh 完全一致。若其中有需要保留的 profile，请手动移动到上面的固定目录。',
 
     'plugin.detail.size': '大小',
+    'plugin.detail.versionSize': '{{size}}',
+    'plugin.detail.versionSizeTip': '删除这个版本约可释放该体积；其中 {{shared}} / 共 {{total}} 与其他版本共享（硬链接），不一定随它一起消失。',
+    'plugin.detail.versionSizeTipSimple': '该版本自身的磁盘占用。版本之间共享硬链接文件，各版本之和可能大于插件总量。',
+    'plugin.detail.sizeMeasuring': '测量中…',
+    'plugin.detail.sizeUnknown': '未测到大小',
+    'plugin.detail.sizesOverlap': '各版本单独测量合计 {{sum}}，大于去重后的总量 {{total}} —— 版本之间共享硬链接文件，因此不能相加。',
     'plugin.detail.usageTab': '使用情况',
     'plugin.detail.versionsLabel': '版本',
     'plugin.detail.readmeTab': 'README',

@@ -297,6 +297,8 @@ const api = {
       ipcRenderer.invoke('plugins:overview'),
     calcSizes: (): Promise<IpcResult<Record<string, number>>> =>
       ipcRenderer.invoke('plugins:calcSizes'),
+    calcVersionSizes: (name: string): Promise<IpcResult<Record<string, number>>> =>
+      ipcRenderer.invoke('plugins:calcVersionSizes', name),
     checkUpdates: (opts?: { refresh?: boolean }): Promise<IpcResult<PluginUpdateInfo[]>> =>
       ipcRenderer.invoke('plugins:checkUpdates', opts),
     applyUpdates: (dshId: string, profile: string, updates: { name: string; version: string }[]): Promise<IpcResult<{ results: PluginApplyResult[] }>> =>

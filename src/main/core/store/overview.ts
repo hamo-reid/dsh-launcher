@@ -366,6 +366,34 @@ export function dirUniqueBytes(dir: string): number {
 }
 
 /**
+ * Real on-disk bytes of each archived version of one plugin, keyed by version.
+ *
+ * This is deliberately NOT a division of the plugin's total: archived versions
+ * share files through the pnpm store's hard links, so a per-version walk counts
+ * the same inode once in each version that references it. That is the honest
+ * answer to "how much does this version cost me" — each version is a
+ * self-contained mini project and is only removable/movable as one — but it means
+ * the values can sum to MORE than the plugin's deduplicated total. Whichever way
+ * it is shown, the two numbers must not be presented as if they add up.
+ *
+ * A version whose directory is gone (or unreadable) is omitted rather than
+ * reported as 0, so "no size" and "empty" stay distinguishable.
+ */
+export function versionSizes(storeDir: string, name: string): Record<string, number> {
+  const sizes: Record<string, number> = {}
+  if (storeDir === '') return sizes
+  for (const version of storeVersions(storeDir, name)) {
+    const inodes = new Map<string, number>()
+    collectDirInodes(join(pluginVersionDir(storeDir, name, version), 'node_modules'), inodes)
+    if (inodes.size === 0) continue
+    let total = 0
+    for (const size of inodes.values()) total += size
+    sizes[version] = total
+  }
+  return sizes
+}
+
+/**
  * Attach `sizeBytes` to each overview row: the plugin's own real on-disk usage,
  * merging (inode-deduped) every archived version + the legacy top-level copy
  * + (for plugins that live only in a profile, e.g. sub-bundles/builtin) that
