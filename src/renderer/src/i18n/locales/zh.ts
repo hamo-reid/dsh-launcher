@@ -313,6 +313,7 @@ const zh = {
     'plugin.detail.usageDetach': '断开',
     'plugin.detail.usageCleanRef': '清理引用',
     'plugin.detail.noReadme': '该插件目录下未提供 README。',
+    'plugin.detail.registry': '来源：{{label}}',
     'plugin.detail.storeTag': 'store',
     'plugin.detail.builtin': '内置',
     'plugin.detail.usageCount': '{{count}} 处使用',

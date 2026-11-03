@@ -74,6 +74,17 @@ export function registryById(id: string): RegistryEntryRecord | undefined {
   return registries().find(entry => entry.id === id)
 }
 
+/** The entry that answers for a package, or `undefined` when that is the public
+ * registry. Same decision as `registryFor`, kept in one place so a recorded origin
+ * can never disagree with where the install actually went. */
+export function registryEntryFor(packageName: string): RegistryEntryRecord | undefined {
+  const scoped = registries()
+    .filter((entry): entry is RegistryEntryRecord & { scope: string } => entry.scope !== undefined)
+    .filter(entry => matchesScope(packageName, entry.scope))
+    .sort((a, b) => b.scope.length - a.scope.length)
+  return scoped[0] ?? fallbackRegistry()
+}
+
 /**
  * The registry a package resolves from: the longest matching scope wins, then the
  * unscoped fallback, then the public registry.
@@ -82,12 +93,7 @@ export function registryById(id: string): RegistryEntryRecord | undefined {
  * `@team/sub`) resolve the way a person would read them.
  */
 export function registryFor(packageName: string): string {
-  const scoped = registries()
-    .filter((entry): entry is RegistryEntryRecord & { scope: string } => entry.scope !== undefined)
-    .filter(entry => matchesScope(packageName, entry.scope))
-    .sort((a, b) => b.scope.length - a.scope.length)
-  if (scoped[0] !== undefined) return scoped[0].url
-  return fallbackRegistry()?.url ?? PUBLIC_REGISTRY
+  return registryEntryFor(packageName)?.url ?? PUBLIC_REGISTRY
 }
 
 /**

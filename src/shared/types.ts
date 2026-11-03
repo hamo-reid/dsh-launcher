@@ -329,6 +329,12 @@ export interface InstalledOverviewRow {
   /** Real on-disk bytes of this plugin's own files (inode-dedup across its archive
    * versions / profile copy). Absent when nothing resolved on disk. */
   sizeBytes?: number
+  /** The label of the configured registry the archived version came from. Absent
+   * when it came from the public registry (or before the origin was recorded).
+   * Shown wherever "which source" is the question: with several registries
+   * configured, an update that starts failing is usually about the registry, and
+   * "npm" says nothing. */
+  registry?: string
 }
 
 /** Where a profile bundle layer's version comes from — decides whether it can be

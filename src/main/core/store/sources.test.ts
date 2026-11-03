@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { readPluginSourceSpec, readPluginSources, recordPluginSource, sourceKindOf } from './sources.ts'
+import { readPluginSourceRegistry, readPluginSourceSpec, readPluginSources, recordPluginSource, sourceKindOf } from './sources.ts'
 
 let root: string
 beforeAll(() => { root = mkdtempSync(join(tmpdir(), 'pm-sources-')) })
@@ -50,5 +50,41 @@ describe('store sources sidecar', () => {
     recordPluginSource(dir, 'plain', '1.0.0', 'store')
     expect(readPluginSources(dir)).toEqual({ 'plain@1.0.0': 'store' })
     expect(readPluginSourceSpec(dir, 'plain')).toBeUndefined()
+  })
+})
+
+describe('registry origin', () => {
+  it('round-trips the id of the registry that answered', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pm-sources-reg-'))
+    try {
+      recordPluginSource(dir, '@team/pkg', '1.0.0', 'npm', '@team/pkg@1.0.0', 'team')
+      expect(readPluginSourceRegistry(dir, '@team/pkg')).toBe('team')
+      // The kind and the spec are unaffected by the extra field.
+      expect(readPluginSourceSpec(dir, '@team/pkg')).toBe('@team/pkg@1.0.0')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('answers nothing for a package that came from the public registry', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pm-sources-pub-'))
+    try {
+      recordPluginSource(dir, 'lodash', '4.0.0', 'npm', 'lodash@4.0.0')
+      expect(readPluginSourceRegistry(dir, 'lodash')).toBeUndefined()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('reads a record written before the field existed', () => {
+    // Store files from earlier builds are real input; a missing id is not an error.
+    const dir = mkdtempSync(join(tmpdir(), 'pm-sources-old-'))
+    try {
+      writeFileSync(join(dir, '.pm-sources.json'), JSON.stringify({ 'old@1.0.0': { kind: 'npm', spec: 'old@1.0.0' } }))
+      expect(readPluginSourceRegistry(dir, 'old')).toBeUndefined()
+      expect(readPluginSources(dir)['old@1.0.0']).toBe('npm')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

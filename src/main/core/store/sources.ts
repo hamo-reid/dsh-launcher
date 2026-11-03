@@ -30,6 +30,10 @@ interface PluginSourceRecord {
   kind: PluginSource
   /** The exact pnpm source spec (`name@ver`, `github:owner/repo[#path]`, `file:…`). */
   spec?: string
+  /** The configured registry that answered for this package, when one did. With
+   * several registries "installed from npm" no longer says which one, and that is
+   * the first question when an update starts failing. */
+  registryId?: string
 }
 
 /** Path to the origin sidecar. */
@@ -52,7 +56,11 @@ function readRaw(storeDir: string): Record<string, RawValue> {
 function normalize(value: RawValue | undefined): PluginSourceRecord | undefined {
   if (typeof value === 'string') return { kind: value }
   if (value !== null && typeof value === 'object' && typeof value.kind === 'string') {
-    return { kind: value.kind, ...(typeof value.spec === 'string' && value.spec !== '' ? { spec: value.spec } : {}) }
+    return {
+      kind: value.kind,
+      ...(typeof value.spec === 'string' && value.spec !== '' ? { spec: value.spec } : {}),
+      ...(typeof value.registryId === 'string' && value.registryId !== '' ? { registryId: value.registryId } : {}),
+    }
   }
   return undefined
 }
@@ -78,11 +86,28 @@ export function readPluginSourceSpec(storeDir: string, name: string): string | u
   return undefined
 }
 
+/** The registry id recorded for a plugin (from the first archived version that
+ * has one), or `undefined` when it came from the public registry. */
+export function readPluginSourceRegistry(storeDir: string, name: string): string | undefined {
+  const prefix = `${name}@`
+  for (const [key, value] of Object.entries(readRaw(storeDir))) {
+    if (!key.startsWith(prefix)) continue
+    const id = normalize(value)?.registryId
+    if (id !== undefined) return id
+  }
+  return undefined
+}
+
 /** Record the origin of one archived version. Idempotent per version. */
 export function recordPluginSource(
-  storeDir: string, name: string, version: string, kind: PluginSource, spec?: string,
+  storeDir: string, name: string, version: string, kind: PluginSource, spec?: string, registryId?: string,
 ): void {
   const data = readRaw(storeDir)
-  data[`${name}@${version}`] = spec !== undefined && spec !== '' ? { kind, spec } : { kind }
+  const record: PluginSourceRecord = {
+    kind,
+    ...(spec !== undefined && spec !== '' ? { spec } : {}),
+    ...(registryId !== undefined && registryId !== '' ? { registryId } : {}),
+  }
+  data[`${name}@${version}`] = record
   writeFileSync(sourcesFile(storeDir), JSON.stringify(data, null, 2) + '\n')
 }

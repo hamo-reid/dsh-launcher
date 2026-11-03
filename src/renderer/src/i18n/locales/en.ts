@@ -315,6 +315,7 @@ const en: typeof zh = {
     'plugin.detail.usageDetach': 'Detach',
     'plugin.detail.usageCleanRef': 'Clean up',
     'plugin.detail.noReadme': 'No README provided in this plugin directory.',
+    'plugin.detail.registry': 'Source: {{label}}',
     'plugin.detail.storeTag': 'store',
     'plugin.detail.builtin': 'built-in',
     'plugin.detail.usageCount': '{{count}} use(s)',

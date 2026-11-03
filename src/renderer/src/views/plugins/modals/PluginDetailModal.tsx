@@ -159,6 +159,11 @@ export function PluginDetailModal(p: PluginDetailModalProps): JSX.Element {
                   <Tag key={s} color={SOURCE_COLORS[s] ?? 'default'}>{t(`plugin.source.${s}`)}</Tag>
                 ))}
                 {(target?.sources.length ?? 0) === 0 && <span style={{ color: token.colorTextTertiary }}>-</span>}
+                {target?.registry !== undefined && (
+                  // Which of the configured registries answered. With several, the
+                  // origin kind alone ("npm") does not say where an update will go.
+                  <Tag color="geekblue">{t('plugin.detail.registry', { label: target.registry })}</Tag>
+                )}
                 <Tag>{t('plugin.detail.usageCount', { count: target?.usage.length ?? 0 })}</Tag>
                 {p.sizeBytes !== undefined && <Tag>{t('plugin.detail.size')}: {fmtBytes(p.sizeBytes)}</Tag>}
               </Space>

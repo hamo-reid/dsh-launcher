@@ -13,6 +13,8 @@ import { readPluginSources } from './sources.ts'
 import { readRef } from './refstate.ts'
 import { resolveInstallAnchor } from '../dsh/dsh.ts'
 import { listBundleSubdepNames } from './subdeps.ts'
+import { readPluginSourceRegistry } from './sources.ts'
+import { registryById } from './registry.ts'
 import { SHIPPED_BUNDLE_NAMES } from '../../../shared/profile-name.ts'
 import { profilesRoot, type DshScope } from '../profile/appState.ts'
 import type {
@@ -391,6 +393,25 @@ export function versionSizes(storeDir: string, name: string): Record<string, num
     sizes[version] = total
   }
   return sizes
+}
+
+/**
+ * Attach the answering registry's label to each row that was installed from one.
+ *
+ * The id is what the archive recorded (it survives a rename); the label is what a
+ * person recognises. An id whose entry has been removed is left off rather than
+ * shown as a bare identifier — the plugin still works, it just came from a
+ * registry that no longer exists on this machine.
+ */
+export function attachRegistryLabels(rows: InstalledOverviewRow[], storeDir: string): InstalledOverviewRow[] {
+  if (storeDir === '') return rows
+  for (const row of rows) {
+    const id = readPluginSourceRegistry(storeDir, row.name)
+    if (id === undefined) continue
+    const label = registryById(id)?.label
+    if (label !== undefined) row.registry = label
+  }
+  return rows
 }
 
 /**

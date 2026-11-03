@@ -14,6 +14,7 @@ import {
   versionStagingDir, versionsRoot, type ProfileManifestShape,
 } from './layout.ts'
 import { recordPluginSource, sourceKindOf } from './sources.ts'
+import { registryEntryFor } from './registry.ts'
 import { installNameFor } from './git-source.ts'
 import { diagnoseFailure, type AdviceKey, type FailureKind, type FailureReport } from './failure.ts'
 import { pathIdentifierInvalid, versionInvalid } from '../profile/name-guard.ts'
@@ -264,7 +265,7 @@ export async function installSource(
     }
     rmSync(stash, { recursive: true, force: true })
     await relinkVersion(dest, join(dest, 'node_modules', name), storeDir)
-    recordPluginSource(storeDir, name, version, sourceKindOf(source), source)
+    recordPluginSource(storeDir, name, version, sourceKindOf(source), source, registryEntryFor(name)?.id)
     logger.info(`plugin store replaced: ${name}@${version} (${source})`)
     return { ok: true, text: `已替换归档 ${name}@${version}`, version }
   }
@@ -277,7 +278,7 @@ export async function installSource(
   // Moving `.staging` → version dir dangles pnpm's absolute top-level links (they
   // name the now-gone `.staging`); let pnpm rewire them to this version's goods.
   await relinkVersion(dest, join(dest, 'node_modules', name), storeDir)
-  recordPluginSource(storeDir, name, version, sourceKindOf(source), source)
+  recordPluginSource(storeDir, name, version, sourceKindOf(source), source, registryEntryFor(name)?.id)
   logger.info(`plugin store add: ${name}@${version} (${source})`)
   return { ok: true, text: `已下载 ${name}@${version}`, version }
 }
