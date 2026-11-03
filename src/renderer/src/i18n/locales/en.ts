@@ -25,6 +25,7 @@ const en: typeof zh = {
     'about.link.issuesHint': 'Report a bug or suggest a change',
     'about.footer': 'DSH Launcher · released under the MIT license',
     'about.update.errorHint': 'See the error detail',
+    'about.update.checkedAt': '· checked at {{time}}',
     'about.update.checking': 'Checking for updates…',
     'about.update.failed': 'Update check failed',
     'about.update.available': 'New version {{version}} available',

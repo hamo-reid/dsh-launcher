@@ -23,6 +23,7 @@ const zh = {
     'about.link.issuesHint': '报告缺陷，或提出改进建议',
     'about.footer': 'DSH Launcher · 以 MIT 许可发布',
     'about.update.errorHint': '查看错误详情',
+    'about.update.checkedAt': '· 检查于 {{time}}',
     'about.update.checking': '正在检查更新…',
     'about.update.failed': '检查更新失败',
     'about.update.available': '发现新版本 {{version}}',

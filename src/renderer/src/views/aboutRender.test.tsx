@@ -12,12 +12,23 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import i18next from 'i18next'
 import { I18nextProvider, initReactI18next } from 'react-i18next'
 import en from '../i18n/locales/en'
-import AboutView from './AboutView.tsx'
+import AboutView, { UpdateReport } from './AboutView.tsx'
+import type { AppRelease } from '../../../shared/types.ts'
 
 const REPO = 'https://github.com/hamo-reid/dsh-launcher'
 
 const markup = (): string =>
   renderToStaticMarkup(<I18nextProvider i18n={i18next}><AboutView /></I18nextProvider>)
+
+const report = (node: JSX.Element): string =>
+  renderToStaticMarkup(<I18nextProvider i18n={i18next}>{node}</I18nextProvider>)
+
+const RELEASE: AppRelease = {
+  tag: '0.6.0-beta1',
+  version: '0.6.0-beta1',
+  url: `${REPO}/releases/tag/v0.6.0-beta1`,
+  publishedAt: '2026-10-01T09:00:00Z',
+}
 
 beforeAll(async () => {
   await i18next.use(initReactI18next).init({
@@ -58,5 +69,37 @@ describe('About page', () => {
 
   it('carries the license line, because an About page is where it belongs', () => {
     expect(markup()).toContain('released under the MIT license')
+  })
+})
+
+describe('the update report', () => {
+  it('shows no row it cannot fill when the app is current', () => {
+    // The defect this pins: a table with "Latest —" and "Published —" reads as a
+    // failed load, and "latest: none" is the state where nothing is unknown —
+    // the answer is simply that you already have it.
+    const html = report(<UpdateReport update={{ status: 'ok', latest: null }} version="0.5.1-beta1" checkedAt="09:41" />)
+    expect(html).toContain('You are up to date')
+    expect(html).toContain('0.5.1-beta1')
+    expect(html).toContain('checked at 09:41')
+    expect(html).not.toContain('Latest')
+    expect(html).not.toContain('Published')
+  })
+
+  it('shows the release rows only when a newer release exists', () => {
+    const html = report(<UpdateReport update={{ status: 'ok', latest: RELEASE }} version="0.5.1-beta1" checkedAt="09:41" />)
+    expect(html).toContain('Latest')
+    expect(html).toContain('0.6.0-beta1')
+    expect(html).toContain('Published')
+    // The date is the release's, rendered as an unambiguous ISO day.
+    expect(html).toContain('2026-10-01')
+    expect(html).toContain(`href="${RELEASE.url}"`)
+  })
+
+  it('says the check failed instead of pretending the version is unknown', () => {
+    const html = report(<UpdateReport update={{ status: 'error', message: 'HTTP 403' }} version="0.5.1-beta1" />)
+    expect(html).toContain('Update check failed')
+    expect(html).toContain('0.5.1-beta1')
+    // The transport detail is a tooltip, so it is not in the server markup.
+    expect(html).not.toContain('HTTP 403')
   })
 })

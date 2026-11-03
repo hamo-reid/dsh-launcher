@@ -48,6 +48,84 @@ function LinkRow({ href, icon, title, hint }: {
   )
 }
 
+/**
+ * The update panel's body — its own component so the state it renders is the
+ * state a test can hand it. The page fetches through an effect, which a server
+ * render does not run, so "up to date" would otherwise be untestable.
+ *
+ * The rule it exists to hold: **a row is only rendered when it has a value.** A
+ * newer release is the sole thing that makes "latest" and its date knowable; when
+ * there is none, the verdict line says "you are current" and the table would
+ * otherwise show two dashes that read as a failed load.
+ */
+export function UpdateReport({ update, version, checkedAt }: {
+  update: UpdateStatus
+  version: string
+  checkedAt?: string
+}) {
+  const { t } = useTranslation()
+  const { token } = theme.useToken()
+  const checking = update.status === 'checking' || update.status === 'idle'
+  const latest = update.status === 'ok' ? update.latest : null
+  const verdict = ((): { color: string; label: string } => {
+    if (checking) return { color: token.colorTextTertiary, label: t('about.update.checking') }
+    if (update.status === 'error') return { color: token.colorError, label: t('about.update.failed') }
+    if (latest !== null) return { color: token.colorWarning, label: t('about.update.available', { version: latest.version }) }
+    return { color: token.colorSuccess, label: t('about.update.upToDate') }
+  })()
+
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: token.paddingSM, flexWrap: 'wrap' }}>
+        {checking
+          ? <LoadingOutlined spin aria-hidden style={{ color: verdict.color }} />
+          : <span aria-hidden style={{ width: 6, height: 6, borderRadius: 3, background: verdict.color }} />}
+        <span style={{ fontWeight: 500 }}>{verdict.label}</span>
+        {update.status === 'ok' && checkedAt !== undefined && (
+          <span style={{ color: token.colorTextTertiary, fontSize: token.fontSizeSM }}>
+            {t('about.update.checkedAt', { time: checkedAt })}
+          </span>
+        )}
+        {update.status === 'error' && (
+          // The transport detail belongs to whoever is filing a bug, not to
+          // everyone who opens this page — hence the tooltip.
+          <Tooltip title={update.message}>
+            <span style={{
+              color: token.colorTextTertiary,
+              fontSize: token.fontSizeSM,
+              borderBottom: `1px dashed ${token.colorBorder}`,
+            }}>
+              {t('about.update.errorHint')}
+            </span>
+          </Tooltip>
+        )}
+      </div>
+      <Descriptions column={1} size="small" colon={false}>
+        <Descriptions.Item label={t('about.label.current')}>
+          <span style={{ fontFamily: MONO }}>{version === '' ? '—' : version}</span>
+        </Descriptions.Item>
+        {latest !== null && (
+          <Descriptions.Item label={t('about.label.latest')}>
+            <span style={{ fontFamily: MONO }}>{latest.version}</span>
+          </Descriptions.Item>
+        )}
+        {latest !== null && (
+          <Descriptions.Item label={t('about.label.published')}>
+            <span style={{ fontFamily: MONO }}>{isoDay(latest.publishedAt)}</span>
+          </Descriptions.Item>
+        )}
+      </Descriptions>
+      {latest !== null && (
+        <div style={{ marginTop: token.paddingSM }}>
+          <Button type="primary" href={latest.url || REPO} target="_blank" rel="noreferrer">
+            {t('about.update.release')}
+          </Button>
+        </div>
+      )}
+    </>
+  )
+}
+
 /** About page: what this app is, which build is installed, whether a newer one
  * exists, and where the project lives.
  *
@@ -58,6 +136,9 @@ export default function AboutView() {
   const { token } = theme.useToken()
   const [version, setVersion] = useState('')
   const [update, setUpdate] = useState<UpdateStatus>({ status: 'idle' })
+  /** When the last *successful* check came back — the one fact that separates
+   * "up to date" from "you have not looked yet". */
+  const [checkedAt, setCheckedAt] = useState<string>()
 
   useEffect(() => {
     void window.api.app.version().then(r => { if (r.ok) setVersion(r.value) })
@@ -66,23 +147,19 @@ export default function AboutView() {
   const check = useCallback((): void => {
     setUpdate({ status: 'checking' })
     window.api.app.checkUpdate().then(r => {
-      if (r.ok) setUpdate({ status: 'ok', latest: r.value.latest })
-      else setUpdate({ status: 'error', message: r.error ?? '' })
+      if (r.ok) {
+        setUpdate({ status: 'ok', latest: r.value.latest })
+        setCheckedAt(new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }))
+      } else {
+        setUpdate({ status: 'error', message: r.error ?? '' })
+        setCheckedAt(undefined)
+      }
     })
   }, [])
 
   useEffect(() => { check() }, [check])
 
   const checking = update.status === 'checking' || update.status === 'idle'
-  const latest = update.status === 'ok' ? update.latest : null
-
-  /** The verdict as one pill: a dot carries the state, the words say it. */
-  const pill = ((): { color: string; label: ReactNode } => {
-    if (checking) return { color: token.colorTextTertiary, label: t('about.update.checking') }
-    if (update.status === 'error') return { color: token.colorError, label: t('about.update.failed') }
-    if (latest !== null) return { color: token.colorWarning, label: t('about.update.available', { version: latest.version }) }
-    return { color: token.colorSuccess, label: t('about.update.upToDate') }
-  })()
 
   return (
     <div style={{ height: '100%', overflowY: 'auto', padding: token.paddingLG }}>
@@ -143,12 +220,6 @@ export default function AboutView() {
             <div style={{ color: token.colorTextSecondary, marginTop: 6 }}>{t('about.about')}</div>
           </div>
           <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 12 }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: pill.color, whiteSpace: 'nowrap' }}>
-              {checking
-                ? <LoadingOutlined spin aria-hidden />
-                : <span aria-hidden style={{ width: 6, height: 6, borderRadius: 3, background: pill.color }} />}
-              <span style={{ color: token.colorText, fontSize: token.fontSizeSM }}>{pill.label}</span>
-            </span>
             <Button icon={<ReloadOutlined />} loading={checking} onClick={check}>
               {t('about.update.check')}
             </Button>
@@ -165,35 +236,7 @@ export default function AboutView() {
           }}
         >
           <Panel title={t('about.section.update')}>
-            <Descriptions column={1} size="small" colon={false}>
-              <Descriptions.Item label={t('about.label.current')}>
-                <span style={{ fontFamily: MONO }}>{version === '' ? '—' : version}</span>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('about.label.latest')}>
-                <span style={{ fontFamily: MONO }}>{latest?.version ?? '—'}</span>
-              </Descriptions.Item>
-              <Descriptions.Item label={t('about.label.published')}>
-                <span style={{ fontFamily: MONO }}>{isoDay(latest?.publishedAt)}</span>
-              </Descriptions.Item>
-            </Descriptions>
-            {latest !== null && (
-              <div style={{ marginTop: token.paddingSM }}>
-                <Button type="primary" href={latest.url || REPO} target="_blank" rel="noreferrer">
-                  {t('about.update.release')}
-                </Button>
-              </div>
-            )}
-            {update.status === 'error' && (
-              <div style={{ marginTop: token.paddingSM, color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>
-                {/* The transport detail belongs to whoever is filing a bug, not to
-                    everyone who opens this page — hence the tooltip. */}
-                <Tooltip title={update.message}>
-                  <span style={{ borderBottom: `1px dashed ${token.colorBorder}` }}>
-                    {t('about.update.errorHint')}
-                  </span>
-                </Tooltip>
-              </div>
-            )}
+            <UpdateReport update={update} version={version} checkedAt={checkedAt} />
           </Panel>
 
           <Panel title={t('about.section.links')}>
