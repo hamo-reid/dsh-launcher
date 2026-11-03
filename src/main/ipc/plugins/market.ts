@@ -92,10 +92,13 @@ export function registerMarketIpc(): void {
         name: typeof input?.name === 'string' ? input.name : '',
         url: typeof input?.url === 'string' ? input.url : '',
       })
-      if (saved === 'badUrl') return fail(E.marketBadUrl)
-      if (saved === 'badName') return fail(E.marketBadName)
-      if (saved === 'duplicateName') return fail(E.marketDuplicateName)
-      if (saved === 'unreachable') return fail(E.marketUnreachable)
+      if (!saved.ok) {
+        if (saved.reason === 'badUrl') return fail(E.marketBadUrl)
+        if (saved.reason === 'badName') return fail(E.marketBadName)
+        if (saved.reason === 'duplicateName') return fail(E.marketDuplicateName)
+        // The status is what tells "wrong host" apart from "wrong token".
+        return fail(E.marketUnreachable, { detail: saved.reason === 'unreachable' && saved.status !== null ? 'HTTP ' + String(saved.status) : '—' })
+      }
       return { ok: true, value: marketSourceState() }
     } catch (error) {
       return failFromError(error)

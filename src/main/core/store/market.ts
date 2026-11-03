@@ -161,17 +161,22 @@ function hostOf(url: string): string {
 /** Add or update one catalog. Returns false when the input cannot be saved:
  * the URL must be http(s), the name non-empty, and names are unique
  * case-insensitively because the picker shows names. */
-export type SaveCatalogResult = 'ok' | 'badUrl' | 'badName' | 'duplicateName' | 'unreachable'
+export type SaveCatalogResult =
+  | { ok: true }
+  | { ok: false; reason: 'badUrl' | 'badName' | 'duplicateName' }
+  /** The address answered with something that is not a catalog; `status` is null
+   * when the request never completed (offline, DNS, timeout). */
+  | { ok: false; reason: 'unreachable'; status: number | null }
 
 export async function saveMarketCatalog(input: { id?: string; name: string; url: string }): Promise<SaveCatalogResult> {
   const url = input.url.trim()
   const name = input.name.trim()
-  if (!isHttpUrl(url)) return 'badUrl'
-  if (name === '') return 'badName'
+  if (!isHttpUrl(url)) return { ok: false, reason: 'badUrl' }
+  if (name === '') return { ok: false, reason: 'badName' }
   const list = marketCatalogs()
   const id = input.id !== undefined && input.id !== '' ? input.id : 'market-' + String(Date.now())
   const clash = list.some(c => c.id !== id && c.name.toLowerCase() === name.toLowerCase())
-  if (clash) return 'duplicateName'
+  if (clash) return { ok: false, reason: 'duplicateName' }
   // Fetch it once before saving. A web page URL and a raw file URL look alike in
   // a text box and behave completely differently - CNB answers 400 for the page -
   // so the mistake has to be caught here, not at the first refresh.
@@ -181,11 +186,11 @@ export async function saveMarketCatalog(input: { id?: string; name: string; url:
       headers: token !== undefined ? { authorization: 'Bearer ' + String(codec.decode(token)) } : {},
       signal: AbortSignal.timeout(8000),
     })
-    if (!probe.ok) return 'unreachable'
+    if (!probe.ok) return { ok: false, reason: 'unreachable', status: probe.status }
     const body = await probe.json() as { plugins?: unknown }
-    if (!Array.isArray(body.plugins)) return 'unreachable'
+    if (!Array.isArray(body.plugins)) return { ok: false, reason: 'unreachable', status: probe.status }
   } catch {
-    return 'unreachable'
+    return { ok: false, reason: 'unreachable', status: null }
   }
   updateSettings((draft) => {
     const entry = { id, name, url, ...(draft.marketCatalogs?.find(c => c.id === id)?.tokenEnc !== undefined
@@ -196,7 +201,7 @@ export async function saveMarketCatalog(input: { id?: string; name: string; url:
     if (draft.marketActiveId === undefined || draft.marketActiveId === '') draft.marketActiveId = id
   })
   forgetCatalog()
-  return 'ok'
+  return { ok: true }
 }
 
 /** Drop one catalog. Its token goes with it; the market falls back to public
