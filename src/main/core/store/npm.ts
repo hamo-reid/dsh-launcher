@@ -6,10 +6,10 @@
  * search only ever asks the public catalogue (`SEARCH_REGISTRY`). The
  * raw-normalization functions are exported so the unit tests stay off the wire. */
 
-import type { NpmSearchHit, PackageVersionInfo, RegistryProbe } from '../../../shared/types.ts'
+import type { NpmSearchHit, PackageVersionInfo, RegistryProbe, RegistrySource } from '../../../shared/types.ts'
 import { logger } from '../shared/logger.ts'
 import { registryAuthHeader, registryToken } from './registry-auth.ts'
-import { registryBase, registryFor, SEARCH_REGISTRY } from './registry.ts'
+import { registryBase, registryForSource, SEARCH_REGISTRY } from './registry.ts'
 
 /**
  * Fetch from the configured registry, carrying the credential when the URL
@@ -85,13 +85,14 @@ export async function npmSearch(
 
 /** Fetch the full version list + dist-tags for a package (for the version picker).
  *
- * The registry is chosen per package (`registryFor`), not globally: with a scope
- * configured, a private plugin resolves from the private registry while every
- * other package keeps resolving from the public one. Asking the wrong host here
- * is what makes an install fail later, because pnpm then installs something the
- * user never chose. */
-export async function fetchPackageVersions(name: string): Promise<PackageVersionInfo> {
-  const base = registryFor(name)
+ * `source` defaults to `auto`, which is the routing: with a scope configured, a
+ * private plugin resolves from the private registry while every other package
+ * keeps resolving from the public one. Asking the wrong host here is what makes
+ * an install fail later, because pnpm then installs something the user never
+ * chose. The download page passes `public` / `private` when the person has said
+ * where to look (`registryForSource`). */
+export async function fetchPackageVersions(name: string, source: RegistrySource = 'auto'): Promise<PackageVersionInfo> {
+  const base = registryForSource(name, source)
   logger.debug(`npm versions: "${name}" @ ${base}`)
   const res = await fetchFromRegistry(`${base}/${encodeURIComponent(name)}`)
   if (!res.ok) throw new Error(`npm 包不存在或不可访问：HTTP ${res.status}`)

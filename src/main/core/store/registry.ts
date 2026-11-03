@@ -22,8 +22,10 @@
  */
 
 import { loadSettings } from '../settings/settings.ts'
+import { throwE } from '../shared/errors.ts'
 import { logger } from '../shared/logger.ts'
 import { matchesScope, normalizeScope, parseRegistry } from './npmrc.ts'
+import type { RegistrySource } from '../../../shared/types.ts'
 
 /** The public npm registry — what both call sites used before this setting. */
 export const PUBLIC_REGISTRY = 'https://registry.npmjs.org'
@@ -97,6 +99,29 @@ let warnedScope: string | undefined
  * answer a keyword.
  */
 export const SEARCH_REGISTRY = PUBLIC_REGISTRY
+
+/**
+ * The registry a lookup should ask, when the caller says which one it wants.
+ *
+ * `auto` is the routing above and stays the default: installs and update checks
+ * have no business overriding it. `private` exists because the download page lets
+ * a person *assert* the source ("look here"), and an assertion must not be
+ * quietly rewritten into a derivation — a name outside the configured scope is
+ * not a reason to go ask the public registry, it is a reason to report that the
+ * package is not in the source that was chosen.
+ *
+ * Throws the coded error when `private` is asked for and nothing is configured,
+ * rather than falling back to public and appearing to answer from the wrong place.
+ */
+export function registryForSource(packageName: string, source: RegistrySource = 'auto'): string {
+  if (source === 'public') return PUBLIC_REGISTRY
+  if (source === 'private') {
+    const configured = parseRegistry(loadSettings().registryUrl)
+    if (configured === undefined) throwE('registry.notConfigured')
+    return configured
+  }
+  return registryFor(packageName)
+}
 
 /**
  * A stable description of the current routing, for cache keys.

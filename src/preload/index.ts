@@ -41,6 +41,7 @@ import type {
   MarketSourceState,
   RegistryAuthState,
   RegistryProbe,
+  RegistrySource,
   NodeEnvironment,
   NpmSearchHit,
   OnboardingPayload,
@@ -317,8 +318,8 @@ const api = {
       ipcRenderer.invoke('plugins:readme', name),
     search: (query: string, opts?: { from?: number; size?: number }): Promise<IpcResult<{ hits: NpmSearchHit[]; total: number }>> =>
       ipcRenderer.invoke('plugins:search', query, opts),
-    pkgVersions: (name: string): Promise<IpcResult<PackageVersionInfo>> =>
-      ipcRenderer.invoke('plugins:pkgVersions', name),
+    pkgVersions: (name: string, source?: RegistrySource): Promise<IpcResult<PackageVersionInfo>> =>
+      ipcRenderer.invoke('plugins:pkgVersions', name, source),
     devList: (): Promise<IpcResult<{ plugins: DevPlugin[]; usage: Record<string, PluginUsagePoint[]> }>> =>
       ipcRenderer.invoke('plugins:devList'),
     devAdd: (): Promise<IpcResult<DevPlugin>> =>

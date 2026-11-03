@@ -15,7 +15,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { exportSettings, importSettings, loadSettings, openDatabase, patchSettings } from '../settings/settings.ts'
-import { PUBLIC_REGISTRY, registryBase, registryFor, SEARCH_REGISTRY } from './registry.ts'
+import { PUBLIC_REGISTRY, registryBase, registryFor, registryForSource, SEARCH_REGISTRY } from './registry.ts'
 import { normalizeSettings, splitPrefs, CURRENT_SCHEMA_VERSION } from '../settings/normalize.ts'
 
 let root: string
@@ -110,6 +110,30 @@ describe('registryFor', () => {
     expect(SEARCH_REGISTRY).toBe(PUBLIC_REGISTRY)
     patchSettings({ registryScope: undefined })
     expect(SEARCH_REGISTRY).toBe(PUBLIC_REGISTRY)
+  })
+
+  it('honours an explicit source over the routing', () => {
+    // The download page lets a person ASSERT where to look. An assertion must not
+    // be quietly rewritten into a derivation: a name outside the scope is not a
+    // reason to ask the public registry, it is an answer to give back.
+    patchSettings({ registryUrl: privateBase, registryScope: '@hamo-studio' })
+    expect(registryForSource('lodash', 'private')).toBe(privateBase)
+    expect(registryForSource('@hamo-studio/x', 'public')).toBe(PUBLIC_REGISTRY)
+    // `auto` remains the routing, so installs and update checks are unaffected.
+    expect(registryForSource('lodash', 'auto')).toBe(PUBLIC_REGISTRY)
+    expect(registryForSource('lodash')).toBe(PUBLIC_REGISTRY)
+  })
+
+  it('refuses to answer "private" when nothing is configured', () => {
+    // Falling back to the public registry here would answer from a place the user
+    // did not choose, and the mismatch would only surface at install time.
+    patchSettings({ registryUrl: undefined })
+    try {
+      registryForSource('lodash', 'private')
+      expect.unreachable('should have thrown')
+    } catch (error) {
+      expect((error as { code?: string }).code).toBe('registry.notConfigured')
+    }
   })
 })
 

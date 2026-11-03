@@ -16,7 +16,7 @@ import DevPluginsView from './plugins/DevPluginsView.tsx'
 import PluginsDownloadView from './plugins/PluginsDownloadView.tsx'
 import PluginsInstallView from './plugins/PluginsInstallView.tsx'
 import PluginsOverviewView from './plugins/PluginsOverviewView.tsx'
-import type { InstalledOverviewRow, MarketAnnotations, PluginUpdateInfo, PluginUsagePoint } from '../../../shared/types.ts'
+import type { InstalledOverviewRow, MarketAnnotations, PluginUpdateInfo, PluginUsagePoint, RegistrySource } from '../../../shared/types.ts'
 
 type PluginView = 'overview' | 'download' | 'install' | 'market' | 'dev'
 
@@ -53,6 +53,13 @@ export default function PluginsSection() {
 
   const [storeMap, setStoreMap] = useState<Map<string, string[]>>(new Map())
   const [dlPkg, setDlPkg] = useState<string | null>(null)
+  /** The source the version dialog was opened from — it must list versions from
+   * the same registry the row was resolved from. */
+  const [dlSource, setDlSource] = useState<RegistrySource>('auto')
+  /** The configured private registry + scope, for the download page's source
+   * choice and its out-of-scope warning. */
+  const [privateRegistry, setPrivateRegistry] = useState('')
+  const [privateScope, setPrivateScope] = useState('')
   // The update dialog (pick a version + the profiles to re-point).
   const [updatePkg, setUpdatePkg] = useState<UpdatePluginTarget | null>(null)
 
@@ -106,6 +113,13 @@ export default function PluginsSection() {
     void (async () => {
       const d = await window.api.plugins.getDir()
       if (d.ok) { setDir(d.value.dir); setDirMissing(d.value.dir === '') }
+      // The download page offers the private source only when one exists, and
+      // warns when an explicit lookup names something installs would not route
+      // there — both need the configured values, not a guess.
+      const url = await window.api.settings.getRegistryUrl()
+      if (url.ok) setPrivateRegistry(url.value ?? '')
+      const scope = await window.api.settings.getRegistryScope()
+      if (scope.ok) setPrivateScope(scope.value ?? '')
       await Promise.all([load(), refreshStoreNames(), refreshDevNames()])
     })()
   }, [refreshStoreNames, refreshDevNames])
@@ -255,7 +269,11 @@ export default function PluginsSection() {
   }
 
   // Download a specific version into the store (the picker fetches the list).
-  const openDownloadVersion = (name: string): void => { setTarget(null); setDlPkg(name) }
+  const openDownloadVersion = (name: string, source: RegistrySource = 'auto'): void => {
+    setTarget(null)
+    setDlSource(source)
+    setDlPkg(name)
+  }
 
   // Update to a chosen version and (optionally) re-point the profiles using it.
   const openUpdate = (row: InstalledOverviewRow): void => {
@@ -343,6 +361,8 @@ export default function PluginsSection() {
         <PluginsDownloadView
           dirMissing={dirMissing}
           storeMap={storeMap}
+          privateRegistry={privateRegistry}
+          privateScope={privateScope}
           onDownloadVersion={openDownloadVersion}
           onInstallToProfile={name => { setTarget(null); setInstallPkg(name) }}
         />
@@ -388,6 +408,7 @@ export default function PluginsSection() {
     />
     <DownloadVersionModal
       pkg={dlPkg}
+      source={dlSource}
       onClose={() => setDlPkg(null)}
       onInstalled={async () => { await Promise.all([load(), refreshStoreNames()]) }}
     />

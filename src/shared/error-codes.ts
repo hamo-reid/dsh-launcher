@@ -43,10 +43,11 @@ export const E = {
   dataRootNested: 'dataRoot.nested',
   // market
   marketEntryNotFound: 'market.entryNotFound',
-  // registry (the configured npm registry a search / install reads from)
+  // registry (the configured npm registry a lookup / install reads from)
   registryBadUrl: 'registry.badUrl',
   registryBadScheme: 'registry.badScheme',
   registryBadScope: 'registry.badScope',
+  registryNotConfigured: 'registry.notConfigured',
   // extensions (MCP rows)
   extBadServerName: 'ext.badServerName',
   extBadTransport: 'ext.badTransport',

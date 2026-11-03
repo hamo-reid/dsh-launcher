@@ -19,7 +19,7 @@ import { pathIdentifierInvalid, versionInvalid } from '../validate.ts'
 import { ctxOf } from '../ctxOf.ts'
 import { handle } from '../handle.ts'
 import type {
-  ComboPlugin, InstalledOverviewRow, IpcResult, NpmSearchHit, PackageVersionInfo, PluginUsagePoint,
+  ComboPlugin, InstalledOverviewRow, IpcResult, NpmSearchHit, PackageVersionInfo, PluginUsagePoint, RegistrySource,
 } from '../../../shared/types.ts'
 
 /** Validate a candidate plugin dir and make it usable: create it, prove it is
@@ -222,10 +222,14 @@ export function registerStoreIpc(): void {
     }
   })
 
-  handle('plugins:pkgVersions', async (_event, name: string): Promise<IpcResult<PackageVersionInfo>> => {
+  handle('plugins:pkgVersions', async (_event, name: string, source?: RegistrySource): Promise<IpcResult<PackageVersionInfo>> => {
     try {
       if (pathIdentifierInvalid(name)) return fail(E.nameInvalid)
-      return { ok: true, value: await fetchPackageVersions(name) }
+      // `source` is the download page's explicit choice; anything else follows
+      // the routing. Validated here rather than trusted: it reaches a URL.
+      const registrySource: RegistrySource =
+        source === 'public' || source === 'private' ? source : 'auto'
+      return { ok: true, value: await fetchPackageVersions(name, registrySource) }
     } catch (error) {
       return failFromError(error)
     }

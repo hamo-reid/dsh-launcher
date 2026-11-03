@@ -804,6 +804,14 @@ export interface RegistryAuthState {
   encryption: 'none' | 'safe' | 'plaintext'
 }
 
+/** Which registry a lookup should ask.
+ *
+ * `auto` follows the routing (`registryFor`: scope decides), which is what
+ * installs and update checks use. `public` / `private` are the user's explicit
+ * choice from the download page — an assertion about where to look, not a
+ * derivation from what is configured. */
+export type RegistrySource = 'auto' | 'public' | 'private'
+
 /** Result of reaching the configured registry (Settings "test" button).
  *
  * Split into the two questions a person actually has: did the address answer, and

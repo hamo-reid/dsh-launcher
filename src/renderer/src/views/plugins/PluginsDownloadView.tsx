@@ -1,14 +1,21 @@
 /**
  * The download centre: a live npm search (debounced) with paged "load more" and an
- * in-store marker per hit.
+ * in-store marker per hit — or, when the person picks the private source, a
+ * by-name lookup against that source.
+ *
+ * The split exists because the two operations are not the same thing. Keyword
+ * search is discovery and only the public catalogue answers it; a private
+ * registry is under no obligation to implement `/-/v1/search`, and the ones that
+ * do not answer 404. So the source is an explicit choice (a dropdown), and the
+ * input changes meaning with it instead of one setting silently deciding for the
+ * user.
  *
  * The query, the result pages and the paging cursor are all private to this view.
  * It mounts only while the download tab is active, which is what used to be the
- * `view !== 'download'` guard on its search effect — so switching to the tab still
- * searches the current query, and sitting on the overview still searches nothing.
+ * `view !== 'download'` guard on its search effect.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Alert, Button, Empty, Space, Skeleton, Tag, theme, message } from 'antd'
+import { Alert, Button, Empty, Input, Select, Space, Skeleton, Tag, theme, message } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../../lib/ipc.ts'
 import { fmtDate } from '../../lib/format.ts'
@@ -16,7 +23,8 @@ import Panel from '../../components/Panel.tsx'
 import SearchInput from '../../components/SearchInput.tsx'
 import SectionHeading from '../../components/SectionHeading.tsx'
 import Toolbar from '../../components/Toolbar.tsx'
-import type { NpmSearchHit } from '../../../../shared/types.ts'
+import { latestPackageVersion } from '../../../../shared/version.ts'
+import type { NpmSearchHit, RegistrySource } from '../../../../shared/types.ts'
 
 const PAGE_SIZE = 25
 
@@ -25,18 +33,40 @@ interface Props {
   dirMissing: boolean
   /** Archived versions per plugin, so a hit can say it is already in the store. */
   storeMap: Map<string, string[]>
-  onDownloadVersion: (name: string) => void
+  /** The configured private registry, or `''` when there is none. Empty hides
+   * the source choice entirely: offering "private" with nothing behind it is a
+   * menu item that can only fail. */
+  privateRegistry: string
+  /** The configured package scope, if any — used to warn when an explicit
+   * private lookup names a package the install would not route there. */
+  privateScope: string
+  onDownloadVersion: (name: string, source: RegistrySource) => void
   onInstallToProfile: (name: string) => void
 }
 
-export default function PluginsDownloadView({ dirMissing, storeMap, onDownloadVersion, onInstallToProfile }: Props): JSX.Element {
+/** The host a registry URL points at, for a label that fits in a dropdown. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host
+  } catch {
+    return url
+  }
+}
+
+export default function PluginsDownloadView(p: Props): JSX.Element {
   const { t } = useTranslation()
   const { token } = theme.useToken()
+  const hasPrivate = p.privateRegistry !== ''
+  const [source, setSource] = useState<RegistrySource>('public')
   const [query, setQuery] = useState('dsh')
+  /** The private-source name box. Kept apart from `query` so switching sources
+   * does not carry a keyword into a field that resolves a package name. */
+  const [lookupName, setLookupName] = useState('')
   const [hits, setHits] = useState<NpmSearchHit[]>([])
   const [total, setTotal] = useState(0)
   const [searching, setSearching] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [lookupError, setLookupError] = useState('')
   /** How many hits have been fetched — the cursor for "load more". */
   const fromRef = useRef(0)
 
@@ -57,29 +87,101 @@ export default function PluginsDownloadView({ dirMissing, storeMap, onDownloadVe
 
   // Debounced: typing in the query re-searches, without firing per keystroke.
   useEffect(() => {
+    if (source !== 'public') return
     const timer = setTimeout(() => void runSearch(query, false), 300)
     return () => clearTimeout(timer)
-  }, [query, runSearch])
+  }, [query, source, runSearch])
+
+  /** Resolve one name against the private source. There is no list to page
+   * through — a private registry exposes packages by name, not by keyword — so
+   * the answer is one row (or one error). */
+  const runLookup = useCallback(async (): Promise<void> => {
+    const name = lookupName.trim()
+    setLookupError('')
+    if (name === '') { setHits([]); setTotal(0); return }
+    setSearching(true)
+    const r = await window.api.plugins.pkgVersions(name, 'private')
+    setSearching(false)
+    if (!r.ok) {
+      setHits([])
+      setTotal(0)
+      setLookupError(apiErrorText(r))
+      return
+    }
+    const latest = latestPackageVersion(r.value)
+    setHits([{ name, description: '', version: latest ?? '' }])
+    setTotal(1)
+  }, [lookupName])
+
+  const switchSource = (next: RegistrySource): void => {
+    setSource(next)
+    setHits([])
+    setTotal(0)
+    setLookupError('')
+    fromRef.current = 0
+  }
+
+  /** True when the name would NOT be installed from the private source: the
+   * scope routing decides installs, and an explicit lookup does not change it. */
+  const outsideScope = (name: string): boolean => {
+    if (p.privateScope === '') return false
+    return !name.toLowerCase().startsWith(`${p.privateScope.toLowerCase()}/`)
+  }
 
   return (
     <Space orientation="vertical" style={{ width: '100%' }} size="middle">
       <SectionHeading title={t('plugin.download.title')} description={t('plugin.download.desc')} />
-      {dirMissing && <Alert type="warning" showIcon title={t('plugin.dirMissingDownload')} />}
+      {p.dirMissing && <Alert type="warning" showIcon title={t('plugin.dirMissingDownload')} />}
       <Panel pad={false}>
         <Toolbar>
-          <SearchInput
-            value={query}
-            onChange={setQuery}
-            onPressEnter={() => void runSearch(query, false)}
-            placeholder={t('plugin.download.searchPlaceholder')}
-            loading={searching}
-            ariaLabel={t('plugin.download.searchPlaceholder')}
-            style={{ minWidth: 240, maxWidth: 480 }}
-          />
+          {hasPrivate && (
+            <Select
+              value={source}
+              onChange={value => switchSource(value as RegistrySource)}
+              style={{ width: 200 }}
+              aria-label={t('plugin.download.source.label')}
+              options={[
+                { value: 'public', label: t('plugin.download.source.public') },
+                { value: 'private', label: t('plugin.download.source.private', { host: hostOf(p.privateRegistry) }) },
+              ]}
+            />
+          )}
+          {source === 'public' ? (
+            <SearchInput
+              value={query}
+              onChange={setQuery}
+              onPressEnter={() => void runSearch(query, false)}
+              placeholder={t('plugin.download.searchPlaceholder')}
+              loading={searching}
+              ariaLabel={t('plugin.download.searchPlaceholder')}
+              style={{ minWidth: 240, maxWidth: 480 }}
+            />
+          ) : (
+            <Space.Compact style={{ minWidth: 240, maxWidth: 480, width: '100%' }}>
+              <Input
+                value={lookupName}
+                onChange={e => setLookupName(e.target.value)}
+                onPressEnter={() => void runLookup()}
+                placeholder={t('plugin.download.lookupPlaceholder')}
+                aria-label={t('plugin.download.lookupPlaceholder')}
+                autoComplete="off"
+              />
+              <Button loading={searching} disabled={lookupName.trim() === ''} onClick={() => void runLookup()}>
+                {t('plugin.download.lookup')}
+              </Button>
+            </Space.Compact>
+          )}
         </Toolbar>
 
         <div style={{ padding: token.padding }}>
-          {total > 0 && hits.length > 0 && (
+          {source === 'private' && (
+            <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, marginBottom: token.paddingSM }}>
+              {t('plugin.download.lookupHint')}
+            </div>
+          )}
+          {lookupError !== '' && <Alert type="error" showIcon title={lookupError} style={{ marginBottom: token.paddingSM }} />}
+
+          {total > 0 && hits.length > 0 && source === 'public' && (
             <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, marginBottom: token.paddingSM }}>
               {t('plugin.download.results', { total, loaded: hits.length })}
             </div>
@@ -91,11 +193,14 @@ export default function PluginsDownloadView({ dirMissing, storeMap, onDownloadVe
             </Space>
           ) : hits.length === 0 ? (
             // The empty slot `List` used to render for us.
-            <Empty description={query === 'dsh' ? t('plugin.download.emptyHint') : t('plugin.download.noMatch')} />
+            <Empty description={source === 'private'
+              ? t('plugin.download.emptyLookup')
+              : (query === 'dsh' ? t('plugin.download.emptyHint') : t('plugin.download.noMatch'))} />
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               {hits.map((hit) => {
-                const inStore = storeMap.has(hit.name)
+                const inStore = p.storeMap.has(hit.name)
+                const warn = source === 'private' && outsideScope(hit.name)
                 return (
                   <div
                     key={hit.name}
@@ -109,9 +214,19 @@ export default function PluginsDownloadView({ dirMissing, storeMap, onDownloadVe
                       <div>
                         {hit.name}
                         {inStore && <Tag color="blue" style={{ marginInlineStart: 6 }}>{t('plugin.download.inStore')}</Tag>}
-                        <Tag style={{ marginInlineStart: 6 }}>{hit.version}</Tag>
+                        {hit.version !== '' && <Tag style={{ marginInlineStart: 6 }}>{hit.version}</Tag>}
                       </div>
-                      <div style={{ wordBreak: 'break-word', color: token.colorTextSecondary, marginTop: 2 }}>{hit.description || t('plugin.download.noDesc')}</div>
+                      {hit.description !== '' && (
+                        <div style={{ wordBreak: 'break-word', color: token.colorTextSecondary, marginTop: 2 }}>{hit.description}</div>
+                      )}
+                      {warn && (
+                        // The lookup honoured the choice; the INSTALL cannot, because
+                        // pnpm follows the scope. Saying so here is the only place the
+                        // mismatch can be caught before it becomes a surprise.
+                        <div style={{ color: token.colorWarning, fontSize: token.fontSizeSM, marginTop: 4 }}>
+                          {t('plugin.download.outOfScope', { scope: p.privateScope })}
+                        </div>
+                      )}
                       {(hit.author !== undefined || hit.date !== undefined) && (
                         <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, marginTop: 2 }}>
                           {hit.author !== undefined && <span>@{hit.author}</span>}
@@ -125,8 +240,8 @@ export default function PluginsDownloadView({ dirMissing, storeMap, onDownloadVe
                       )}
                     </div>
                     <Space size={8} style={{ flexShrink: 0 }}>
-                      <Button size="small" disabled={dirMissing} onClick={() => onDownloadVersion(hit.name)}>{t('plugin.version.download')}</Button>
-                      {inStore && <Button key="install" type="primary" size="small" onClick={() => onInstallToProfile(hit.name)}>{t('plugin.download.installToProfile')}</Button>}
+                      <Button size="small" disabled={p.dirMissing} onClick={() => p.onDownloadVersion(hit.name, source)}>{t('plugin.version.download')}</Button>
+                      {inStore && <Button key="install" type="primary" size="small" onClick={() => p.onInstallToProfile(hit.name)}>{t('plugin.download.installToProfile')}</Button>}
                     </Space>
                   </div>
                 )
@@ -134,7 +249,7 @@ export default function PluginsDownloadView({ dirMissing, storeMap, onDownloadVe
             </div>
           )}
 
-          {!searching && hits.length > 0 && hits.length < total && (
+          {!searching && source === 'public' && hits.length > 0 && hits.length < total && (
             <div style={{ textAlign: 'center', marginTop: token.padding }}>
               <Button onClick={() => void runSearch(query, true)} loading={loadingMore}>{t('plugin.download.loadMore')}</Button>
             </div>

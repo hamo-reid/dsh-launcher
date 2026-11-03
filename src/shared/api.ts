@@ -56,6 +56,7 @@ import type {
   ProfileValidation,
   RegistryAuthState,
   RegistryProbe,
+  RegistrySource,
   RowCreateInput,
   PluginApplyResult,
   PluginCleanupResult,
@@ -326,8 +327,10 @@ export interface WindowApi {
     reveal: (name: string) => Promise<IpcResult<boolean>>
     readme: (name: string) => Promise<IpcResult<{ content: string; dir: string }>>
     search: (query: string, opts?: { from?: number; size?: number }) => Promise<IpcResult<{ hits: NpmSearchHit[]; total: number }>>
-    /** Full version list + dist-tags for the version picker. */
-    pkgVersions: (name: string) => Promise<IpcResult<PackageVersionInfo>>
+    /** Full version list + dist-tags for the version picker. `source` is the
+     * download page's explicit choice (`public` / `private`); leaving it out
+     * follows the scope routing, which is what every other caller wants. */
+    pkgVersions: (name: string, source?: RegistrySource) => Promise<IpcResult<PackageVersionInfo>>
     /** Local dev plugins: source dirs linked (not archived) into profiles, kept
      * in their own registry and managed separately from the store. */
     devList: () => Promise<IpcResult<{ plugins: DevPlugin[]; usage: Record<string, PluginUsagePoint[]> }>>

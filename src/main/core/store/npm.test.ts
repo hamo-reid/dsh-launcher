@@ -130,6 +130,21 @@ describe('npmSearch', () => {
     expect(seen[0]).not.toContain('registry.internal.example')
   })
 
+  it('resolves versions from the source the caller named', async () => {
+    // The download page passes its dropdown choice through to here, and the
+    // version dialog re-resolves with the same value — listing from one registry
+    // and installing from another is how a version gets picked that never lands.
+    const seen: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      seen.push(url)
+      return { ok: true, status: 200, json: async () => ({ 'dist-tags': {}, versions: {} }) }
+    }))
+    await fetchPackageVersions('lodash', 'private')
+    await fetchPackageVersions('lodash', 'public')
+    expect(seen[0]).toBe('https://registry.internal.example/lodash')
+    expect(seen[1]).toBe('https://registry.npmjs.org/lodash')
+  })
+
   it('falls back to the public registry with no configured one', async () => {
     const seen: string[] = []
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {

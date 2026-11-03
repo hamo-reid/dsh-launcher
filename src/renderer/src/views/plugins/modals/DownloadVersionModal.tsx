@@ -12,17 +12,23 @@ import { apiErrorText } from '../../../lib/ipc.ts'
 import FieldLabel from '../../../components/FieldLabel.tsx'
 import { MODAL } from '../../../theme.ts'
 import { latestPackageVersion } from '../../../../../shared/version.ts'
-import type { PackageVersionInfo } from '../../../../../shared/types.ts'
+import type { PackageVersionInfo, RegistrySource } from '../../../../../shared/types.ts'
 
 // ── Download with a selectable version ──────────────────────────────────────
 interface DownloadVersionModalProps {
   pkg: string | null
+  /** Where the version list comes from. The download page passes the source the
+   * person chose; leaving it out follows the scope routing. It must travel with
+   * the package name: listing versions from one registry and installing from
+   * another is how a user ends up with a version they did not pick. */
+  source?: RegistrySource
   onClose: () => void
   /** Called once the package has been added to the store. */
   onInstalled: () => void | Promise<void>
 }
 export function DownloadVersionModal(p: DownloadVersionModalProps): JSX.Element {
   const { t } = useTranslation()
+  const source = p.source ?? 'auto'
   const [info, setInfo] = useState<PackageVersionInfo | null>(null)
   const [version, setVersion] = useState<string>()
   const [loading, setLoading] = useState(false)
@@ -34,7 +40,7 @@ export function DownloadVersionModal(p: DownloadVersionModalProps): JSX.Element 
     let alive = true
     setLoading(true)
     setError('')
-    void window.api.plugins.pkgVersions(p.pkg).then(r => {
+    void window.api.plugins.pkgVersions(p.pkg, source).then(r => {
       if (!alive) return
       setLoading(false)
       if (!r.ok) { setError(apiErrorText(r)); return }
@@ -42,7 +48,7 @@ export function DownloadVersionModal(p: DownloadVersionModalProps): JSX.Element 
       setVersion(latestPackageVersion(r.value))
     })
     return () => { alive = false }
-  }, [p.pkg])
+  }, [p.pkg, source])
 
   const doDownload = async (): Promise<void> => {
     if (p.pkg === null || version === undefined) return
