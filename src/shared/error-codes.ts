@@ -46,6 +46,8 @@ export const E = {
   marketUnauthorized: 'market.unauthorized',
   /** The catalog answered 403: the token is valid but cannot see this repository. */
   marketForbidden: 'market.forbidden',
+  /** A catalog could not be saved: bad URL, empty name, or a duplicate name. */
+  marketBadCatalog: 'market.badCatalog',
   marketEntryNotFound: 'market.entryNotFound',
   // registry (the configured npm registry a lookup / install reads from)
   registryBadUrl: 'registry.badUrl',

@@ -378,6 +378,13 @@ const api = {
     source: (): Promise<IpcResult<MarketSourceState>> => ipcRenderer.invoke('market:source'),
     setSource: (next: MarketSourceState): Promise<IpcResult<boolean>> => ipcRenderer.invoke('market:setSource', next),
     setToken: (value: string | null): Promise<IpcResult<MarketSourceState>> => ipcRenderer.invoke('market:setToken', value),
+    catalogs: (): Promise<IpcResult<MarketSourceState>> => ipcRenderer.invoke('market:catalogs'),
+    setActive: (id: string | null): Promise<IpcResult<MarketSourceState>> => ipcRenderer.invoke('market:setActive', id),
+    saveCatalog: (input: { id?: string; name: string; url: string }): Promise<IpcResult<MarketSourceState>> =>
+      ipcRenderer.invoke('market:saveCatalog', input),
+    removeCatalog: (id: string): Promise<IpcResult<MarketSourceState>> => ipcRenderer.invoke('market:removeCatalog', id),
+    setCatalogToken: (id: string, value: string | null): Promise<IpcResult<MarketSourceState>> =>
+      ipcRenderer.invoke('market:setCatalogToken', id, value),
     resolve: (url: string): Promise<IpcResult<{ spec: string | null; plugin: MarketPlugin | null }>> =>
       ipcRenderer.invoke('market:resolve', url),
     annotations: (): Promise<IpcResult<MarketAnnotations>> =>

@@ -5,7 +5,7 @@
 import { handle } from '../handle.ts'
 import {
   annotationsFor, installSpecFor, marketSourceState, pageCatalog, resolveMarket, setMarketSourceState,
-  setMarketToken,
+  removeMarketCatalog, saveMarketCatalog, setMarketActive, setMarketToken,
 } from '../../core/store/market.ts'
 import { fail, failFromError, E } from '../../core/shared/errors.ts'
 import type {
@@ -59,6 +59,60 @@ export function registerMarketIpc(): void {
       const active = marketSourceState().activeId
       if (active === null || active === undefined) return fail(E.marketEntryNotFound)
       setMarketToken(active, typeof value === 'string' ? value : null)
+      return { ok: true, value: marketSourceState() }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  /** The catalog list, with which one is active. */
+  handle('market:catalogs', (): IpcResult<MarketSourceState> => {
+    try {
+      return { ok: true, value: marketSourceState() }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  /** Switch to one catalog (`null` = the public one). */
+  handle('market:setActive', (_event, id: string | null): IpcResult<MarketSourceState> => {
+    try {
+      const ok = setMarketActive(typeof id === 'string' && id !== '' ? id : null)
+      return ok ? { ok: true, value: marketSourceState() } : fail(E.marketEntryNotFound)
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  /** Add or rename a catalog; returns the new list. */
+  handle('market:saveCatalog', (_event, input: { id?: string; name: string; url: string }): IpcResult<MarketSourceState> => {
+    try {
+      const saved = saveMarketCatalog({
+        ...(typeof input?.id === 'string' ? { id: input.id } : {}),
+        name: typeof input?.name === 'string' ? input.name : '',
+        url: typeof input?.url === 'string' ? input.url : '',
+      })
+      return saved ? { ok: true, value: marketSourceState() } : fail(E.marketBadCatalog)
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  /** Drop one catalog (and its token). */
+  handle('market:removeCatalog', (_event, id: string): IpcResult<MarketSourceState> => {
+    try {
+      return removeMarketCatalog(id)
+        ? { ok: true, value: marketSourceState() }
+        : fail(E.marketEntryNotFound)
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  /** Save (or clear) one catalog's token. */
+  handle('market:setCatalogToken', (_event, id: string, value: string | null): IpcResult<MarketSourceState> => {
+    try {
+      setMarketToken(id, typeof value === 'string' ? value : null)
       return { ok: true, value: marketSourceState() }
     } catch (error) {
       return failFromError(error)

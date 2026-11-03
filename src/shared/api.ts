@@ -391,6 +391,16 @@ export interface WindowApi {
     setSource: (next: MarketSourceState) => Promise<IpcResult<boolean>>
     /** Save (or clear, with '') the token a private catalog requires. */
     setToken: (value: string | null) => Promise<IpcResult<MarketSourceState>>
+    /** The catalog list, with which one is active. */
+    catalogs: () => Promise<IpcResult<MarketSourceState>>
+    /** Switch to one catalog (`null` = the public one). */
+    setActive: (id: string | null) => Promise<IpcResult<MarketSourceState>>
+    /** Add or rename a catalog. */
+    saveCatalog: (input: { id?: string; name: string; url: string }) => Promise<IpcResult<MarketSourceState>>
+    /** Drop one catalog (and its token). */
+    removeCatalog: (id: string) => Promise<IpcResult<MarketSourceState>>
+    /** Save (or clear) one catalog's token. */
+    setCatalogToken: (id: string, value: string | null) => Promise<IpcResult<MarketSourceState>>
     /** Resolve one catalog entry (by url) to its install spec + meta. */
     resolve: (url: string) => Promise<IpcResult<{ spec: string | null; plugin: MarketPlugin | null }>>
     /** Category / deprecation annotations for the installed-plugin overview. */

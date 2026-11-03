@@ -158,6 +158,41 @@ function hostOf(url: string): string {
   }
 }
 
+/** Add or update one catalog. Returns false when the input cannot be saved:
+ * the URL must be http(s), the name non-empty, and names are unique
+ * case-insensitively because the picker shows names. */
+export function saveMarketCatalog(input: { id?: string; name: string; url: string }): boolean {
+  const url = input.url.trim()
+  const name = input.name.trim()
+  if (!isHttpUrl(url) || name === '') return false
+  const list = marketCatalogs()
+  const id = input.id !== undefined && input.id !== '' ? input.id : 'market-' + String(Date.now())
+  const clash = list.some(c => c.id !== id && c.name.toLowerCase() === name.toLowerCase())
+  if (clash) return false
+  updateSettings((draft) => {
+    const entry = { id, name, url, ...(draft.marketCatalogs?.find(c => c.id === id)?.tokenEnc !== undefined
+      ? { tokenEnc: draft.marketCatalogs?.find(c => c.id === id)?.tokenEnc }
+      : {}) }
+    const rest = (draft.marketCatalogs ?? []).filter(c => c.id !== id)
+    draft.marketCatalogs = [...rest, entry]
+    if (draft.marketActiveId === undefined || draft.marketActiveId === '') draft.marketActiveId = id
+  })
+  forgetCatalog()
+  return true
+}
+
+/** Drop one catalog. Its token goes with it; the market falls back to public
+ * when the active one is the one removed. */
+export function removeMarketCatalog(id: string): boolean {
+  if (!marketCatalogs().some(c => c.id === id)) return false
+  updateSettings((draft) => {
+    draft.marketCatalogs = (draft.marketCatalogs ?? []).filter(c => c.id !== id)
+    if (draft.marketActiveId === id) draft.marketActiveId = undefined
+  })
+  forgetCatalog()
+  return true
+}
+
 function isHttpUrl(value: string): boolean {
   if (!/^https?:\/\//i.test(value)) return false
   try {
