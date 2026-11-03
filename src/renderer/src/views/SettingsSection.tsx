@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, Button, Descriptions, Input, Modal, Radio, Segmented, Select, Space, Switch, Tag, message, theme } from 'antd'
+import { Alert, Button, Descriptions, Empty, Input, Modal, Radio, Segmented, Select, Space, Switch, Tag, message, theme } from 'antd'
 import { DownloadOutlined, FolderOpenOutlined, UploadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import Panel from '../components/Panel.tsx'
@@ -14,7 +14,7 @@ import { useThemeMode } from '../ThemeProvider.tsx'
 import { useAppLang } from '../i18n'
 import { apiErrorText, requestHealthRefresh } from '../lib/ipc.ts'
 import type { ThemeMode } from '../theme.ts'
-import type { DataRootState, GithubAuthState, GithubRateLimit, NodeEnvironment, RegistryAuthState, RegistryProbe } from '../../../shared/types.ts'
+import type { DataRootState, GithubAuthState, GithubRateLimit, NodeEnvironment, RegistryEntryView, RegistryProbe } from '../../../shared/types.ts'
 
 /** The settings categories, in reading order: the things a person changes about
  * the app, then the things it talks to, then where its files live. */
@@ -45,12 +45,14 @@ export default function SettingsSection() {
   const [githubInput, setGithubInput] = useState('')
   const [githubBusy, setGithubBusy] = useState(false)
   const [githubLimit, setGithubLimit] = useState<GithubRateLimit>()
-  const [registryInput, setRegistryInput] = useState('')
+  /** The configured registries, as the editor lists them. */
+  const [registries, setRegistries] = useState<RegistryEntryView[]>([])
+  /** The entry being added or edited, or null while the list is shown. */
+  const [form, setForm] = useState<{ id?: string; label: string; url: string; scope: string; token: string } | null>(null)
+  /** Last probe per entry id. */
+  const [probes, setProbes] = useState<Record<string, RegistryProbe>>({})
+  /** A registry write/test is in flight. */
   const [registryBusy, setRegistryBusy] = useState(false)
-  const [registryScopeInput, setRegistryScopeInput] = useState('')
-  const [registryTokenInput, setRegistryTokenInput] = useState('')
-  const [registryAuth, setRegistryAuth] = useState<RegistryAuthState>()
-  const [registryProbe, setRegistryProbe] = useState<RegistryProbe>()
 
   const load = async (): Promise<void> => {
     const d = await window.api.settings.getDataRoot()
@@ -65,14 +67,8 @@ export default function SettingsSection() {
     if (n.ok) setNodeEnv(n.value)
     const g = await window.api.settings.getGithubAuth()
     if (g.ok) setGithubAuth(g.value)
-    // Likewise: an unset registry shows empty rather than pre-filling the public
-    // URL, which would persist the default as if the user had chosen it.
-    const r = await window.api.settings.getRegistryUrl()
-    if (r.ok) setRegistryInput(r.value ?? '')
-    const rs = await window.api.settings.getRegistryScope()
-    if (rs.ok) setRegistryScopeInput(rs.value ?? '')
-    const ra = await window.api.settings.getRegistryAuth()
-    if (ra.ok) setRegistryAuth(ra.value)
+    const list = await window.api.settings.listRegistries()
+    if (list.ok) setRegistries(list.value)
   }
 
   useEffect(() => { void load() }, [])
@@ -107,55 +103,53 @@ export default function SettingsSection() {
     void message.success(t('settings.github.saved'))
   }
 
-  const saveRegistry = async (): Promise<void> => {
+  /** Open the form for a new entry, or for an existing one. */
+  const editRegistry = (entry?: RegistryEntryView): void => {
+    setForm({
+      ...(entry !== undefined ? { id: entry.id } : {}),
+      label: entry?.label ?? '',
+      url: entry?.url ?? '',
+      scope: entry?.scope ?? '',
+      token: '',
+    })
+  }
+
+  /** Persist whatever the form holds. The token is only sent when the field was
+   * touched — an untouched field must not wipe a credential. */
+  const submitRegistry = async (): Promise<void> => {
+    if (form === null) return
     setRegistryBusy(true)
-    const r = await window.api.settings.setRegistryUrl(registryInput.trim())
+    const r = await window.api.settings.saveRegistry({
+      ...(form.id !== undefined ? { id: form.id } : {}),
+      label: form.label.trim(),
+      url: form.url.trim(),
+      scope: form.scope.trim(),
+      ...(form.token !== '' ? { token: form.token } : {}),
+    })
     setRegistryBusy(false)
     if (!r.ok) { void message.error(apiErrorText(r)); return }
-    setRegistryInput(r.value ?? '')
-    // A new address invalidates whatever the last reachability check said.
-    setRegistryProbe(undefined)
+    setRegistries(r.value)
+    setForm(null)
     void message.success(t('settings.registry.saved'))
   }
 
-  const saveRegistryScope = async (): Promise<void> => {
+  const removeRegistry = async (entry: RegistryEntryView): Promise<void> => {
     setRegistryBusy(true)
-    const r = await window.api.settings.setRegistryScope(registryScopeInput.trim())
+    const r = await window.api.settings.removeRegistry(entry.id)
     setRegistryBusy(false)
     if (!r.ok) { void message.error(apiErrorText(r)); return }
-    setRegistryScopeInput(r.value ?? '')
-    setRegistryProbe(undefined)
-    void message.success(t('settings.registry.scope.saved'))
+    setRegistries(r.value)
+    setProbes(prev => { const next = { ...prev }; delete next[entry.id]; return next })
+    void message.success(t('settings.registry.removed'))
   }
 
-  const saveRegistryToken = async (): Promise<void> => {
+  const testRegistry = async (id?: string): Promise<void> => {
+    const key = id ?? ''
     setRegistryBusy(true)
-    const r = await window.api.settings.setRegistryToken(registryTokenInput.trim())
+    const r = await window.api.settings.testRegistry(id)
     setRegistryBusy(false)
     if (!r.ok) { void message.error(apiErrorText(r)); return }
-    setRegistryAuth(r.value)
-    // The value is never read back, so the field is emptied as soon as it is saved.
-    setRegistryTokenInput('')
-    setRegistryProbe(undefined)
-    void message.success(t('settings.registry.token.saved'))
-  }
-
-  const clearRegistryToken = async (): Promise<void> => {
-    setRegistryBusy(true)
-    const r = await window.api.settings.setRegistryToken('')
-    setRegistryBusy(false)
-    if (!r.ok) { void message.error(apiErrorText(r)); return }
-    setRegistryAuth(r.value)
-    setRegistryProbe(undefined)
-    void message.success(t('settings.registry.token.cleared'))
-  }
-
-  const testRegistry = async (): Promise<void> => {
-    setRegistryBusy(true)
-    const r = await window.api.settings.testRegistry()
-    setRegistryBusy(false)
-    if (!r.ok) { void message.error(apiErrorText(r)); return }
-    setRegistryProbe(r.value)
+    setProbes(prev => ({ ...prev, [key]: r.value }))
   }
 
   const clearGithubToken = async (): Promise<void> => {
@@ -233,7 +227,7 @@ export default function SettingsSection() {
    * A registry's root answering 404 is normal, so a status code is never the
    * headline: the answer is about the ADDRESS and the CREDENTIAL, which need
    * different fixes. */
-  const probeAlert = (probe: RegistryProbe): { type: 'success' | 'info' | 'warning' | 'error'; text: string } => {
+  const registryProbeAlert = (probe: RegistryProbe): { type: 'success' | 'info' | 'warning' | 'error'; text: string } => {
     if (!probe.reachable) {
       return { type: 'error', text: t('settings.registry.probeUnreachable', { detail: probe.detail ?? '' }) }
     }
@@ -430,101 +424,113 @@ export default function SettingsSection() {
             </Panel>
 
             <Panel title={t('settings.section.registry')}>
-              <div style={{ maxWidth: 620 }}>
-                <div style={{ ...muted, margin: '4px 0 12px' }}>
-                  {t('settings.registry.desc')}
-                </div>
-                <Space.Compact style={{ width: '100%', maxWidth: 560 }}>
-                  <Input
-                    value={registryInput}
-                    onChange={e => setRegistryInput(e.target.value)}
-                    placeholder={t('settings.registry.placeholder')}
-                    autoComplete="off"
-                  />
-                  <Button type="primary" loading={registryBusy} disabled={registryInput.trim() === ''} onClick={() => void saveRegistry()}>
-                    {t('common.save')}
-                  </Button>
-                  <Button loading={registryBusy} disabled={registryInput.trim() === ''} onClick={() => {
-                    setRegistryInput('')
-                    void window.api.settings.setRegistryUrl('').then(r => {
-                      if (r.ok) void message.success(t('settings.registry.cleared'))
-                      else void message.error(apiErrorText(r))
-                    })
-                  }}>
-                    {t('settings.registry.clear')}
-                  </Button>
-                </Space.Compact>
-                <div style={{ ...muted, marginTop: token.paddingSM }}>
-                  {t('settings.registry.hint')}
-                </div>
+              <div style={{ maxWidth: 720 }}>
+                <div style={{ ...muted, margin: '4px 0 12px' }}>{t('settings.registry.desc')}</div>
 
-                <div style={{ fontWeight: 500, marginTop: token.paddingLG }}>{t('settings.registry.scope.label')}</div>
-                <Space.Compact style={{ width: '100%', maxWidth: 560, marginTop: 6 }}>
-                  <Input
-                    value={registryScopeInput}
-                    onChange={e => setRegistryScopeInput(e.target.value)}
-                    placeholder={t('settings.registry.scope.placeholder')}
-                    disabled={registryInput.trim() === ''}
-                    autoComplete="off"
+                {registries.length === 0 && form === null && (
+                  <Empty
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    description={t('settings.registry.empty')}
+                    style={{ marginBottom: token.padding }}
                   />
-                  <Button
-                    loading={registryBusy}
-                    disabled={registryInput.trim() === ''}
-                    onClick={() => void saveRegistryScope()}
-                  >
-                    {t('common.save')}
-                  </Button>
-                </Space.Compact>
-                <div style={{ ...muted, marginTop: token.paddingSM }}>
-                  {t('settings.registry.scope.hint')}
-                </div>
+                )}
 
-                <div style={{ fontWeight: 500, marginTop: token.paddingLG }}>{t('settings.registry.token.label')}</div>
-                <Space.Compact style={{ width: '100%', maxWidth: 560, marginTop: 6 }}>
-                  <Input.Password
-                    value={registryTokenInput}
-                    onChange={e => setRegistryTokenInput(e.target.value)}
-                    placeholder={registryAuth?.configured === true
-                      ? t('settings.registry.token.replace')
-                      : t('settings.registry.token.placeholder')}
-                    disabled={registryInput.trim() === ''}
-                    autoComplete="new-password"
-                  />
-                  <Button
-                    type="primary"
-                    loading={registryBusy}
-                    disabled={registryInput.trim() === '' || registryTokenInput.trim() === ''}
-                    onClick={() => void saveRegistryToken()}
-                  >
-                    {t('common.save')}
-                  </Button>
-                  <Button loading={registryBusy} disabled={registryAuth?.configured !== true} onClick={() => void clearRegistryToken()}>
-                    {t('settings.registry.token.clear')}
-                  </Button>
-                </Space.Compact>
-                <div style={{ ...muted, marginTop: token.paddingSM }}>
-                  {t('settings.registry.token.hint')}
-                </div>
-
-                <Space style={{ marginTop: token.paddingLG }}>
-                  <Button loading={registryBusy} disabled={registryInput.trim() === ''} onClick={() => void testRegistry()}>
-                    {t('settings.registry.test')}
-                  </Button>
-                  {registryAuth?.configured === true && (
-                    <Tag color={registryAuth.encryption === 'safe' ? 'green' : 'orange'}>
-                      {registryAuth.encryption === 'safe'
-                        ? t('settings.registry.encryption.safe')
-                        : t('settings.registry.encryption.plaintext')}
-                    </Tag>
-                  )}
+                <Space orientation="vertical" size={8} style={{ width: '100%' }}>
+                  {registries.map((entry) => {
+                    const probe = probes[entry.id]
+                    return (
+                      <div
+                        key={entry.id}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+                          padding: '10px 12px',
+                          borderRadius: token.borderRadiusLG,
+                          border: `1px solid ${token.colorBorder}`,
+                          background: token.colorBgContainer,
+                        }}
+                      >
+                        <div style={{ flex: 1, minWidth: 240 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 500 }}>{entry.label}</span>
+                            {entry.scope !== undefined
+                              ? <Tag color="blue">{entry.scope}</Tag>
+                              : <Tag>{t('settings.registry.fallbackTag')}</Tag>}
+                            {entry.hasToken && (
+                              <Tag color={entry.encryption === 'safe' ? 'green' : 'orange'}>
+                                {entry.encryption === 'safe'
+                                  ? t('settings.registry.token.safe')
+                                  : t('settings.registry.token.plain')}
+                              </Tag>
+                            )}
+                          </div>
+                          <div style={{ ...muted, marginTop: 2, wordBreak: 'break-all' }}>{entry.url}</div>
+                          {probe !== undefined && (
+                            <Alert
+                              style={{ marginTop: 6 }}
+                              type={registryProbeAlert(probe).type}
+                              showIcon
+                              title={registryProbeAlert(probe).text}
+                            />
+                          )}
+                        </div>
+                        <Space size={8} style={{ flexShrink: 0 }}>
+                          <Button size="small" loading={registryBusy} onClick={() => void testRegistry(entry.id)}>
+                            {t('settings.registry.test')}
+                          </Button>
+                          <Button size="small" onClick={() => editRegistry(entry)}>{t('common.edit')}</Button>
+                          <Button size="small" danger onClick={() => void removeRegistry(entry)}>{t('common.delete')}</Button>
+                        </Space>
+                      </div>
+                    )
+                  })}
                 </Space>
-                {registryProbe !== undefined && (
-                  <Alert
-                    style={{ marginTop: token.paddingSM }}
-                    type={probeAlert(registryProbe).type}
-                    showIcon
-                    title={probeAlert(registryProbe).text}
-                  />
+
+                {form === null ? (
+                  <Button style={{ marginTop: token.padding }} onClick={() => editRegistry()}>
+                    {t('settings.registry.add')}
+                  </Button>
+                ) : (
+                  <div style={{ marginTop: token.padding, padding: 12, borderRadius: token.borderRadiusLG, background: token.colorBgLayout }}>
+                    <Space orientation="vertical" size={8} style={{ width: '100%' }}>
+                      <div>
+                        <div style={{ fontWeight: 500 }}>{t('settings.registry.urlLabel')}</div>
+                        <Input
+                          value={form.url}
+                          onChange={e => setForm({ ...form, url: e.target.value })}
+                          placeholder={t('settings.registry.placeholder')}
+                          autoComplete="off"
+                        />
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 500 }}>{t('settings.registry.scope.label')}</div>
+                        <Input
+                          value={form.scope}
+                          onChange={e => setForm({ ...form, scope: e.target.value })}
+                          placeholder={t('settings.registry.scope.placeholder')}
+                          autoComplete="off"
+                        />
+                        <div style={{ ...muted, marginTop: 4 }}>{t('settings.registry.scope.hint')}</div>
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 500 }}>{t('settings.registry.token.label')}</div>
+                        <Input.Password
+                          value={form.token}
+                          onChange={e => setForm({ ...form, token: e.target.value })}
+                          placeholder={form.id !== undefined
+                            ? t('settings.registry.token.replace')
+                            : t('settings.registry.token.placeholder')}
+                          autoComplete="new-password"
+                        />
+                        <div style={{ ...muted, marginTop: 4 }}>{t('settings.registry.token.hint')}</div>
+                      </div>
+                      <Space>
+                        <Button type="primary" loading={registryBusy} disabled={form.url.trim() === ''} onClick={() => void submitRegistry()}>
+                          {t('common.save')}
+                        </Button>
+                        <Button onClick={() => setForm(null)}>{t('common.cancel')}</Button>
+                      </Space>
+                    </Space>
+                  </div>
                 )}
               </div>
             </Panel>

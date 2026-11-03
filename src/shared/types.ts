@@ -795,24 +795,49 @@ export interface GithubRateLimit {
   resetAt?: string
 }
 
-/** Whether the private npm registry has a credential, and how it is protected.
- * Two facts only — the value itself never leaves the main process. */
-export interface RegistryAuthState {
-  /** True when a token is saved. */
-  configured: boolean
-  /** How the saved token is protected at rest. */
+/** One configured npm registry, as the renderer sees it: the credential is
+ * reduced to whether it exists and how it is protected. There is no single
+ * "the" registry — a machine may point at several — so this is the list the
+ * settings editor and the download page both render. */
+export interface RegistryEntryView {
+  id: string
+  label: string
+  url: string
+  /** The package scope this registry owns. Absent = it answers for whatever no
+   * other scope claims; at most one entry may say that. */
+  scope?: string
+  /** True when a token is saved for this entry. The value never crosses. */
+  hasToken: boolean
+  /** How that token is protected at rest. */
   encryption: 'none' | 'safe' | 'plaintext'
 }
 
 /** Which registry a lookup should ask.
  *
- * `auto` follows the routing (`registryFor`: scope decides), which is what
- * installs and update checks use. `public` / `private` are the user's explicit
- * choice from the download page — an assertion about where to look, not a
- * derivation from what is configured. */
-export type RegistrySource = 'auto' | 'public' | 'private'
+ * - `auto` — the routing: the scope decides, which is what installs use.
+ * - `public` — the public catalogue, asserted.
+ * - `reg:<id>` — one configured registry, asserted by the download page.
+ *
+ * Assertions are not derived from settings on purpose: a name outside every
+ * scope is an answer to give back ("not in the source you chose"), not a reason
+ * to quietly ask somewhere else. */
+export type RegistrySource = 'auto' | 'public' | `reg:${string}`
 
-/** Result of reaching the configured registry (Settings "test" button).
+/** What the settings editor sends to add or update one registry.
+ *
+ * `token` is tri-state on purpose: absent = leave the saved one alone (editing a
+ * label must not wipe a credential), `''` = clear it, anything else = replace. */
+export interface RegistryEntryInput {
+  /** Absent = add a new entry. */
+  id?: string
+  label: string
+  url: string
+  /** Empty string = this registry answers for whatever no scope claims. */
+  scope: string
+  token?: string
+}
+
+/** Result of reaching a registry (Settings "test" button).
  *
  * Split into the two questions a person actually has: did the address answer, and
  * did the credential work. They have different fixes, so they get different

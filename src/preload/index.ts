@@ -39,7 +39,8 @@ import type {
   MarketPage,
   MarketPlugin,
   MarketSourceState,
-  RegistryAuthState,
+  RegistryEntryInput,
+  RegistryEntryView,
   RegistryProbe,
   RegistrySource,
   NodeEnvironment,
@@ -419,21 +420,14 @@ const api = {
       ipcRenderer.invoke('settings:getGithubAuth'),
     setGithubToken: (token: string): Promise<IpcResult<GithubAuthState>> =>
       ipcRenderer.invoke('settings:setGithubToken', token),
-    getRegistryUrl: (): Promise<IpcResult<string | null>> =>
-      ipcRenderer.invoke('settings:getRegistryUrl'),
-    setRegistryUrl: (url: string): Promise<IpcResult<string | null>> =>
-      ipcRenderer.invoke('settings:setRegistryUrl', url),
-    getRegistryScope: (): Promise<IpcResult<string | null>> =>
-      ipcRenderer.invoke('settings:getRegistryScope'),
-    setRegistryScope: (scope: string): Promise<IpcResult<string | null>> =>
-      ipcRenderer.invoke('settings:setRegistryScope', scope),
-    getRegistryAuth: (): Promise<IpcResult<RegistryAuthState>> =>
-      ipcRenderer.invoke('settings:getRegistryAuth'),
-    setRegistryToken: (token: string): Promise<IpcResult<RegistryAuthState>> =>
-      ipcRenderer.invoke('settings:setRegistryToken', token),
-    testRegistry: (): Promise<IpcResult<RegistryProbe>> =>
-      ipcRenderer.invoke('settings:testRegistry'),
-    testGithubToken: (): Promise<IpcResult<GithubRateLimit>> =>
+    listRegistries: (): Promise<IpcResult<RegistryEntryView[]>> =>
+      ipcRenderer.invoke('settings:listRegistries'),
+    saveRegistry: (input: RegistryEntryInput): Promise<IpcResult<RegistryEntryView[]>> =>
+      ipcRenderer.invoke('settings:saveRegistry', input),
+    removeRegistry: (id: string): Promise<IpcResult<RegistryEntryView[]>> =>
+      ipcRenderer.invoke('settings:removeRegistry', id),
+    testRegistry: (id?: string): Promise<IpcResult<RegistryProbe>> =>
+      ipcRenderer.invoke('settings:testRegistry', id),    testGithubToken: (): Promise<IpcResult<GithubRateLimit>> =>
       ipcRenderer.invoke('settings:testGithubToken'),
     exportSettings: (): Promise<IpcResult<string>> =>
       ipcRenderer.invoke('settings:export'),

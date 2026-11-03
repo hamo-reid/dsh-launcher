@@ -7,9 +7,10 @@
  * raw-normalization functions are exported so the unit tests stay off the wire. */
 
 import type { NpmSearchHit, PackageVersionInfo, RegistryProbe, RegistrySource } from '../../../shared/types.ts'
+import { throwE } from '../shared/errors.ts'
 import { logger } from '../shared/logger.ts'
-import { registryAuthHeader, registryToken } from './registry-auth.ts'
-import { registryBase, registryForSource, SEARCH_REGISTRY } from './registry.ts'
+import { registryAuthHeader, registryTokenOf } from './registry-auth.ts'
+import { defaultRegistry, fallbackRegistry, registryById, registryForSource, SEARCH_REGISTRY } from './registry.ts'
 
 /**
  * Fetch from the configured registry, carrying the credential when the URL
@@ -121,9 +122,14 @@ export async function fetchPackageVersions(name: string, source: RegistrySource 
  * the host answers and the credential went unchecked, rather than inventing a
  * verdict. Nothing is thrown — a wrong address is a result, not an exception.
  */
-export async function probeRegistry(): Promise<RegistryProbe> {
-  const registry = registryBase()
-  const hasToken = registryToken() !== undefined
+export async function probeRegistry(id?: string): Promise<RegistryProbe> {
+  // A named entry is what the settings editor tests; without one this asks the
+  // registry that answers for unclaimed packages, which is what an operator
+  // means when they hit "test" with no row in mind.
+  const entry = id !== undefined ? registryById(id) : fallbackRegistry()
+  if (id !== undefined && entry === undefined) throwE('registry.notConfigured')
+  const registry = entry?.url ?? defaultRegistry()
+  const hasToken = entry !== undefined ? registryTokenOf(entry) !== undefined : false
   try {
     const who = await fetchFromRegistry(`${registry}/-/whoami`)
     if (who.ok) {

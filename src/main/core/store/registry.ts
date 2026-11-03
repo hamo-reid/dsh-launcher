@@ -1,137 +1,148 @@
 /**
- * Which npm registry the launcher itself resolves versions from.
+ * Which npm registry answers for which package.
  *
- * One invariant, stated once because two call paths used to break it: **choosing
- * a version and fetching the package must ask the SAME registry.** `npmSearch`
- * and `fetchPackageVersions` are the launcher's own `fetch` calls, and pnpm is a
- * separate process reading the user's `.npmrc` — so a private deployment could
- * resolve `latest` against `registry.npmjs.org` and then install from its own
- * mirror. The visible consequences are that an air-gapped install cannot even
- * START (the version lookup throws before pnpm is ever spawned) and that a mirror
- * whose `latest` disagrees with the public one installs a version the user did
- * not ask for.
+ * The model is the standard one, not any vendor's: a registry is a URL plus an
+ * optional **scope**. A scoped entry owns `@scope/*` and nothing else; the one
+ * entry *without* a scope answers for everything no other scope claims (the
+ * internal-mirror case). Anything nobody claims falls through to the public
+ * registry. Because at most one entry may be unscoped — the writer refuses a
+ * second one, and `normalizeSettings` drops it — this table always has exactly
+ * one answer per package name.
  *
- * `core/dsh/install.ts` resolves both the initial install and the update check
- * through `fetchPackageVersions`, so pointing this at a private registry is what
- * makes an air-gapped dsh install work at all — there is no second place to
- * configure and no separate knob for dsh.
- *
- * This module reads settings directly, unlike `core/dsh/pnpm.ts` which keeps its
- * dependencies injectable because it drives a child process. It stays pure of
- * HTTP: it answers "which URL", and `npm.ts` owns the request.
+ * Two invariants live here, both learned the hard way:
+ * - **A version list and the install must come from the same host.** That is why
+ *   `registryFor` is the single routing decision and why the pnpm side is
+ *   generated from the same table (`store/registry-config.ts`).
+ * - **Search is not routing.** Keyword search is discovery, and a private
+ *   registry is under no obligation to implement `/-/v1/search` — routing search
+ *   there turned "I configured a private source" into "the download centre
+ *   stopped working". Only resolution follows the table.
  */
-
 import { loadSettings } from '../settings/settings.ts'
 import { throwE } from '../shared/errors.ts'
 import { logger } from '../shared/logger.ts'
 import { matchesScope, normalizeScope, parseRegistry } from './npmrc.ts'
+import type { RegistryEntryRecord } from '../settings/normalize.ts'
 import type { RegistrySource } from '../../../shared/types.ts'
 
-/** The public npm registry — what both call sites used before this setting. */
+/** The public npm registry — the answer for anything no scope claims. */
 export const PUBLIC_REGISTRY = 'https://registry.npmjs.org'
 
 /**
- * The registry base to build request URLs from: the configured one, or the
- * public one. Never has a trailing slash.
+ * The configured entries, with URLs normalized and unusable ones dropped.
  *
- * A configured value arrives through a text field and a settings import, so it is
- * validated rather than trusted: an unusable value warns and falls back, because
- * silently building a `fetch` against a nonsense scheme is worse, and because a
- * deployment that asked for a mirror and quietly got the public one is exactly
- * the confusion this setting exists to end.
+ * Validated rather than trusted: a value arrives through a text field and a
+ * settings import. An unusable URL warns once per value (this runs per package
+ * during an update check) and is skipped, because building a `fetch` against a
+ * nonsense scheme is worse than not offering that registry at all.
  */
-export function registryBase(): string {
-  const raw = loadSettings().registryUrl
-  const parsed = parseRegistry(raw)
-  if (parsed !== undefined) return parsed
-  if (typeof raw === 'string' && raw.trim() !== '') {
-    logger.warn(`registry: "${raw.trim()}" is not a usable http(s) registry URL; using ${PUBLIC_REGISTRY}`)
+export function registries(): RegistryEntryRecord[] {
+  const out: RegistryEntryRecord[] = []
+  for (const entry of loadSettings().registries ?? []) {
+    const url = parseRegistry(entry.url)
+    if (url === undefined) {
+      if (warnedUrls.get(entry.id) !== entry.url) {
+        warnedUrls.set(entry.id, entry.url)
+        logger.warn(`registry: "${entry.url}" is not a usable http(s) URL; entry "${entry.label}" is ignored`)
+      }
+      continue
+    }
+    const scope = normalizeScope(entry.scope)
+    out.push({ ...entry, url, ...(scope !== undefined ? { scope } : {}) })
   }
-  return PUBLIC_REGISTRY
+  return out
+}
+
+/** The configured entries as stored, for the settings editor and for anything
+ * that must not lose sight of an entry. An entry with an unusable URL is still
+ * listed — hiding it would leave the user unable to fix it — while `registries()`
+ * is what routing and pnpm see. */
+export function registryEntries(): RegistryEntryRecord[] {
+  return loadSettings().registries ?? []
+}
+
+/** Last-unusable URLs warned about, so a per-package path warns once. */
+const warnedUrls = new Map<string, string>()
+
+/** The entry that answers for everything unclaimed, if one is configured. */
+export function fallbackRegistry(): RegistryEntryRecord | undefined {
+  return registries().find(entry => entry.scope === undefined)
+}
+
+/** One entry by id, or `undefined`. */
+export function registryById(id: string): RegistryEntryRecord | undefined {
+  return registries().find(entry => entry.id === id)
 }
 
 /**
- * The registry a *specific package* resolves from.
+ * The registry a package resolves from: the longest matching scope wins, then the
+ * unscoped fallback, then the public registry.
  *
- * Same invariant as above, one step finer: the registry that answers "which
- * versions exist" has to be the registry the package is installed from. It used
- * to be one global answer, which meant a private registry could only ever be the
- * only registry — every public dependency had to be proxied by it or the install
- * failed. A scope narrows the configured registry to the packages that actually
- * live there and leaves everything else on the public one.
- *
- * No scope means the configured registry answers for every package, which is
- * both the pre-existing behaviour and the correct reading of an internal mirror.
+ * Longest-match rather than first-match so that overlapping scopes (`@team` and
+ * `@team/sub`) resolve the way a person would read them.
  */
 export function registryFor(packageName: string): string {
-  const base = registryBase()
-  const rawScope = loadSettings().registryScope
-  const scope = normalizeScope(rawScope)
-  if (scope === undefined) {
-    // An unusable scope adds nothing to a value the user already set, so the
-    // configured registry answers for everything — the unset meaning. It is
-    // said once, because this runs per package during an update check.
-    if (typeof rawScope === 'string' && rawScope.trim() !== '' && warnedScope !== rawScope) {
-      warnedScope = rawScope
-      logger.warn(`registry: "${rawScope.trim()}" is not a usable package scope; every package resolves from ${base}`)
-    }
-    return base
-  }
-  return matchesScope(packageName, scope) ? base : PUBLIC_REGISTRY
+  const scoped = registries()
+    .filter((entry): entry is RegistryEntryRecord & { scope: string } => entry.scope !== undefined)
+    .filter(entry => matchesScope(packageName, entry.scope))
+    .sort((a, b) => b.scope.length - a.scope.length)
+  if (scoped[0] !== undefined) return scoped[0].url
+  return fallbackRegistry()?.url ?? PUBLIC_REGISTRY
 }
 
-/** The last unusable scope value warned about (see `registryFor`). */
-let warnedScope: string | undefined
-
 /**
- * The registry a SEARCH runs against.
- *
- * Deliberately **not** `registryBase()`, and the distinction is the whole point:
- * search is discovery, resolution is installation. A private registry is a place
- * packages are fetched from *by name*; the standard registry protocol puts no
- * obligation on it to implement `/-/v1/search`, and plenty do not. Routing search
- * there turned "I configured a private source" into "the download centre stopped
- * working" — one setting quietly breaking an unrelated feature.
- *
- * Everything package-scoped still routes through `registryFor`, so a private
- * plugin is still resolved (and installed) from the private source. Only the
- * catalogue you browse stays public, which is also the only catalogue that can
- * answer a keyword.
- */
-export const SEARCH_REGISTRY = PUBLIC_REGISTRY
-
-/**
- * The registry a lookup should ask, when the caller says which one it wants.
+ * The registry named by an explicit choice.
  *
  * `auto` is the routing above and stays the default: installs and update checks
- * have no business overriding it. `private` exists because the download page lets
- * a person *assert* the source ("look here"), and an assertion must not be
- * quietly rewritten into a derivation — a name outside the configured scope is
- * not a reason to go ask the public registry, it is a reason to report that the
- * package is not in the source that was chosen.
+ * have no business overriding it. `public` and `reg:<id>` come from the download
+ * page, where a person *asserts* where to look — and an assertion must not be
+ * quietly rewritten into a derivation. A name outside the scope of the registry
+ * that was chosen is an answer to give back ("not in there"), not a reason to go
+ * ask somewhere else.
  *
- * Throws the coded error when `private` is asked for and nothing is configured,
- * rather than falling back to public and appearing to answer from the wrong place.
+ * Throws the coded error when the named registry does not exist, rather than
+ * falling back to public and appearing to answer from the wrong place.
  */
 export function registryForSource(packageName: string, source: RegistrySource = 'auto'): string {
   if (source === 'public') return PUBLIC_REGISTRY
-  if (source === 'private') {
-    const configured = parseRegistry(loadSettings().registryUrl)
-    if (configured === undefined) throwE('registry.notConfigured')
-    return configured
+  if (source.startsWith('reg:')) {
+    const entry = registryById(source.slice(4))
+    if (entry === undefined) throwE('registry.notConfigured')
+    return entry.url
   }
   return registryFor(packageName)
 }
 
 /**
+ * The registry that answers when no package name is in hand — the unscoped entry
+ * if there is one, else the public registry. Used by the settings "test" action
+ * when it is not testing a specific entry.
+ */
+export function defaultRegistry(): string {
+  return fallbackRegistry()?.url ?? PUBLIC_REGISTRY
+}
+
+/**
+ * The registry a SEARCH runs against: always the public catalogue.
+ *
+ * Search has no package name to route by, and a private registry is not required
+ * to answer `/-/v1/search` (the ones that do not answer 404). Discovery therefore
+ * does not follow the table; resolution does.
+ */
+export const SEARCH_REGISTRY = PUBLIC_REGISTRY
+
+/**
  * A stable description of the current routing, for cache keys.
  *
- * A version list comes from a HOST, and both halves of the routing decide which
- * host that is: changing the registry, or narrowing it to a scope, changes what
- * `latest` means for a whole set of packages at once. Without this in a cache
- * key, a previous host's verdicts keep being served for the rest of the TTL —
- * minutes of "no update available" that are simply about a different registry.
+ * A version list comes from a HOST, and the whole table decides which host that
+ * is: adding, removing or re-scoping an entry changes what `latest` means for a
+ * set of packages at once. Without this in a cache key, a previous table's
+ * verdicts keep being served for the rest of the TTL — minutes of "no update
+ * available" that are simply about different registries.
  */
 export function registrySignature(): string {
-  return `${registryBase()}\u0000${loadSettings().registryScope ?? ''}`
+  return registries()
+    .map(entry => `${entry.id}\u0000${entry.url}\u0000${entry.scope ?? ''}`)
+    .sort()
+    .join('\u0001')
 }

@@ -3,6 +3,7 @@
 
 import { app, dialog } from 'electron'
 import { readFileSync, writeFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import {
   askOnCloseEnabled, closeToTrayEnabled, exportSettings, importSettings, loadSettings, patchSettings,
 } from '../../core/settings/settings.ts'
@@ -17,12 +18,13 @@ import { githubAuthState, probeGithubRateLimit, setGithubToken } from '../../cor
 import { nodeEnvironment } from '../../core/dsh/node-env.ts'
 import { nodePreferenceValue } from '../../core/settings/settings.ts'
 import { applyDataRoot } from './data-root.ts'
-import { normalizeScope } from '../../core/store/npmrc.ts'
-import { registryAuthState, setRegistryToken } from '../../core/store/registry-auth.ts'
+import { normalizeScope, parseRegistry } from '../../core/store/npmrc.ts'
+import { registryEntryViews, setRegistryToken } from '../../core/store/registry-auth.ts'
 import { probeRegistry } from '../../core/store/npm.ts'
+import type { RegistryEntryRecord } from '../../core/settings/normalize.ts'
 import type {
   AppUpdateInfo, GithubAuthState, GithubRateLimit, HealthIssue, IpcResult, NodeEnvironment, OnboardingPayload,
-  OnboardingState, RegistryAuthState, RegistryProbe,
+  OnboardingState, RegistryEntryInput, RegistryEntryView, RegistryProbe,
 } from '../../../shared/types.ts'
 
 export function registerSettingsIpc(): void {
@@ -124,105 +126,97 @@ export function registerSettingsIpc(): void {
     }
   })
 
-  /** The registry the launcher resolves package versions from, or `null` for the
-   * public one. Read/write rather than an opaque "state" object because it is a
-   * single URL with no derived fields. */
-  handle('settings:getRegistryUrl', (): IpcResult<string | null> => {
+  /** The configured registries, as the settings editor renders them: no token
+   * values, only whether each entry has one and how it is protected. */
+  handle('settings:listRegistries', (): IpcResult<RegistryEntryView[]> => {
     try {
-      return { ok: true, value: loadSettings().registryUrl ?? null }
+      return { ok: true, value: registryEntryViews() }
     } catch (error) {
       return failFromError(error)
     }
   })
 
-  /** Save (or clear, with `''`/`null`) the registry URL. Validated as an absolute
-   * http(s) URL at the boundary: this string becomes request URLs, so a bad value
-   * is refused here rather than warned about at the first search. */
-  handle('settings:setRegistryUrl', (_event, value: string | null): IpcResult<string | null> => {
+  /** Add or update one registry. Validated at the boundary: these strings become
+   * request URLs and pnpm configuration, so a bad value is refused here rather
+   * than warned about at the first lookup.
+   *
+   * Two rules are enforced because routing depends on them: scopes must be
+   * unique (case-insensitively), and at most one entry may have no scope — two
+   * of those would be two answers to the same question. */
+  handle('settings:saveRegistry', (_event, input: RegistryEntryInput): IpcResult<RegistryEntryView[]> => {
     try {
-      const raw = typeof value === 'string' ? value.trim() : ''
-      if (raw === '') {
-        patchSettings({ registryUrl: undefined })
-        return { ok: true, value: null }
+      const rawUrl = typeof input?.url === 'string' ? input.url.trim() : ''
+      const url = parseRegistry(rawUrl)
+      if (url === undefined) {
+        // Distinguish "not a URL" from "not http(s)": the two have different
+        // fixes, and `apiErrorText` prefers the localized message either way.
+        let parsed: URL | undefined
+        try { parsed = new URL(rawUrl) } catch { parsed = undefined }
+        return parsed === undefined
+          ? fail(E.registryBadUrl, { detail: rawUrl })
+          : fail(E.registryBadScheme, { detail: rawUrl })
       }
-      let url: URL
-      try {
-        url = new URL(raw)
-      } catch {
-        // A dedicated code, with the offending text as a PARAM: `apiErrorText`
-        // prefers the localized message, so `E.nameInvalid` would have shown
-        // "invalid name" and dropped the one useful thing — which URL was refused.
-        return fail(E.registryBadUrl, { detail: raw })
+      const rawScope = typeof input.scope === 'string' ? input.scope.trim() : ''
+      const scope = rawScope === '' ? undefined : normalizeScope(rawScope)
+      if (rawScope !== '' && scope === undefined) return fail(E.registryBadScope, { detail: rawScope })
+
+      const list = [...(loadSettings().registries ?? [])]
+      const id = typeof input.id === 'string' && input.id !== '' ? input.id : `reg-${randomUUID().slice(0, 8)}`
+      const others = list.filter(entry => entry.id !== id)
+
+      if (scope === undefined && others.some(entry => entry.scope === undefined)) {
+        return fail(E.registryDuplicateFallback)
       }
-      if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-        return fail(E.registryBadScheme, { detail: raw })
+      if (scope !== undefined && others.some(entry => entry.scope?.toLowerCase() === scope.toLowerCase())) {
+        return fail(E.registryDuplicateScope, { detail: scope })
       }
-      const saved = raw.replace(/\/+$/, '')
-      patchSettings({ registryUrl: saved })
-      return { ok: true, value: saved }
-    } catch (error) {
-      return failFromError(error)
-    }
-  })
 
-  /** The scope that belongs to the configured registry, or `null` when the
-   * registry answers for every package. */
-  handle('settings:getRegistryScope', (): IpcResult<string | null> => {
-    try {
-      return { ok: true, value: loadSettings().registryScope ?? null }
-    } catch (error) {
-      return failFromError(error)
-    }
-  })
-
-  /** Save (or clear, with `''`/`null`) the scope. Normalized to `@name` here so
-   * one value has one spelling; `@` alone or a value that is not a scope at all is
-   * refused rather than saved and silently ignored by the router. */
-  handle('settings:setRegistryScope', (_event, value: string | null): IpcResult<string | null> => {
-    try {
-      const raw = typeof value === 'string' ? value.trim() : ''
-      if (raw === '') {
-        patchSettings({ registryScope: undefined })
-        return { ok: true, value: null }
+      const label = typeof input.label === 'string' && input.label.trim() !== ''
+        ? input.label.trim()
+        : (() => { try { return new URL(url).host } catch { return url } })()
+      const existing = list.find(entry => entry.id === id)
+      const entry: RegistryEntryRecord = {
+        id,
+        label,
+        url,
+        ...(scope !== undefined ? { scope } : {}),
+        ...(existing?.tokenEnc !== undefined ? { tokenEnc: existing.tokenEnc } : {}),
       }
-      const scope = normalizeScope(raw)
-      if (scope === undefined) return fail(E.registryBadScope, { detail: raw })
-      patchSettings({ registryScope: scope })
-      return { ok: true, value: scope }
+      const next = existing === undefined
+        ? [...list, entry]
+        : list.map(e => (e.id === id ? entry : e))
+      patchSettings({ registries: next })
+
+      // Tri-state: absent leaves the saved token alone (editing a label must not
+      // wipe a credential), `''` clears it, anything else replaces it.
+      if (typeof input.token === 'string') setRegistryToken(id, input.token)
+      return { ok: true, value: registryEntryViews() }
     } catch (error) {
       return failFromError(error)
     }
   })
 
-  /** Whether the registry has a credential, and how it is protected. The value
-   * itself never crosses this boundary. */
-  handle('settings:getRegistryAuth', (): IpcResult<RegistryAuthState> => {
+  /** Drop one registry. Its token goes with it. */
+  handle('settings:removeRegistry', (_event, id: string): IpcResult<RegistryEntryView[]> => {
     try {
-      return { ok: true, value: registryAuthState() }
+      const list = loadSettings().registries ?? []
+      if (!list.some(entry => entry.id === id)) return fail(E.registryEntryMissing)
+      patchSettings({ registries: list.filter(entry => entry.id !== id) })
+      return { ok: true, value: registryEntryViews() }
     } catch (error) {
       return failFromError(error)
     }
   })
 
-  /** Save (or clear, with `''`) the registry token; returns the new state. */
-  handle('settings:setRegistryToken', (_event, value: string | null): IpcResult<RegistryAuthState> => {
+  /** Reach one registry (or the fallback one) once, so an address and a token can
+   * be checked before they are trusted with an install. */
+  handle('settings:testRegistry', async (_event, id?: string): Promise<IpcResult<RegistryProbe>> => {
     try {
-      return { ok: true, value: setRegistryToken(typeof value === 'string' ? value : null) }
+      return { ok: true, value: await probeRegistry(typeof id === 'string' && id !== '' ? id : undefined) }
     } catch (error) {
       return failFromError(error)
     }
   })
-
-  /** Reach the configured registry once, so a pasted address can be checked
-   * before it is trusted with an install. */
-  handle('settings:testRegistry', async (): Promise<IpcResult<RegistryProbe>> => {
-    try {
-      return { ok: true, value: await probeRegistry() }
-    } catch (error) {
-      return failFromError(error)
-    }
-  })
-
   handle('settings:getOnboardingState', (): IpcResult<OnboardingState> => {    try {
       return {
         ok: true,

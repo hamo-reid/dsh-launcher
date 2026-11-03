@@ -54,7 +54,8 @@ import type {
   ProfilePatchReload,
   ProfileSummary,
   ProfileValidation,
-  RegistryAuthState,
+  RegistryEntryInput,
+  RegistryEntryView,
   RegistryProbe,
   RegistrySource,
   RowCreateInput,
@@ -440,23 +441,16 @@ export interface WindowApi {
     /** The registry the launcher resolves package versions from, or `null` for the
      * public one. Governs the launcher's own lookups — plugin search, version
      * lists, the dsh install/update lookup — so it must name the same registry
-     * pnpm installs from. */
-    getRegistryUrl: () => Promise<IpcResult<string | null>>
-    /** Save (or clear, with `''`) the registry URL; returns what was saved.
-     * Refused unless the value is an absolute http(s) URL. */
-    setRegistryUrl: (url: string) => Promise<IpcResult<string | null>>
-    /** The package scope that belongs to the configured registry, or `null` when
-     * that registry answers for every package. */
-    getRegistryScope: () => Promise<IpcResult<string | null>>
-    /** Save (or clear, with `''`) the scope; normalized to `@name`. */
-    setRegistryScope: (scope: string) => Promise<IpcResult<string | null>>
-    /** Whether the registry has a credential, and how it is protected at rest.
-     * The token itself never crosses this boundary. */
-    getRegistryAuth: () => Promise<IpcResult<RegistryAuthState>>
-    /** Save (or clear, with `''`) the registry token; returns the new state. */
-    setRegistryToken: (token: string) => Promise<IpcResult<RegistryAuthState>>
-    /** Reach the configured registry once (Settings "test" button). */
-    testRegistry: () => Promise<IpcResult<RegistryProbe>>
+    /** The npm registries this machine points at, in display order. Token
+     * values never cross: each entry carries only whether it has one. */
+    listRegistries: () => Promise<IpcResult<RegistryEntryView[]>>
+    /** Add or update one registry. `token` is tri-state: absent leaves the saved
+     * one alone, `''` clears it. Returns the new list. */
+    saveRegistry: (input: RegistryEntryInput) => Promise<IpcResult<RegistryEntryView[]>>
+    /** Drop one registry (and its token). */
+    removeRegistry: (id: string) => Promise<IpcResult<RegistryEntryView[]>>
+    /** Reach one registry (or the fallback one) once. */
+    testRegistry: (id?: string) => Promise<IpcResult<RegistryProbe>>
     /** Export settings to a user-chosen JSON file (`''` = cancelled). */
     exportSettings: () => Promise<IpcResult<string>>
     /** Import settings from a JSON file (`false` = cancelled). */

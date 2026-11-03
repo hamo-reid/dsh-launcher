@@ -15,7 +15,7 @@ let root: string
 beforeAll(async () => {
   root = mkdtempSync(join(tmpdir(), 'pm-registry-'))
   await openDatabase(join(root, 'app.sqlite'))
-  patchSettings({ registryUrl: 'https://registry.internal.example' })
+  patchSettings({ registries: [{ id: 'default', label: 'internal', url: 'https://registry.internal.example' }] })
 }, 20000)
 
 afterAll(() => rmSync(root, { recursive: true, force: true }))
@@ -139,7 +139,7 @@ describe('npmSearch', () => {
       seen.push(url)
       return { ok: true, status: 200, json: async () => ({ 'dist-tags': {}, versions: {} }) }
     }))
-    await fetchPackageVersions('lodash', 'private')
+    await fetchPackageVersions('lodash', 'reg:default')
     await fetchPackageVersions('lodash', 'public')
     expect(seen[0]).toBe('https://registry.internal.example/lodash')
     expect(seen[1]).toBe('https://registry.npmjs.org/lodash')
@@ -153,10 +153,10 @@ describe('npmSearch', () => {
     }))
     // Cleared first: this file configures a private registry for the test above,
     // and both cases must be exercised against the same code path.
-    await patchSettings({ registryUrl: undefined })
+    await patchSettings({ registries: undefined })
     await fetchPackageVersions('pkg')
     expect(seen[0]).toBe('https://registry.npmjs.org/pkg')
-    await patchSettings({ registryUrl: 'https://registry.internal.example' })
+    await patchSettings({ registries: [{ id: 'default', label: 'internal', url: 'https://registry.internal.example' }] })
   })
 
   it('maps a search response and defers to the registry total', async () => {

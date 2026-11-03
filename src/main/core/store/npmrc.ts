@@ -113,61 +113,81 @@ export function authKeyFor(registry: string): string | undefined {
 }
 
 /**
- * The `.npmrc` text for one private source, or `undefined` when the source
- * cannot be described honestly.
+ * The `.npmrc` text for the configured registries, or `undefined` when one of
+ * them cannot be described honestly.
  *
- * `defaultRegistry` is where everything *else* resolves from. With no scope the
- * private source wins outright, so it is not used; with a scope the file pins
- * the default explicitly rather than leaving pnpm to inherit whatever the
- * machine happens to be configured for.
+ * The whole table is written at once, because pnpm has to agree with the
+ * launcher's routing: one entry supplies the default (`registry=`) and each
+ * scoped entry pins its own scope. Writing a partial file — say, only the entry
+ * that happens to have a token — would install from a registry the launcher
+ * never routed to.
+ *
+ * `defaultRegistry` is what `registry=` gets when no unscoped entry exists
+ * (normally the public registry). Pinning it explicitly keeps the file from
+ * inheriting whatever the machine happens to be configured for.
  *
  * Refuses (returns `undefined`) when a token is expected but the registry cannot
  * produce an auth key: an `.npmrc` that claims to authenticate and cannot would
  * turn a configuration mistake into a 401 that looks like a bad token.
  */
 export function buildNpmrc(
-  source: PrivateSource, opts: { defaultRegistry: string },
+  sources: readonly PrivateSource[], opts: { defaultRegistry: string },
 ): string | undefined {
-  const registry = parseRegistry(source.registry)
-  if (registry === undefined) return undefined
-  const scope = normalizeScope(source.scope)
-  const tokenEnv = source.tokenEnv ?? ''
-  const wantsToken = tokenEnv !== ''
-  const authKey = authKeyFor(registry)
-  // A token that cannot be described — no usable auth key, or a name the child
-  // environment could not carry — is a configuration mistake, not a reason to
-  // emit an `.npmrc` without the auth line: that turns the mistake into a 401
-  // that looks like a bad token.
-  if (wantsToken && (authKey === undefined || !ENV_NAME.test(tokenEnv))) return undefined
+  const parsed: { registry: string; scope?: string; tokenEnv?: string }[] = []
+  for (const source of sources) {
+    const registry = parseRegistry(source.registry)
+    if (registry === undefined) return undefined
+    const scope = normalizeScope(source.scope)
+    const tokenEnv = source.tokenEnv ?? ''
+    // A token that cannot be described — no usable auth key, or a name the child
+    // environment could not carry — is a configuration mistake, not a reason to
+    // emit the file without the auth line.
+    if (tokenEnv !== '' && (authKeyFor(registry) === undefined || !ENV_NAME.test(tokenEnv))) return undefined
+    parsed.push({ registry, ...(scope !== undefined ? { scope } : {}), ...(tokenEnv !== '' ? { tokenEnv } : {}) })
+  }
 
-  const lines = [`registry=${scope === undefined ? registry : opts.defaultRegistry}`]
-  if (scope !== undefined) lines.push(`${scope}:registry=${registry}`)
-  if (wantsToken && authKey !== undefined) {
+  const unscoped = parsed.filter(source => source.scope === undefined)
+  // Two unscoped entries answer the same question differently. The settings
+  // writer refuses that; refusing here keeps a hand-edited row from producing a
+  // file whose meaning depends on line order.
+  if (unscoped.length > 1) return undefined
+
+  const lines = [`registry=${unscoped[0]?.registry ?? opts.defaultRegistry}`]
+  for (const source of parsed) {
+    if (source.scope !== undefined) lines.push(`${source.scope}:registry=${source.registry}`)
+  }
+  let anyToken = false
+  for (const source of parsed) {
+    const tokenEnv = source.tokenEnv ?? ''
+    if (tokenEnv === '') continue
+    const authKey = authKeyFor(source.registry)
+    if (authKey === undefined) return undefined
     // The value is supplied by `registryEnv`; `${NAME}` is the one form that
     // keeps the secret out of every copy of this file.
     lines.push(`${authKey}:_authToken=\${${tokenEnv}}`)
-    lines.push('always-auth=true')
+    anyToken = true
   }
+  if (anyToken) lines.push('always-auth=true')
   return `${lines.join('\n')}\n`
 }
 
 /**
  * The environment additions that make the file above take effect: pnpm reads the
- * user config from `NPM_CONFIG_USERCONFIG`, and the token travels as its own
- * variable so the file never holds it.
+ * user config from `NPM_CONFIG_USERCONFIG`, and each token travels as its own
+ * variable so the file never holds one.
  *
  * Returns only the keys it owns — the caller spreads them over the environment
  * it already builds, so a value it set for another reason is not overwritten by
- * an empty one here. A blank token clears the variable instead of exporting it,
- * so a stale value cannot authorize a request the current settings do not.
+ * an empty one here. A missing token means no variable, never an empty one: a
+ * stale value must not authorize a request the current settings do not.
  */
 export function registryEnv(input: {
   configPath: string
-  tokenEnv?: string
-  token?: string
+  tokens?: Readonly<Record<string, string>>
 }): Record<string, string> {
   const env: Record<string, string> = { NPM_CONFIG_USERCONFIG: input.configPath }
-  const name = input.tokenEnv ?? ''
-  if (ENV_NAME.test(name) && (input.token ?? '') !== '') env[name] = input.token ?? ''
+  for (const [name, value] of Object.entries(input.tokens ?? {})) {
+    if (ENV_NAME.test(name) && value !== '') env[name] = value
+  }
   return env
 }

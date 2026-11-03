@@ -1,118 +1,144 @@
 /**
- * The private registry's credential: at rest, and in the shape an HTTP request
- * needs it.
+ * Registry credentials: at rest, and in the shape a request needs them.
+ *
+ * One token **per entry**, because a machine can point at several registries and
+ * a credential belongs to one of them. The value never leaves this module; the
+ * renderer gets `RegistryEntryView` (label, url, scope, and whether a token
+ * exists), never the token.
  *
  * Same envelope as the GitHub token and the MCP launch secrets
  * (`settings/secret-at-rest.ts`): encrypted when the OS keyring is available,
- * marked plaintext when it is not, and never logged, exported, or rendered.
+ * marked plaintext when it is not — and said out loud rather than implied.
  *
- * The *value* never leaves this module. Two places consume it:
- * - `registryAuthHeader` — the launcher's own `fetch` calls (version lookup),
- *   which would otherwise get a 403 from a private registry and report "package
- *   not found";
- * - the pnpm child environment, where it is supplied as an environment variable
- *   that the generated `.npmrc` refers to by name (`store/registry-config.ts`).
+ * Two consumers:
+ * - `registryAuthHeader` — the launcher's own `fetch` calls;
+ * - the pnpm child environment, where each token travels as
+ *   `PM_REGISTRY_TOKEN_<ID>` and the generated `.npmrc` refers to it by name
+ *   (`store/registry-config.ts`).
  */
-import { loadSettings, updateSettings } from '../settings/settings.ts'
+import { updateSettings } from '../settings/settings.ts'
 import { createSecretCodec, type SecretCipher } from '../settings/secret-at-rest.ts'
 import { logger } from '../shared/logger.ts'
 import { normalizeScope } from './npmrc.ts'
+import { registries, registryEntries } from './registry.ts'
 import type { PrivateSource } from './npmrc.ts'
-import type { RegistryAuthState } from '../../../shared/types.ts'
+import type { RegistryEntryRecord } from '../settings/normalize.ts'
+import type { RegistryEntryView } from '../../../shared/types.ts'
 
-/** The variable the generated `.npmrc` refers to. One name is enough: the token
- * authorizes exactly one registry — the configured one. */
-export const REGISTRY_TOKEN_ENV = 'PM_REGISTRY_TOKEN'
+/** The variable name one entry's token travels under. Derived from the id so
+ * several registries can be configured without sharing a variable. */
+export function registryTokenEnvName(id: string): string {
+  return `PM_REGISTRY_TOKEN_${id.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`
+}
 
-/** The token's at-rest envelope. */
-const codec = createSecretCodec('private registry')
+/** The tokens' at-rest envelope. One codec, one label — the value is the same
+ * kind of secret for every entry. */
+const codec = createSecretCodec('registry token')
 
-/** Last decoded value, keyed by the stored envelope, so a settings change (or an
- * import) is picked up without every caller paying for a decrypt. */
-let cache: { stored: string; plain: string | undefined } | null = null
+/** Decoded tokens keyed by the stored envelope, so unchanged entries are not
+ * re-decrypted on every package lookup. */
+const cache = new Map<string, string | undefined>()
 
 /** Inject the at-rest cipher (main process wires safeStorage; tests inject a fake). */
 export function setRegistryTokenCipher(next: SecretCipher | null): void {
   codec.setCipher(next)
-  cache = null
+  cache.clear()
 }
 
-/** The plaintext token, or `undefined` when none is configured / it cannot be
- * decrypted (a keyring change, or settings imported from another machine). */
-export function registryToken(): string | undefined {
-  const stored = loadSettings().registryTokenEnc
+/** The plaintext token for one entry, or `undefined` when none is saved or it
+ * cannot be decrypted (a keyring change, or settings imported from elsewhere). */
+export function registryTokenOf(entry: RegistryEntryRecord): string | undefined {
+  const stored = entry.tokenEnc
   if (typeof stored !== 'string' || stored === '') return undefined
-  if (cache?.stored === stored) return cache.plain
+  if (cache.has(stored)) return cache.get(stored)
   const plain = codec.decode(stored)
-  cache = { stored, plain }
+  cache.set(stored, plain)
   return plain
 }
 
-/** Save (or clear, with `''`/`null`) the token. Never logs the value. */
-export function setRegistryToken(value: string | null): RegistryAuthState {
+/** Every entry as the renderer may see it: no token value, only whether one
+ * exists and how it is protected. */
+export function registryEntryViews(): RegistryEntryView[] {
+  return registryEntries().map((entry) => {
+    const hasToken = registryTokenOf(entry) !== undefined
+    return {
+      id: entry.id,
+      label: entry.label,
+      url: entry.url,
+      ...(entry.scope !== undefined ? { scope: entry.scope } : {}),
+      hasToken,
+      encryption: hasToken ? (codec.available() ? 'safe' : 'plaintext') : 'none',
+    }
+  })
+}
+
+/** Save (or clear, with `''`/`null`) one entry's token. Never logs the value. */
+export function setRegistryToken(id: string, value: string | null): RegistryEntryView[] {
   const plain = value?.trim() ?? ''
   updateSettings((draft) => {
-    if (plain === '') delete draft.registryTokenEnc
-    else draft.registryTokenEnc = codec.encode(plain)
+    const list = draft.registries
+    if (list === undefined) return
+    const entry = list.find(e => e.id === id)
+    if (entry === undefined) return
+    if (plain === '') delete entry.tokenEnc
+    else entry.tokenEnc = codec.encode(plain)
   })
-  cache = null
-  logger.info(`private registry: token ${plain === '' ? 'cleared' : 'saved'}${plain !== '' && !codec.available() ? ' (no OS keyring — stored as plaintext)' : ''}`)
-  return registryAuthState()
+  cache.clear()
+  logger.info(`registry: token ${plain === '' ? 'cleared' : 'saved'} for "${id}"`)
+  return registryEntryViews()
 }
 
-/** What the renderer is allowed to know: whether a token exists and how it is
- * protected. The value itself never crosses. */
-export type { RegistryAuthState }
-
-export function registryAuthState(): RegistryAuthState {
-  const configured = registryToken() !== undefined
-  if (!configured) return { configured: false, encryption: 'none' }
-  return { configured: true, encryption: codec.available() ? 'safe' : 'plaintext' }
+/** The configured registries as npm has to be told about them — one per entry,
+ * each naming its own token variable when it has a token. Invalid URLs are
+ * already filtered out by `registries()`, so nothing here can build a bad file. */
+export function privateSources(): PrivateSource[] {
+  return registries().map((entry) => {
+    const scope = normalizeScope(entry.scope)
+    return {
+      registry: entry.url,
+      ...(scope !== undefined ? { scope } : {}),
+      // No token means no auth line: a public mirror needs none, and a line
+      // pointing at an unset variable would fail every install with a 401.
+      ...(registryTokenOf(entry) !== undefined ? { tokenEnv: registryTokenEnvName(entry.id) } : {}),
+    }
+  })
 }
 
-/** The private source as npm has to be told about it, or `undefined` when the
- * configured registry needs no credential (nothing to inject). */
-export function privateRegistrySource(): PrivateSource | undefined {
-  const url = loadSettings().registryUrl
-  if (typeof url !== 'string' || url.trim() === '') return undefined
-  const token = registryToken()
-  const scope = normalizeScope(loadSettings().registryScope)
-  return {
-    registry: url,
-    ...(scope !== undefined ? { scope } : {}),
-    // No token means no auth line: a public mirror needs none, and an auth line
-    // pointing at an unset variable would fail every install with a 401.
-    ...(token !== undefined ? { tokenEnv: REGISTRY_TOKEN_ENV } : {}),
+/** Every token as environment entries, for the pnpm child. */
+export function registryTokenEnv(): Record<string, string> {
+  const env: Record<string, string> = {}
+  for (const entry of registries()) {
+    const token = registryTokenOf(entry)
+    if (token !== undefined) env[registryTokenEnvName(entry.id)] = token
   }
+  return env
 }
 
-/** Trimmed, slash-free form used to compare a request URL against the configured
- * registry. */
+/** Trailing slashes off, for comparing a request URL with a registry base. */
 function bare(value: string): string {
   return value.trim().replace(/\/+$/, '')
 }
 
 /**
- * The `Authorization` header for a request to `url`, or `{}` when the request is
- * not for the configured registry (or no token is saved).
+ * The `Authorization` header for a request to `url`, or `{}` when no configured
+ * registry owns that URL (or the owning one has no token).
  *
  * `Bearer` is the only scheme: it is what pnpm puts on the wire for the
  * `_authToken` line in the generated `.npmrc`, so the lookup that decides "which
  * versions exist" authenticates exactly like the install that follows it. The
- * registry protocol's `_authToken` is a bearer token — a user name and password
- * pair is a different mechanism (`_auth`), and inventing one here meant guessing
- * a user name on the caller's behalf.
+ * registry protocol's `_authToken` IS a bearer token — a user name and password
+ * pair is a different mechanism (`_auth`) and is not guessed at here.
  *
- * Only the configured registry gets it: the routing in `store/registry.ts` sends
- * every other package to the public registry, and attaching the credential there
- * would hand a private token to a third party.
+ * Longest match wins: with `https://host/team/repo` and `https://host` both
+ * configured, the narrower one owns the request. Attaching a token to a URL no
+ * entry owns would hand a private credential to a third party, which is why the
+ * guard is a prefix test against the configured bases and not a host test.
  */
 export function registryAuthHeader(url: string): Record<string, string> {
-  const token = registryToken()
-  if (token === undefined) return {}
-  const base = bare(loadSettings().registryUrl ?? '')
-  if (base === '') return {}
   const target = bare(url)
-  if (target !== base && !target.startsWith(`${base}/`)) return {}
-  return { authorization: `Bearer ${token}` }
+  const owner = registries()
+    .map(entry => ({ base: bare(entry.url), token: registryTokenOf(entry) }))
+    .filter(c => c.token !== undefined && (target === c.base || target.startsWith(`${c.base}/`)))
+    .sort((a, b) => b.base.length - a.base.length)[0]
+  return owner?.token !== undefined ? { authorization: `Bearer ${owner.token}` } : {}
 }

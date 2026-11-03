@@ -24,7 +24,7 @@ import SearchInput from '../../components/SearchInput.tsx'
 import SectionHeading from '../../components/SectionHeading.tsx'
 import Toolbar from '../../components/Toolbar.tsx'
 import { latestPackageVersion } from '../../../../shared/version.ts'
-import type { NpmSearchHit, RegistrySource } from '../../../../shared/types.ts'
+import type { NpmSearchHit, RegistryEntryView, RegistrySource } from '../../../../shared/types.ts'
 
 const PAGE_SIZE = 25
 
@@ -33,30 +33,19 @@ interface Props {
   dirMissing: boolean
   /** Archived versions per plugin, so a hit can say it is already in the store. */
   storeMap: Map<string, string[]>
-  /** The configured private registry, or `''` when there is none. Empty hides
-   * the source choice entirely: offering "private" with nothing behind it is a
-   * menu item that can only fail. */
-  privateRegistry: string
-  /** The configured package scope, if any — used to warn when an explicit
-   * private lookup names a package the install would not route there. */
-  privateScope: string
+  /** The configured registries, in display order. Empty hides the source choice
+   * entirely: offering a registry that does not exist is a menu item that can
+   * only fail. */
+  registries: RegistryEntryView[]
   onDownloadVersion: (name: string, source: RegistrySource) => void
   onInstallToProfile: (name: string) => void
 }
 
-/** The host a registry URL points at, for a label that fits in a dropdown. */
-function hostOf(url: string): string {
-  try {
-    return new URL(url).host
-  } catch {
-    return url
-  }
-}
 
 export default function PluginsDownloadView(p: Props): JSX.Element {
   const { t } = useTranslation()
   const { token } = theme.useToken()
-  const hasPrivate = p.privateRegistry !== ''
+  const hasPrivate = p.registries.length > 0
   const [source, setSource] = useState<RegistrySource>('public')
   const [query, setQuery] = useState('dsh')
   /** The private-source name box. Kept apart from `query` so switching sources
@@ -100,7 +89,7 @@ export default function PluginsDownloadView(p: Props): JSX.Element {
     setLookupError('')
     if (name === '') { setHits([]); setTotal(0); return }
     setSearching(true)
-    const r = await window.api.plugins.pkgVersions(name, 'private')
+    const r = await window.api.plugins.pkgVersions(name, source)
     setSearching(false)
     if (!r.ok) {
       setHits([])
@@ -121,11 +110,18 @@ export default function PluginsDownloadView(p: Props): JSX.Element {
     fromRef.current = 0
   }
 
-  /** True when the name would NOT be installed from the private source: the
-   * scope routing decides installs, and an explicit lookup does not change it. */
+  /** The entry the dropdown currently asserts, when it is one of ours. */
+  const chosen = source.startsWith('reg:')
+    ? p.registries.find(entry => `reg:${entry.id}` === source)
+    : undefined
+
+  /** True when the name would NOT be installed from the chosen registry: the
+   * scope routing decides installs, and an explicit lookup does not change it.
+   * An unscoped entry IS the fallback, so it owns unclaimed names by definition. */
   const outsideScope = (name: string): boolean => {
-    if (p.privateScope === '') return false
-    return !name.toLowerCase().startsWith(`${p.privateScope.toLowerCase()}/`)
+    const scope = chosen?.scope
+    if (scope === undefined) return false
+    return !name.toLowerCase().startsWith(`${scope.toLowerCase()}/`)
   }
 
   return (
@@ -142,7 +138,12 @@ export default function PluginsDownloadView(p: Props): JSX.Element {
               aria-label={t('plugin.download.source.label')}
               options={[
                 { value: 'public', label: t('plugin.download.source.public') },
-                { value: 'private', label: t('plugin.download.source.private', { host: hostOf(p.privateRegistry) }) },
+                ...p.registries.map(entry => ({
+                  value: `reg:${entry.id}` as RegistrySource,
+                  label: entry.scope === undefined
+                    ? t('plugin.download.source.fallback', { label: entry.label })
+                    : t('plugin.download.source.scoped', { label: entry.label, scope: entry.scope }),
+                })),
               ]}
             />
           )}
@@ -174,7 +175,7 @@ export default function PluginsDownloadView(p: Props): JSX.Element {
         </Toolbar>
 
         <div style={{ padding: token.padding }}>
-          {source === 'private' && (
+          {source !== 'public' && (
             <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, marginBottom: token.paddingSM }}>
               {t('plugin.download.lookupHint')}
             </div>
@@ -193,14 +194,14 @@ export default function PluginsDownloadView(p: Props): JSX.Element {
             </Space>
           ) : hits.length === 0 ? (
             // The empty slot `List` used to render for us.
-            <Empty description={source === 'private'
+            <Empty description={source !== 'public'
               ? t('plugin.download.emptyLookup')
               : (query === 'dsh' ? t('plugin.download.emptyHint') : t('plugin.download.noMatch'))} />
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               {hits.map((hit) => {
                 const inStore = p.storeMap.has(hit.name)
-                const warn = source === 'private' && outsideScope(hit.name)
+                const warn = source !== 'public' && outsideScope(hit.name)
                 return (
                   <div
                     key={hit.name}
@@ -224,7 +225,7 @@ export default function PluginsDownloadView(p: Props): JSX.Element {
                         // pnpm follows the scope. Saying so here is the only place the
                         // mismatch can be caught before it becomes a surprise.
                         <div style={{ color: token.colorWarning, fontSize: token.fontSizeSM, marginTop: 4 }}>
-                          {t('plugin.download.outOfScope', { scope: p.privateScope })}
+                          {t('plugin.download.outOfScope', { scope: chosen?.scope ?? '' })}
                         </div>
                       )}
                       {(hit.author !== undefined || hit.date !== undefined) && (

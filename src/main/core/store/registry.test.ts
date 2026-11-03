@@ -1,194 +1,166 @@
 /**
- * The registry base both HTTP call sites build on.
+ * The registry table: which host answers for which package.
  *
- * The setting exists to keep one invariant: choosing a version and installing it
- * must resolve against the SAME registry. Before it, `npmSearch` and
- * `fetchPackageVersions` hardcoded `registry.npmjs.org` while pnpm read the
- * user's `.npmrc`, so an air-gapped install threw before pnpm ever ran.
+ * One invariant underlies all of it — choosing a version and installing it must
+ * resolve against the SAME registry. That is why routing is a single decision
+ * here and why the pnpm configuration is generated from the same table.
  *
- * A configured value reaches settings through a text field and a settings import,
- * so the fallback path is part of the contract: an unusable value warns and uses
- * the public registry rather than building a request against a nonsense scheme.
+ * The second invariant is the one a private registry makes easy to get wrong:
+ * search is discovery, not routing. A private registry is under no obligation to
+ * answer `/-/v1/search`, so discovery stays on the public catalogue.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { exportSettings, importSettings, loadSettings, openDatabase, patchSettings } from '../settings/settings.ts'
-import { PUBLIC_REGISTRY, registryBase, registryFor, registryForSource, SEARCH_REGISTRY } from './registry.ts'
-import { normalizeSettings, splitPrefs, CURRENT_SCHEMA_VERSION } from '../settings/normalize.ts'
+import { openDatabase, patchSettings } from '../settings/settings.ts'
+import {
+  PUBLIC_REGISTRY, defaultRegistry, fallbackRegistry, registries, registryFor, registryForSource,
+  registrySignature, SEARCH_REGISTRY,
+} from './registry.ts'
 
 let root: string
 
-const withRegistry = (url: string | undefined): string => {
-  patchSettings({ registryUrl: url })
-  return registryBase()
-}
-
 beforeAll(async () => {
-  root = mkdtempSync(join(tmpdir(), 'pm-registry-base-'))
+  root = mkdtempSync(join(tmpdir(), 'pm-registry-table-'))
   await openDatabase(join(root, 'app.sqlite'))
 }, 20000)
 
 afterAll(() => rmSync(root, { recursive: true, force: true }))
 
-describe('registryBase', () => {
-  it('uses the configured registry', () => {
-    expect(withRegistry('https://registry.internal.example')).toBe('https://registry.internal.example')
+const PRIVATE = 'https://npm.internal.example/team/repo/-/packages'
+const MIRROR = 'https://mirror.example/npm'
+
+/** Point the machine at `list` (empty = nothing configured). */
+const withRegistries = (...list: { id: string; label: string; url: string; scope?: string }[]): string =>
+  (patchSettings({ registries: list.length > 0 ? list : undefined }), registryFor('anything'))
+
+describe('registries', () => {
+  it('drops an entry whose URL cannot be used, and keeps the rest', () => {
+    // A hand-edited row must not break the entries that are fine, and it must not
+    // reach a `fetch` either.
+    withRegistries(
+      { id: 'a', label: 'bad', url: 'not a url', scope: '@bad' },
+      { id: 'b', label: 'good', url: PRIVATE, scope: '@good' },
+    )
+    expect(registries().map(entry => entry.id)).toEqual(['b'])
   })
 
-  it('keeps a path prefix, which some mirrors mount under one', () => {
-    expect(withRegistry('https://mirror.example/npm/')).toBe('https://mirror.example/npm')
-  })
-
-  it('falls back to the public registry when unset or blank', () => {
-    expect(withRegistry(undefined)).toBe(PUBLIC_REGISTRY)
-    expect(withRegistry('')).toBe(PUBLIC_REGISTRY)
-    expect(withRegistry('   ')).toBe(PUBLIC_REGISTRY)
-  })
-
-  it('falls back rather than building a request from an unusable value', () => {
-    // `new URL` throws here, and a `file:` scheme parses — either way the answer
-    // is the public registry, because silently asking the wrong host is the one
-    // outcome a private deployment must never get.
-    expect(withRegistry('not a url')).toBe(PUBLIC_REGISTRY)
-    expect(withRegistry('file:///etc')).toBe(PUBLIC_REGISTRY)
-    expect(withRegistry('ftp://mirror.example')).toBe(PUBLIC_REGISTRY)
+  it('normalizes trailing slashes so one value has one spelling', () => {
+    withRegistries({ id: 'a', label: 'x', url: `${PRIVATE}/` })
+    expect(registries()[0]?.url).toBe(PRIVATE)
   })
 })
 
 describe('registryFor', () => {
-  const privateBase = 'https://npm.internal.example/hamo-studio/hamo-dsh/-/packages'
-
-  const routed = (scope: string | undefined, name: string): string => {
-    patchSettings({ registryUrl: privateBase, registryScope: scope })
-    return registryFor(name)
-  }
-
-  it('answers for every package when no scope is set', () => {
-    // The internal-mirror reading, and what every build before the scope field
-    // assumed: one configured registry, all packages.
-    expect(routed(undefined, '@deepseek-ai/dsh-mcp-client')).toBe(privateBase)
-    expect(routed(undefined, 'lodash')).toBe(privateBase)
+  it('uses the public registry when nothing is configured', () => {
+    expect(withRegistries()).toBe(PUBLIC_REGISTRY)
   })
 
-  it('narrows the private registry to its own scope', () => {
-    // The whole point of the field: a registry that does NOT proxy npmjs can
-    // still be used, because everything else keeps resolving from the public one.
-    expect(routed('@hamo-studio', '@hamo-studio/dsh-plugin-hamo')).toBe(privateBase)
-    expect(routed('@hamo-studio', '@deepseek-ai/dsh-mcp-client')).toBe(PUBLIC_REGISTRY)
-    expect(routed('@hamo-studio', 'lodash')).toBe(PUBLIC_REGISTRY)
+  it('sends everything to an unscoped entry — the internal-mirror reading', () => {
+    expect(withRegistries({ id: 'm', label: 'mirror', url: MIRROR })).toBe(MIRROR)
+    patchSettings({ registries: [{ id: 'm', label: 'mirror', url: MIRROR }] })
+    expect(registryFor('lodash')).toBe(MIRROR)
+    expect(registryFor('@deepseek-ai/dsh')).toBe(MIRROR)
   })
 
-  it('matches the scope case-insensitively, with or without the at-sign', () => {
-    expect(routed('hamo-studio', '@Hamo-Studio/x')).toBe(privateBase)
-    expect(routed('@Hamo-Studio', '@hamo-studio/x')).toBe(privateBase)
-  })
-
-  it('falls back to the public registry when no registry is configured at all', () => {
-    patchSettings({ registryUrl: undefined, registryScope: '@hamo-studio' })
-    // A scope with nothing to narrow: every package is public, including the
-    // scoped one — there is no private host to send it to.
-    expect(registryFor('@hamo-studio/x')).toBe(PUBLIC_REGISTRY)
+  it('keeps a scoped entry to its own scope', () => {
+    withRegistries({ id: 'p', label: 'private', url: PRIVATE, scope: '@drahamo' })
+    expect(registryFor('@drahamo/hamo-app')).toBe(PRIVATE)
+    expect(registryFor('@deepseek-ai/dsh')).toBe(PUBLIC_REGISTRY)
     expect(registryFor('lodash')).toBe(PUBLIC_REGISTRY)
   })
 
-  it('treats an unusable scope as no scope rather than guessing a route', () => {
-    // Hand-edited settings only (the settings field validates on save). An
-    // unusable value must not silently mean "public for everything", which would
-    // make the user's own plugins unfindable with no explanation.
-    expect(routed('has space', '@hamo-studio/x')).toBe(privateBase)
-    expect(routed('has space', 'lodash')).toBe(privateBase)
+  it('falls back to the unscoped entry for names no scope claims', () => {
+    withRegistries(
+      { id: 'p', label: 'private', url: PRIVATE, scope: '@drahamo' },
+      { id: 'm', label: 'mirror', url: MIRROR },
+    )
+    expect(registryFor('@drahamo/x')).toBe(PRIVATE)
+    expect(registryFor('lodash')).toBe(MIRROR)
   })
 
-  it('keeps search on the public catalogue whatever the source is', () => {
-    // The setting governs RESOLUTION (which versions exist, and where they are
-    // installed from), never DISCOVERY. A private registry is a place packages
-    // are fetched from by name; routing a keyword search there meant one setting
-    // silently broke the download centre's search.
-    patchSettings({ registryUrl: privateBase, registryScope: '@hamo-studio' })
-    expect(SEARCH_REGISTRY).toBe(PUBLIC_REGISTRY)
-    patchSettings({ registryScope: undefined })
-    expect(SEARCH_REGISTRY).toBe(PUBLIC_REGISTRY)
+  it('matches the scope as a whole segment, never as a prefix of a name', () => {
+    // npm scopes are one segment: `@team` owns `@team/x`, and must not also claim
+    // `@team-other/x` — a registry that answered for a neighbour's packages would
+    // resolve versions the user never asked it about.
+    withRegistries({ id: 'p', label: 'private', url: PRIVATE, scope: '@team' })
+    expect(registryFor('@team/x')).toBe(PRIVATE)
+    expect(registryFor('@team-other/x')).toBe(PUBLIC_REGISTRY)
   })
 
-  it('honours an explicit source over the routing', () => {
-    // The download page lets a person ASSERT where to look. An assertion must not
-    // be quietly rewritten into a derivation: a name outside the scope is not a
-    // reason to ask the public registry, it is an answer to give back.
-    patchSettings({ registryUrl: privateBase, registryScope: '@hamo-studio' })
-    expect(registryForSource('lodash', 'private')).toBe(privateBase)
-    expect(registryForSource('@hamo-studio/x', 'public')).toBe(PUBLIC_REGISTRY)
-    // `auto` remains the routing, so installs and update checks are unaffected.
-    expect(registryForSource('lodash', 'auto')).toBe(PUBLIC_REGISTRY)
-    expect(registryForSource('lodash')).toBe(PUBLIC_REGISTRY)
+  it('does not care about the order entries were added in', () => {
+    withRegistries(
+      { id: 'm', label: 'mirror', url: MIRROR },
+      { id: 'p', label: 'private', url: PRIVATE, scope: '@drahamo' },
+    )
+    expect(registryFor('@drahamo/x')).toBe(PRIVATE)
+    const reversed = withRegistries(
+      { id: 'p', label: 'private', url: PRIVATE, scope: '@drahamo' },
+      { id: 'm', label: 'mirror', url: MIRROR },
+    )
+    expect(reversed).toBe(MIRROR)
+  })
+})
+
+describe('registryForSource', () => {
+  it('honours an explicit public choice whatever is configured', () => {
+    withRegistries({ id: 'm', label: 'mirror', url: MIRROR })
+    expect(registryForSource('lodash', 'public')).toBe(PUBLIC_REGISTRY)
   })
 
-  it('refuses to answer "private" when nothing is configured', () => {
-    // Falling back to the public registry here would answer from a place the user
-    // did not choose, and the mismatch would only surface at install time.
-    patchSettings({ registryUrl: undefined })
+  it('honours an explicit entry, even outside its scope', () => {
+    // The download page lets a person ASSERT where to look. A name outside the
+    // scope is not a reason to ask somewhere else — it is an answer to give back.
+    withRegistries({ id: 'p', label: 'private', url: PRIVATE, scope: '@drahamo' })
+    expect(registryForSource('lodash', 'reg:p')).toBe(PRIVATE)
+  })
+
+  it('refuses a choice that names no configured entry', () => {
+    // Falling back to public would answer from a place the user did not choose,
+    // and the mismatch would only surface at install time.
+    withRegistries({ id: 'm', label: 'mirror', url: MIRROR })
+    expect(() => registryForSource('lodash', 'reg:gone')).toThrow()
     try {
-      registryForSource('lodash', 'private')
+      registryForSource('lodash', 'reg:gone')
       expect.unreachable('should have thrown')
     } catch (error) {
       expect((error as { code?: string }).code).toBe('registry.notConfigured')
     }
   })
-})
 
-describe('settings plumbing for registryUrl', () => {
-  it('round-trips through the prefs row', () => {
-    // Stored verbatim, like every other string setting: `normalizeSettings` only
-    // decides whether a value is present, and trimming happens where the value is
-    // used (`registryBase`) and where it is typed (`settings:setRegistryUrl`).
-    expect(normalizeSettings({ registryUrl: 'https://a.example' }).registryUrl).toBe('https://a.example')
-    expect(splitPrefs({ registryUrl: 'https://a.example' }).registryUrl).toBe('https://a.example')
-    expect(withRegistry(' https://a.example/ ')).toBe('https://a.example')
-  })
-
-  it('drops an empty or non-string value', () => {
-    expect(normalizeSettings({ registryUrl: '' }).registryUrl).toBeUndefined()
-    expect(normalizeSettings({ registryUrl: '   ' }).registryUrl).toBeUndefined()
-    expect(normalizeSettings({ registryUrl: 42 }).registryUrl).toBeUndefined()
-  })
-
-  it('bumps the schema version with no migration step, because the field is additive', () => {
-    // The bump exists so `importSettings` refuses a newer export instead of
-    // silently dropping the registry; the field needs no data-shape step.
-    expect(CURRENT_SCHEMA_VERSION).toBe(3)
+  it('keeps `auto` on the routing', () => {
+    withRegistries({ id: 'm', label: 'mirror', url: MIRROR })
+    expect(registryForSource('lodash')).toBe(MIRROR)
+    expect(registryForSource('lodash', 'auto')).toBe(MIRROR)
   })
 })
 
-describe('settings plumbing for the private source', () => {
-  const privateBase = 'https://npm.internal.example/hamo-studio/hamo-dsh/-/packages'
-
-  it('round-trips the scope through the prefs row', () => {
-    expect(normalizeSettings({ registryScope: '@hamo-studio' }).registryScope).toBe('@hamo-studio')
-    expect(splitPrefs({ registryScope: '@hamo-studio' }).registryScope).toBe('@hamo-studio')
-    expect(normalizeSettings({ registryScope: '' }).registryScope).toBeUndefined()
+describe('defaults and discovery', () => {
+  it('answers for unclaimed packages with the fallback entry, else public', () => {
+    withRegistries({ id: 'm', label: 'mirror', url: MIRROR })
+    expect(defaultRegistry()).toBe(MIRROR)
+    expect(fallbackRegistry()?.id).toBe('m')
+    withRegistries({ id: 'p', label: 'private', url: PRIVATE, scope: '@drahamo' })
+    expect(defaultRegistry()).toBe(PUBLIC_REGISTRY)
+    expect(fallbackRegistry()).toBeUndefined()
   })
 
-  it('keeps the registry token out of an export', () => {
-    // Same boundary as the GitHub token and the MCP secrets: a settings backup
-    // is a file that gets emailed around, and this one authorizes a registry.
-    patchSettings({ registryUrl: privateBase, registryScope: '@hamo-studio', registryTokenEnc: 'enc:abc' })
-    const json = exportSettings()
-    expect(json).not.toContain('enc:abc')
-    expect(json).not.toContain('registryTokenEnc')
-    expect(json).toContain('@hamo-studio')
+  it('keeps search on the public catalogue whatever the table says', () => {
+    // The table governs RESOLUTION (which versions exist, and where they are
+    // installed from), never DISCOVERY. A private registry need not implement
+    // `/-/v1/search`; routing a keyword there broke the download centre.
+    withRegistries({ id: 'm', label: 'mirror', url: MIRROR })
+    expect(SEARCH_REGISTRY).toBe(PUBLIC_REGISTRY)
   })
 
-  it('keeps this machine\'s token when an export is imported over it', () => {
-    // The export has no token by construction, so importing one must not wipe the
-    // value already on this machine — the same rule the GitHub token follows.
-    patchSettings({ registryTokenEnc: 'enc:local' })
-    importSettings(exportSettings())
-    expect(loadSettings().registryTokenEnc).toBe('enc:local')
-  })
-
-  it('drops a non-string token rather than storing it', () => {
-    expect(normalizeSettings({ registryTokenEnc: 42 }).registryTokenEnc).toBeUndefined()
-    expect(normalizeSettings({ registryTokenEnc: '   ' }).registryTokenEnc).toBeUndefined()
+  it('changes the routing signature whenever the table changes', () => {
+    // A cached version list belongs to a host: adding, re-scoping or renaming an
+    // entry changes what `latest` means for a whole set of packages.
+    withRegistries({ id: 'm', label: 'mirror', url: MIRROR })
+    const before = registrySignature()
+    withRegistries({ id: 'm', label: 'mirror', url: MIRROR, scope: '@team' })
+    expect(registrySignature()).not.toBe(before)
+    expect(registrySignature()).toBe(registrySignature())
   })
 })

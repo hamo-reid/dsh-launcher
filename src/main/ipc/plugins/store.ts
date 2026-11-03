@@ -222,13 +222,13 @@ export function registerStoreIpc(): void {
     }
   })
 
-  handle('plugins:pkgVersions', async (_event, name: string, source?: RegistrySource): Promise<IpcResult<PackageVersionInfo>> => {
+  handle('plugins:pkgVersions', async (_event, name: string, source?: string): Promise<IpcResult<PackageVersionInfo>> => {
     try {
       if (pathIdentifierInvalid(name)) return fail(E.nameInvalid)
       // `source` is the download page's explicit choice; anything else follows
       // the routing. Validated here rather than trusted: it reaches a URL.
       const registrySource: RegistrySource =
-        source === 'public' || source === 'private' ? source : 'auto'
+        source === 'public' || (source?.startsWith('reg:') === true) ? source as RegistrySource : 'auto'
       return { ok: true, value: await fetchPackageVersions(name, registrySource) }
     } catch (error) {
       return failFromError(error)

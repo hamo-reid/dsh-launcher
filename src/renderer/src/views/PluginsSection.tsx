@@ -16,7 +16,7 @@ import DevPluginsView from './plugins/DevPluginsView.tsx'
 import PluginsDownloadView from './plugins/PluginsDownloadView.tsx'
 import PluginsInstallView from './plugins/PluginsInstallView.tsx'
 import PluginsOverviewView from './plugins/PluginsOverviewView.tsx'
-import type { InstalledOverviewRow, MarketAnnotations, PluginUpdateInfo, PluginUsagePoint, RegistrySource } from '../../../shared/types.ts'
+import type { InstalledOverviewRow, MarketAnnotations, PluginUpdateInfo, PluginUsagePoint, RegistryEntryView, RegistrySource } from '../../../shared/types.ts'
 
 type PluginView = 'overview' | 'download' | 'install' | 'market' | 'dev'
 
@@ -56,10 +56,10 @@ export default function PluginsSection() {
   /** The source the version dialog was opened from — it must list versions from
    * the same registry the row was resolved from. */
   const [dlSource, setDlSource] = useState<RegistrySource>('auto')
-  /** The configured private registry + scope, for the download page's source
-   * choice and its out-of-scope warning. */
-  const [privateRegistry, setPrivateRegistry] = useState('')
-  const [privateScope, setPrivateScope] = useState('')
+  /** The configured registries, for the download page's source choice and its
+   * out-of-scope warning. Read on mount — the page is remounted when the user
+   * comes back to it. */
+  const [registries, setRegistries] = useState<RegistryEntryView[]>([])
   // The update dialog (pick a version + the profiles to re-point).
   const [updatePkg, setUpdatePkg] = useState<UpdatePluginTarget | null>(null)
 
@@ -113,13 +113,11 @@ export default function PluginsSection() {
     void (async () => {
       const d = await window.api.plugins.getDir()
       if (d.ok) { setDir(d.value.dir); setDirMissing(d.value.dir === '') }
-      // The download page offers the private source only when one exists, and
-      // warns when an explicit lookup names something installs would not route
-      // there — both need the configured values, not a guess.
-      const url = await window.api.settings.getRegistryUrl()
-      if (url.ok) setPrivateRegistry(url.value ?? '')
-      const scope = await window.api.settings.getRegistryScope()
-      if (scope.ok) setPrivateScope(scope.value ?? '')
+      // The download page offers the configured registries, and warns when an
+      // explicit lookup names something installs would not route there — both
+      // need the real list, not a guess.
+      const list = await window.api.settings.listRegistries()
+      if (list.ok) setRegistries(list.value)
       await Promise.all([load(), refreshStoreNames(), refreshDevNames()])
     })()
   }, [refreshStoreNames, refreshDevNames])
@@ -361,9 +359,7 @@ export default function PluginsSection() {
         <PluginsDownloadView
           dirMissing={dirMissing}
           storeMap={storeMap}
-          privateRegistry={privateRegistry}
-          privateScope={privateScope}
-          onDownloadVersion={openDownloadVersion}
+          registries={registries}          onDownloadVersion={openDownloadVersion}
           onInstallToProfile={name => { setTarget(null); setInstallPkg(name) }}
         />
       )}

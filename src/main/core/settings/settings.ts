@@ -288,13 +288,19 @@ export function flushSettings(): void {
   snapshotBackup(dbFile)
 }
 
-/** Export the settings plus a header, for backup / migration. The GitHub token
- * and the MCP launch secrets are secrets and are deliberately left out. */
+/** Export the settings plus a header, for backup / migration. The GitHub token,
+ * the MCP launch secrets and every registry token are secrets and are
+ * deliberately left out. */
 export function exportSettings(): string {
   const app = loadSettings()
   delete app.githubTokenEnc
   delete app.mcpSecrets
   delete app.registryTokenEnc
+  // Registry tokens live one per entry; a backup is a file that gets emailed
+  // around, so the entries travel without them.
+  if (app.registries !== undefined) {
+    app.registries = app.registries.map(({ tokenEnc: _dropped, ...entry }) => entry)
+  }
   return JSON.stringify(
     { schemaVersion, exportedAt: new Date().toISOString(), app },
     null, 2,
@@ -314,10 +320,22 @@ export function importSettings(json: string): void {
   // An export never carries secrets; keep the ones already on this machine.
   const existingToken = current.githubTokenEnc
   const existingSecrets = current.mcpSecrets
-  const existingRegistryToken = current.registryTokenEnc
+  const existingRegistryTokens = new Map(
+    (current.registries ?? []).map(entry => [entry.id, entry.tokenEnc] as const),
+  )
   current = existingToken !== undefined ? { ...migrated, githubTokenEnc: existingToken } : migrated
   current = existingSecrets !== undefined ? { ...current, mcpSecrets: existingSecrets } : current
-  current = existingRegistryToken !== undefined ? { ...current, registryTokenEnc: existingRegistryToken } : current
+  // Per entry, by id: an imported list can add, remove or rewrite registries, and
+  // the token that belongs to an id on THIS machine must survive all three.
+  if (current.registries !== undefined && existingRegistryTokens.size > 0) {
+    current = {
+      ...current,
+      registries: current.registries.map((entry) => {
+        const tokenEnc = existingRegistryTokens.get(entry.id)
+        return tokenEnc !== undefined ? { ...entry, tokenEnc } : entry
+      }),
+    }
+  }
   schemaVersion = CURRENT_SCHEMA_VERSION
   lastSignature = ''
   persist()

@@ -8,9 +8,28 @@
 import type { DshEntry } from '../dsh/dsh.ts'
 import type { DevPlugin, LaunchOptions, MarketSource, McpLibEntry, RunMode } from '../../../shared/types.ts'
 
+/** One npm registry a machine points at.
+ *
+ * `scope` is what makes several of these coexist: a scoped entry owns that
+ * package scope and nothing else, while the one entry WITHOUT a scope answers
+ * for everything no other scope claims. Without that split there would be no
+ * way to say which registry a bare package name belongs to. */
+export interface RegistryEntryRecord {
+  /** Stable identity. Referenced by the download page's source choice and by the
+   * token, so it survives a URL edit. */
+  id: string
+  /** What the settings list shows. Derived from the host when first added. */
+  label: string
+  /** Registry base, normalized (no trailing slash). */
+  url: string
+  /** `@myorg` — the packages this registry owns. */
+  scope?: string
+  /** Encrypted token for this registry. A secret: stripped from every export. */
+  tokenEnc?: string
+}
+
 /** The merged settings shape callers see (a union of the three stored rows). */
-export interface AppSettings {
-  /** Single launcher data root. When set, the three launcher-owned directories
+export interface AppSettings {  /** Single launcher data root. When set, the three launcher-owned directories
    * derive from it — `<dataRoot>/plugins`, `<dataRoot>/skill-library`,
    * `<dataRoot>/dsh/versions` — and `pluginDir` / `dshVersionDir` no longer
    * apply. Unset falls back to the Electron `userData` dir, which is the
@@ -45,30 +64,22 @@ export interface AppSettings {
   marketSource?: MarketSource
   /** Custom market catalog URL, used when `marketSource === 'custom'`. */
   marketUrl?: string
-  /** The npm registry the launcher ITSELF resolves package versions from.
+  /** The npm registries this machine points at.
    *
-   * Only half the job: it is what `core/store/registry.ts` asks before handing a
-   * spec to pnpm. It is deliberately the same registry pnpm uses — a launcher that
-   * resolved `latest` on one registry and installed from another would install a
-   * version the user did not ask for, and could not install anything at all on a
-   * network where the public one is unreachable. pnpm's own configuration stays
-   * the user's `.npmrc` until the `project` split lands; an unset value means the
-   * public registry, which is what every call site did before. */
+   * **At most one entry may omit `scope`.** An unscoped registry answers for
+   * every package no scope claims, so two of them would be two different answers
+   * to the same question — the writer (the settings IPC) refuses that, and the
+   * router relies on it.
+   *
+   * Order is presentation order; routing never depends on it (a scope is matched
+   * by name, and the fallback is found by its absence of one). */
+  registries?: RegistryEntryRecord[]
+  /** @deprecated Renamed into `registries` by the v3 → v4 migration. Read so an
+   * old row or an old export still migrates; never written by this build. */
   registryUrl?: string
-  /** The package scope that belongs to `registryUrl` (`@myorg`), when that
-   * registry holds only your own packages.
-   *
-   * Unset means the configured registry answers for every package — the
-   * internal-mirror reading, and what every build before this field assumed.
-   * Set, it narrows the private registry to its own packages and leaves the rest
-   * on the public one, so a registry that does not proxy npmjs can still be
-   * used without breaking every other dependency. See `store/registry.ts`
-   * (`registryFor`) for the resolution order. */
+  /** @deprecated — see `registryUrl`. */
   registryScope?: string
-  /** Token for the private registry, encrypted at rest via the shared secret
-   * envelope (`settings/secret-at-rest.ts`). A secret: never exported, never
-   * logged, and never written into an `.npmrc` — that file names the environment
-   * variable the child process carries instead. */
+  /** @deprecated — see `registryUrl`. A secret. */
   registryTokenEnc?: string
   /** The user's GitHub token, encrypted at rest (see `core/github/auth.ts`).
    * A secret: never exported and never logged. */
@@ -97,8 +108,8 @@ export interface AppSettings {
 /** The `prefs` row: user preferences (no registry / no per-profile config). */
 export type PrefsSettings = Pick<AppSettings,
   'dataRoot' | 'pluginDir' | 'dshVersionDir' | 'uiLanguage' | 'closeToTray' | 'askOnClose' |
-  'nodePreference' | 'onboarded' | 'marketSource' | 'marketUrl' | 'registryUrl' | 'registryScope' |
-  'registryTokenEnc' | 'githubTokenEnc' |
+  'nodePreference' | 'onboarded' | 'marketSource' | 'marketUrl' | 'registries' |
+  'registryUrl' | 'registryScope' | 'registryTokenEnc' | 'githubTokenEnc' |
   'mcpSecrets' | 'mcpLibrary' | 'devPlugins'>
 /** The `dsh` row: the registered dsh installs. */
 export type DshSettings = Pick<AppSettings, 'dshes'>
@@ -106,7 +117,7 @@ export type DshSettings = Pick<AppSettings, 'dshes'>
 export type LaunchSettings = Pick<AppSettings, 'launchOptions' | 'runModes'>
 
 /** Current on-disk schema version. Bump when a migration is added. */
-export const CURRENT_SCHEMA_VERSION = 3
+export const CURRENT_SCHEMA_VERSION = 4
 
 type Migration = (s: AppSettings) => AppSettings
 /** Ordered migrations keyed by the version they upgrade FROM (`v → v+1`).
@@ -114,11 +125,44 @@ type Migration = (s: AppSettings) => AppSettings
  * 1 → 2 adds the optional `dataRoot` field — purely additive, so there is no
  * step either; the bump exists so `importSettings` refuses a newer export
  * instead of silently dropping the root on an older build.
- * 2 → 3 adds the optional `registryUrl` — same reasoning, no data-shape step.
- * `registryScope` / `registryTokenEnc` are additive in the same way and stay on
- * v3: the token is machine-local (it is stripped from every export), so an older
- * build reading a newer export loses nothing it could have used. */
-const MIGRATIONS: Record<number, Migration> = {}
+ * 2 → 3 adds the optional `registryUrl` — same reasoning, no step.
+ *
+ * 3 → 4 is the first step with real data movement: the single
+ * `registryUrl` / `registryScope` / `registryTokenEnc` triple becomes the first
+ * member of `registries`. A machine that configured one registry keeps exactly
+ * that one, with the same scope and the same (encrypted) token, so an upgrade
+ * cannot lose a credential or start resolving from somewhere else. */
+const MIGRATIONS: Record<number, Migration> = {
+  3: (s) => {
+    if (s.registries !== undefined) return s
+    const url = typeof s.registryUrl === 'string' ? s.registryUrl.trim().replace(/\/+$/, '') : ''
+    const { registryUrl: _url, registryScope: _scope, registryTokenEnc: _token, ...rest } = s
+    if (url === '') return rest
+    const scope = typeof s.registryScope === 'string' ? s.registryScope.trim() : ''
+    return {
+      ...rest,
+      registries: [{
+        id: 'default',
+        label: hostLabel(url),
+        url,
+        ...(scope !== '' ? { scope: scope.startsWith('@') ? scope : `@${scope}` } : {}),
+        ...(typeof s.registryTokenEnc === 'string' && s.registryTokenEnc !== ''
+          ? { tokenEnc: s.registryTokenEnc }
+          : {}),
+      }],
+    }
+  },
+}
+
+/** A URL's host, for the label a migrated entry gets. Falls back to the raw text
+ * so a hand-edited value still shows as something recognisable. */
+function hostLabel(url: string): string {
+  try {
+    return new URL(url).host
+  } catch {
+    return url
+  }
+}
 
 export function splitPrefs(s: AppSettings): PrefsSettings {
   return {
@@ -132,6 +176,7 @@ export function splitPrefs(s: AppSettings): PrefsSettings {
     ...(s.onboarded !== undefined ? { onboarded: s.onboarded } : {}),
     ...(s.marketSource !== undefined ? { marketSource: s.marketSource } : {}),
     ...(s.marketUrl !== undefined ? { marketUrl: s.marketUrl } : {}),
+    ...(s.registries !== undefined ? { registries: s.registries } : {}),
     ...(s.registryUrl !== undefined ? { registryUrl: s.registryUrl } : {}),
     ...(s.registryScope !== undefined ? { registryScope: s.registryScope } : {}),
     ...(s.registryTokenEnc !== undefined ? { registryTokenEnc: s.registryTokenEnc } : {}),
@@ -207,6 +252,40 @@ function readMcpLibrary(raw: unknown[]): McpLibEntry[] {
   return out
 }
 
+/** Normalize the registry list: an entry needs an id and a URL; the scope is
+ * coerced to `@name` form; a token is kept verbatim (it is opaque at rest).
+ * Entries sharing an id or a scope are dropped after the first, because routing
+ * by id or by scope has to have ONE answer. */
+function readRegistries(raw: unknown[]): RegistryEntryRecord[] {
+  const out: RegistryEntryRecord[] = []
+  const ids = new Set<string>()
+  const scopes = new Set<string>()
+  let fallbackSeen = false
+  for (const item of raw) {
+    if (!isRecord(item)) continue
+    const id = typeof item.id === 'string' ? item.id.trim() : ''
+    const url = typeof item.url === 'string' ? item.url.trim().replace(/\/+$/, '') : ''
+    if (id === '' || url === '' || ids.has(id)) continue
+    const scopeRaw = typeof item.scope === 'string' ? item.scope.trim() : ''
+    const scope = scopeRaw === '' ? '' : (scopeRaw.startsWith('@') ? scopeRaw : `@${scopeRaw}`)
+    if (scope !== '' && scopes.has(scope.toLowerCase())) continue
+    // Two unscoped entries would answer the same question differently.
+    if (scope === '' && fallbackSeen) continue
+    ids.add(id)
+    if (scope === '') fallbackSeen = true
+    else scopes.add(scope.toLowerCase())
+    const label = typeof item.label === 'string' && item.label.trim() !== '' ? item.label.trim() : hostLabel(url)
+    out.push({
+      id,
+      label,
+      url,
+      ...(scope !== '' ? { scope } : {}),
+      ...(typeof item.tokenEnc === 'string' && item.tokenEnc !== '' ? { tokenEnc: item.tokenEnc } : {}),
+    })
+  }
+  return out
+}
+
 /** Coerce an arbitrary parsed value into a valid `AppSettings`, dropping bad
  * fields. Defends against hand-edited / partially-corrupt input. */
 
@@ -241,6 +320,10 @@ export function normalizeSettings(raw: unknown): AppSettings {
   if (registryScope !== undefined) out.registryScope = registryScope
   const registryTokenEnc = nonEmptyString(raw.registryTokenEnc)
   if (registryTokenEnc !== undefined) out.registryTokenEnc = registryTokenEnc
+  if (Array.isArray(raw.registries)) {
+    const registries = readRegistries(raw.registries)
+    if (registries.length > 0) out.registries = registries
+  }
   const githubTokenEnc = nonEmptyString(raw.githubTokenEnc)
   if (githubTokenEnc !== undefined) out.githubTokenEnc = githubTokenEnc
   if (isRecord(raw.mcpSecrets)) {

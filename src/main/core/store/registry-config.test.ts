@@ -14,7 +14,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openDatabase, patchSettings } from '../settings/settings.ts'
 import { applyRegistryConfig, REGISTRY_NPMRC } from './registry-config.ts'
-import { REGISTRY_TOKEN_ENV, setRegistryToken, setRegistryTokenCipher } from './registry-auth.ts'
+import { registryTokenEnvName, setRegistryToken, setRegistryTokenCipher } from './registry-auth.ts'
+
+/** The variable one entry's token travels under (the only entry these tests make). */
+const REGISTRY_TOKEN_ENV = registryTokenEnvName('default')
 
 const PRIVATE = 'https://npm.internal.example/hamo-studio/hamo-dsh/-/packages'
 
@@ -28,7 +31,7 @@ beforeAll(async () => {
 afterAll(() => rmSync(root, { recursive: true, force: true }))
 
 beforeEach(() => {
-  patchSettings({ registryUrl: undefined, registryScope: undefined, registryTokenEnc: undefined })
+  patchSettings({ registries: undefined })
   setRegistryTokenCipher({
     available: () => true,
     encrypt: plain => `enc(${plain})`,
@@ -39,8 +42,8 @@ beforeEach(() => {
 describe('applyRegistryConfig', () => {
   it('writes the file and returns the environment pnpm needs', () => {
     const dir = mkdtempSync(join(root, 'ok-'))
-    patchSettings({ registryUrl: PRIVATE, registryScope: '@hamo-studio' })
-    setRegistryToken('secret-token')
+    patchSettings({ registries: [{ id: 'default', label: 'internal', url: PRIVATE, scope: '@hamo-studio' }] })
+    setRegistryToken('default', 'secret-token')
     const env = applyRegistryConfig(dir)
     expect(env).toEqual({
       NPM_CONFIG_USERCONFIG: join(dir, REGISTRY_NPMRC),
@@ -55,13 +58,16 @@ describe('applyRegistryConfig', () => {
     expect(text).not.toContain('secret-token')
   })
 
-  it('leaves the user configuration alone when no token is configured', () => {
-    // A public mirror. Writing our own file would replace whatever the user has
-    // configured — a corporate proxy, another registry's auth — for no gain.
+  it('writes the routing even with no token, because pnpm must agree with us', () => {
+    // A public mirror with no credential. Writing the file is still required:
+    // pnpm follows ITS configuration, and a mirror configured here but not there
+    // would install from a registry the launcher never routed to. The one cost is
+    // that the user's own npm configuration is not read while entries exist —
+    // stated in the module doc and in the settings copy.
     const dir = mkdtempSync(join(root, 'pub-'))
-    patchSettings({ registryUrl: PRIVATE })
-    expect(applyRegistryConfig(dir)).toEqual({})
-    expect(existsSync(join(dir, REGISTRY_NPMRC))).toBe(false)
+    patchSettings({ registries: [{ id: 'default', label: 'internal', url: PRIVATE }] })
+    expect(applyRegistryConfig(dir)).toEqual({ NPM_CONFIG_USERCONFIG: join(dir, REGISTRY_NPMRC) })
+    expect(readFileSync(join(dir, REGISTRY_NPMRC), 'utf8')).toBe(`registry=${PRIVATE}\n`)
   })
 
   it('answers nothing when no registry is configured at all', () => {
@@ -73,8 +79,8 @@ describe('applyRegistryConfig', () => {
   it('is idempotent, and rewrites when the settings move on', () => {
     const dir = mkdtempSync(join(root, 'churn-'))
     const file = join(dir, REGISTRY_NPMRC)
-    patchSettings({ registryUrl: PRIVATE })
-    setRegistryToken('one')
+    patchSettings({ registries: [{ id: 'default', label: 'internal', url: PRIVATE }] })
+    setRegistryToken('default', 'one')
     applyRegistryConfig(dir)
     const first = readFileSync(file, 'utf8')
     // Every pnpm spawn calls this; the second call must land on the same bytes
@@ -82,7 +88,7 @@ describe('applyRegistryConfig', () => {
     applyRegistryConfig(dir)
     expect(readFileSync(file, 'utf8')).toBe(first)
     // A changed scope must produce a new file, not a stale one.
-    patchSettings({ registryScope: '@hamo-studio' })
+    patchSettings({ registries: [{ id: 'default', label: 'internal', url: PRIVATE, scope: '@hamo-studio' }] })
     applyRegistryConfig(dir)
     expect(readFileSync(file, 'utf8')).toContain('@hamo-studio:registry=')
     expect(readFileSync(file, 'utf8')).not.toBe(first)
@@ -93,16 +99,16 @@ describe('applyRegistryConfig', () => {
     // run with whatever npm configuration the machine already has.
     const dir = join(mkdtempSync(join(root, 'blocked-')), 'not-a-dir')
     writeFileSync(dir, 'x', 'utf8')
-    patchSettings({ registryUrl: PRIVATE })
-    setRegistryToken('secret-token')
+    patchSettings({ registries: [{ id: 'default', label: 'internal', url: PRIVATE }] })
+    setRegistryToken('default', 'secret-token')
     expect(applyRegistryConfig(dir)).toEqual({})
   })
 
   it('does not nest the file inside a directory that already exists empty', () => {
     const dir = join(mkdtempSync(join(root, 'existing-')), 'nested')
     mkdirSync(dir)
-    patchSettings({ registryUrl: PRIVATE })
-    setRegistryToken('secret-token')
+    patchSettings({ registries: [{ id: 'default', label: 'internal', url: PRIVATE }] })
+    setRegistryToken('default', 'secret-token')
     applyRegistryConfig(dir)
     expect(existsSync(join(dir, REGISTRY_NPMRC))).toBe(true)
   })

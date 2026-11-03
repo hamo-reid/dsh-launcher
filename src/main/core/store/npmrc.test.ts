@@ -93,7 +93,7 @@ describe('buildNpmrc', () => {
 
   it('sends everything to the private source when no scope is set', () => {
     // The internal-mirror case: one registry that also proxies the public one.
-    const text = buildNpmrc({ registry: PRIVATE }, opts)
+    const text = buildNpmrc([{ registry: PRIVATE }], opts)
     expect(text).toBe(`registry=${PRIVATE}\n`)
   })
 
@@ -101,14 +101,14 @@ describe('buildNpmrc', () => {
     // Pinning the default matters: the generated file REPLACES the user config
     // pnpm would otherwise read, so leaving it out would change where every
     // other package resolves from.
-    const text = buildNpmrc({ registry: PRIVATE, scope: '@hamo-studio' }, opts)
+    const text = buildNpmrc([{ registry: PRIVATE, scope: '@hamo-studio' }], opts)
     expect(text).toBe(
       `registry=https://registry.npmjs.org\n@hamo-studio:registry=${PRIVATE}\n`,
     )
   })
 
   it('names the token variable instead of writing a token', () => {
-    const text = buildNpmrc({ registry: PRIVATE, scope: '@hamo-studio', tokenEnv: 'PM_REGISTRY_TOKEN' }, opts)
+    const text = buildNpmrc([{ registry: PRIVATE, scope: '@hamo-studio', tokenEnv: 'PM_REGISTRY_TOKEN' }], opts)
     expect(text).toBe(
       'registry=https://registry.npmjs.org\n' +
       `@hamo-studio:registry=${PRIVATE}\n` +
@@ -121,7 +121,7 @@ describe('buildNpmrc', () => {
   })
 
   it('omits the auth lines when the source needs no token', () => {
-    const text = buildNpmrc({ registry: PRIVATE }, opts) ?? ''
+    const text = buildNpmrc([{ registry: PRIVATE }], opts) ?? ''
     expect(text).not.toContain('_authToken')
     expect(text).not.toContain('always-auth')
   })
@@ -129,14 +129,14 @@ describe('buildNpmrc', () => {
   it('refuses to describe a source it cannot authenticate to', () => {
     // A bad variable name is a configuration mistake. Emitting the file without
     // the auth line would turn it into a 401 that looks like an expired token.
-    expect(buildNpmrc({ registry: PRIVATE, tokenEnv: 'bad-name' }, opts)).toBeUndefined()
-    expect(buildNpmrc({ registry: 'nonsense', tokenEnv: 'PM_TOKEN' }, opts)).toBeUndefined()
+    expect(buildNpmrc([{ registry: PRIVATE, tokenEnv: 'bad-name' }], opts)).toBeUndefined()
+    expect(buildNpmrc([{ registry: 'nonsense', tokenEnv: 'PM_TOKEN' }], opts)).toBeUndefined()
   })
 })
 
 describe('registryEnv', () => {
   it('points pnpm at the generated file and supplies the token', () => {
-    expect(registryEnv({ configPath: 'C:/data/npmrc', tokenEnv: 'PM_REGISTRY_TOKEN', token: 'secret' })).toEqual({
+    expect(registryEnv({ configPath: 'C:/data/npmrc', tokens: { PM_REGISTRY_TOKEN: 'secret' } })).toEqual({
       NPM_CONFIG_USERCONFIG: 'C:/data/npmrc',
       PM_REGISTRY_TOKEN: 'secret',
     })
@@ -145,13 +145,55 @@ describe('registryEnv', () => {
   it('does not export a token it does not have', () => {
     // A blank value must clear the variable rather than export an empty one, so
     // a stale token cannot authorize a request the current settings do not.
-    expect(registryEnv({ configPath: 'C:/data/npmrc', tokenEnv: 'PM_REGISTRY_TOKEN', token: '' })).toEqual({
+    expect(registryEnv({ configPath: 'C:/data/npmrc', tokens: {} })).toEqual({
       NPM_CONFIG_USERCONFIG: 'C:/data/npmrc',
     })
     expect(registryEnv({ configPath: 'C:/data/npmrc' })).toEqual({ NPM_CONFIG_USERCONFIG: 'C:/data/npmrc' })
   })
 
   it('ignores a variable name the child environment could not carry', () => {
-    expect(registryEnv({ configPath: 'p', tokenEnv: 'bad-name', token: 'secret' })).toEqual({ NPM_CONFIG_USERCONFIG: 'p' })
+    expect(registryEnv({ configPath: 'p', tokens: { 'bad-name': 'secret' } })).toEqual({ NPM_CONFIG_USERCONFIG: 'p' })
+  })
+})
+
+describe('buildNpmrc with several registries', () => {
+  const opts = { defaultRegistry: 'https://registry.npmjs.org' }
+
+  it('writes one block per entry and one default', () => {
+    // The whole table at once: pnpm must route the way the launcher routes, so a
+    // file that only described the authenticated entries would install from a
+    // registry nothing was ever looked up on.
+    const text = buildNpmrc([
+      { registry: PRIVATE, scope: '@team' },
+      { registry: 'https://npm.other.example/registry', scope: '@other' },
+    ], opts)
+    expect(text).toBe(
+      'registry=https://registry.npmjs.org\n' +
+      `@team:registry=${PRIVATE}\n` +
+      '@other:registry=https://npm.other.example/registry\n',
+    )
+  })
+
+  it('lets an unscoped entry become the default', () => {
+    const text = buildNpmrc([
+      { registry: PRIVATE },
+      { registry: 'https://npm.other.example/registry', scope: '@other' },
+    ], opts)
+    expect(text).toContain(`registry=${PRIVATE}`)
+    expect(text).toContain('@other:registry=https://npm.other.example/registry')
+  })
+
+  it('refuses two unscoped entries instead of picking by line order', () => {
+    expect(buildNpmrc([{ registry: PRIVATE }, { registry: 'https://npm.other.example' }], opts)).toBeUndefined()
+  })
+
+  it('gives each token its own variable and one always-auth', () => {
+    const text = buildNpmrc([
+      { registry: PRIVATE, scope: '@team', tokenEnv: 'PM_REGISTRY_TOKEN_A' },
+      { registry: 'https://npm.other.example/registry', scope: '@other', tokenEnv: 'PM_REGISTRY_TOKEN_B' },
+    ], opts) ?? ''
+    expect(text).toContain('${PM_REGISTRY_TOKEN_A}')
+    expect(text).toContain('${PM_REGISTRY_TOKEN_B}')
+    expect(text.match(/always-auth=true/g)).toHaveLength(1)
   })
 })

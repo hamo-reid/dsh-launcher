@@ -48,6 +48,11 @@ export const E = {
   registryBadScheme: 'registry.badScheme',
   registryBadScope: 'registry.badScope',
   registryNotConfigured: 'registry.notConfigured',
+  /** Two entries claiming the same package scope. */
+  registryDuplicateScope: 'registry.duplicateScope',
+  /** Two entries answering for unclaimed packages — only one may. */
+  registryDuplicateFallback: 'registry.duplicateFallback',
+  registryEntryMissing: 'registry.entryMissing',
   // extensions (MCP rows)
   extBadServerName: 'ext.badServerName',
   extBadTransport: 'ext.badTransport',

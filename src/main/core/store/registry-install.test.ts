@@ -32,7 +32,10 @@ import { openDatabase, patchSettings } from '../settings/settings.ts'
 import { configurePnpmRegistryEnv, configurePnpmStore, runPnpm } from '../dsh/pnpm.ts'
 import { applyRegistryConfig } from './registry-config.ts'
 import { probeRegistry } from './npm.ts'
-import { REGISTRY_TOKEN_ENV, setRegistryToken, setRegistryTokenCipher } from './registry-auth.ts'
+import { registryTokenEnvName, setRegistryToken, setRegistryTokenCipher } from './registry-auth.ts'
+
+/** The variable the single configured entry's token travels under. */
+const REGISTRY_TOKEN_ENV = registryTokenEnvName('default')
 
 /** The only credential the probe registry accepts. `_authToken` reaches the wire
  * as a Bearer header — verified here rather than assumed: the first version of
@@ -146,7 +149,7 @@ afterAll(async () => {
 })
 
 beforeEach(() => {
-  patchSettings({ registryUrl: base, registryScope: '@probe', registryTokenEnc: undefined })
+  patchSettings({ registries: [{ id: 'default', label: 'stub', url: base, scope: '@probe' }] })
 })
 
 /** A fresh pnpm project (and store) so one test cannot read another's cache. */
@@ -162,7 +165,7 @@ describe('installing from a private registry', () => {
     // Both assumptions fail here if they are wrong: an inert user config sends
     // the request to npmjs (404), and an unexpanded `${VAR}` sends the wrong
     // header (401). Either way the package never lands.
-    setRegistryToken(TOKEN)
+    setRegistryToken('default', TOKEN)
     const dir = project('ok')
     configurePnpmStore(() => join(root, 'store-ok'))
     const result = await runPnpm(dir, ['add', PACKAGE, '--fetch-retries=0'])
@@ -180,7 +183,7 @@ describe('installing from a private registry', () => {
     // The control for the test above: the server does not answer everything, so
     // "it installed" means the header was right rather than that auth was never
     // checked.
-    setRegistryToken('not-the-right-token')
+    setRegistryToken('default', 'not-the-right-token')
     const dir = project('denied')
     configurePnpmStore(() => join(root, 'store-denied'))
     const result = await runPnpm(dir, ['add', PACKAGE, '--fetch-retries=0'])
@@ -197,24 +200,24 @@ describe('the connection test', () => {
   beforeEach(() => { whoamiEnabled = true })
 
   it('names the authenticated user', async () => {
-    setRegistryToken(TOKEN)
-    expect(await probeRegistry()).toMatchObject({ reachable: true, auth: 'ok', user: 'probe-user' })
+    setRegistryToken('default', TOKEN)
+    expect(await probeRegistry('default')).toMatchObject({ reachable: true, auth: 'ok', user: 'probe-user' })
   })
 
   it('reports a wrong token as rejected, not as an unreachable host', async () => {
-    setRegistryToken('not-the-right-token')
-    expect(await probeRegistry()).toMatchObject({ reachable: true, auth: 'rejected', status: 401 })
+    setRegistryToken('default', 'not-the-right-token')
+    expect(await probeRegistry('default')).toMatchObject({ reachable: true, auth: 'rejected', status: 401 })
   })
 
   it('asks for a token when none was sent', async () => {
-    expect(await probeRegistry()).toMatchObject({ reachable: true, auth: 'required', status: 401 })
+    expect(await probeRegistry('default')).toMatchObject({ reachable: true, auth: 'required', status: 401 })
   })
 
   it('says the credential went unchecked when the source has no whoami route', async () => {
     // The honest answer for a source that only implements packages: the host
     // answered, and nothing here can vouch for the token.
     whoamiEnabled = false
-    setRegistryToken(TOKEN)
-    expect(await probeRegistry()).toMatchObject({ reachable: true, auth: 'unknown', status: 404 })
+    setRegistryToken('default', TOKEN)
+    expect(await probeRegistry('default')).toMatchObject({ reachable: true, auth: 'unknown', status: 404 })
   })
 })
