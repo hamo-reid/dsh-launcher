@@ -1086,7 +1086,7 @@ const zh = {
 
     'plugin.view.market': '社区市场',
     'plugin.market.title': '社区市场（{{count}} 个插件）',
-    'plugin.market.desc': '来自 awesome-dsh-plugin 的精选 dsh 插件——按分类、星星与双语描述浏览。',
+    'plugin.market.desc': '按分类、排序与描述浏览目录里的插件。',
     'plugin.market.searchPlaceholder': '搜索名称 / 作者 / npm / 描述',
     'plugin.market.refresh': '刷新',
     'plugin.market.openSource': '打开来源',

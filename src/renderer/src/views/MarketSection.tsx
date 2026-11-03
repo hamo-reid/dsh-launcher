@@ -163,6 +163,8 @@ export default function MarketSection(): JSX.Element {
 
   const descOf = (p: MarketPlugin): string => p.description?.[lang] ?? p.description?.en ?? ''
   const hasNpm = (p: MarketPlugin): boolean => typeof p.npm === 'string' && p.npm !== ''
+  /** `owner/name`, except for a scoped name - it already carries its owner. */
+  const labelOf = (p: MarketPlugin): string => (p.name.startsWith('@') ? p.name : p.owner + '/' + p.name)
   /** Only a github.com URL gets a GitHub label; anything else is just a link. */
   const isGitHub = (url: string): boolean => {
     try { return new URL(url).hostname === 'github.com' } catch { return false }
@@ -295,7 +297,7 @@ export default function MarketSection(): JSX.Element {
                     <List.Item.Meta
                       title={(
                         <span>
-                          <span style={{ fontWeight: 600 }}>{p.owner}/{p.name}</span>
+                        <span style={{ fontWeight: 600 }}>{labelOf(p)}</span>
                           {p.deprecated === true && <Tag color="error" style={{ marginInlineStart: 6 }}>{t('plugin.market.deprecated')}</Tag>}
                           {inStore && <Tag color="blue" style={{ marginInlineStart: 6 }}>{t('plugin.market.inStore')}</Tag>}
                         </span>
@@ -335,7 +337,7 @@ export default function MarketSection(): JSX.Element {
 
       {/* Detail dialog: full entry info + source links. */}
       <Modal
-        title={detail !== null ? `${detail.owner}/${detail.name}` : ''}
+        title={detail !== null ? labelOf(detail) : ''}
         open={detail !== null}
         onCancel={() => setDetail(null)}
         footer={null}
