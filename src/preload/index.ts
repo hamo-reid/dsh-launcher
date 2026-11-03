@@ -39,6 +39,8 @@ import type {
   MarketPage,
   MarketPlugin,
   MarketSourceState,
+  RegistryAuthState,
+  RegistryProbe,
   NodeEnvironment,
   NpmSearchHit,
   OnboardingPayload,
@@ -420,6 +422,16 @@ const api = {
       ipcRenderer.invoke('settings:getRegistryUrl'),
     setRegistryUrl: (url: string): Promise<IpcResult<string | null>> =>
       ipcRenderer.invoke('settings:setRegistryUrl', url),
+    getRegistryScope: (): Promise<IpcResult<string | null>> =>
+      ipcRenderer.invoke('settings:getRegistryScope'),
+    setRegistryScope: (scope: string): Promise<IpcResult<string | null>> =>
+      ipcRenderer.invoke('settings:setRegistryScope', scope),
+    getRegistryAuth: (): Promise<IpcResult<RegistryAuthState>> =>
+      ipcRenderer.invoke('settings:getRegistryAuth'),
+    setRegistryToken: (token: string): Promise<IpcResult<RegistryAuthState>> =>
+      ipcRenderer.invoke('settings:setRegistryToken', token),
+    testRegistry: (): Promise<IpcResult<RegistryProbe>> =>
+      ipcRenderer.invoke('settings:testRegistry'),
     testGithubToken: (): Promise<IpcResult<GithubRateLimit>> =>
       ipcRenderer.invoke('settings:testGithubToken'),
     exportSettings: (): Promise<IpcResult<string>> =>

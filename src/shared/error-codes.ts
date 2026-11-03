@@ -46,6 +46,7 @@ export const E = {
   // registry (the configured npm registry a search / install reads from)
   registryBadUrl: 'registry.badUrl',
   registryBadScheme: 'registry.badScheme',
+  registryBadScope: 'registry.badScope',
   // extensions (MCP rows)
   extBadServerName: 'ext.badServerName',
   extBadTransport: 'ext.badTransport',

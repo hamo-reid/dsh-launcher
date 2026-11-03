@@ -16,7 +16,7 @@ import { join } from 'node:path'
 import { openDatabase, patchSettings, loadSettings } from '../settings/settings.ts'
 import { exportSettings } from '../settings/settings.ts'
 import {
-  REGISTRY_TOKEN_ENV, REGISTRY_USER, privateRegistrySource, registryAuthHeader, registryAuthState,
+  REGISTRY_TOKEN_ENV, REGISTRY_USER, privateRegistrySource, registryAuthCandidates, registryAuthState,
   registryToken, setRegistryToken, setRegistryTokenCipher,
 } from './registry-auth.ts'
 import type { SecretCipher } from '../settings/secret-at-rest.ts'
@@ -87,20 +87,24 @@ describe('registryToken', () => {
   })
 })
 
-describe('registryAuthHeader', () => {
-  it('signs a request to the configured registry', () => {
+describe('registryAuthCandidates', () => {
+  it('offers Bearer first, because that is what an _authToken becomes on the wire', () => {
+    // Verified end to end in `registry-install.test.ts`: pnpm sends `_authToken`
+    // as `Bearer`. The lookup must authenticate the same way as the install it
+    // precedes.
     patchSettings({ registryUrl: CNB })
     setRegistryToken('secret-token')
-    expect(registryAuthHeader(`${CNB}/@hamo-studio%2Fplugin`)).toEqual({
-      authorization: basic(REGISTRY_USER, 'secret-token'),
-    })
+    expect(registryAuthCandidates(`${CNB}/@hamo-studio%2Fplugin`)).toEqual([
+      { authorization: 'Bearer secret-token' },
+      { authorization: basic(REGISTRY_USER, 'secret-token') },
+    ])
   })
 
   it('signs the registry base itself, including the search endpoint', () => {
     patchSettings({ registryUrl: CNB })
     setRegistryToken('secret-token')
-    expect(registryAuthHeader(CNB).authorization).toBe(basic(REGISTRY_USER, 'secret-token'))
-    expect(registryAuthHeader(`${CNB}/-/v1/search?text=x`).authorization).toBe(basic(REGISTRY_USER, 'secret-token'))
+    expect(registryAuthCandidates(CNB)[0]?.authorization).toBe('Bearer secret-token')
+    expect(registryAuthCandidates(`${CNB}/-/v1/search?text=x`)[0]?.authorization).toBe('Bearer secret-token')
   })
 
   it('never signs a request to another host', () => {
@@ -108,19 +112,19 @@ describe('registryAuthHeader', () => {
     // public registry, and that request must not carry a private credential.
     patchSettings({ registryUrl: CNB })
     setRegistryToken('secret-token')
-    expect(registryAuthHeader('https://registry.npmjs.org/lodash')).toEqual({})
+    expect(registryAuthCandidates('https://registry.npmjs.org/lodash')).toEqual([])
     // A host that merely starts with the same characters is not the same host.
-    expect(registryAuthHeader('https://npm.cnb.cool.evil.example/x')).toEqual({})
+    expect(registryAuthCandidates('https://npm.cnb.cool.evil.example/x')).toEqual([])
   })
 
   it('answers nothing when no token is configured', () => {
     patchSettings({ registryUrl: CNB })
-    expect(registryAuthHeader(`${CNB}/x`)).toEqual({})
+    expect(registryAuthCandidates(`${CNB}/x`)).toEqual([])
   })
 
   it('answers nothing when no registry is configured', () => {
     setRegistryToken('secret-token')
-    expect(registryAuthHeader(`${CNB}/x`)).toEqual({})
+    expect(registryAuthCandidates(`${CNB}/x`)).toEqual([])
   })
 })
 

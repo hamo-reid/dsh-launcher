@@ -69,3 +69,43 @@ describe('settings:setRegistryUrl', () => {
     expect(loadSettings().registryUrl).toBeUndefined()
   })
 })
+
+describe('settings:setRegistryScope', () => {
+  it('normalizes the two spellings a person might type into one', async () => {
+    expect(await call<string | null>('settings:setRegistryScope', 'hamo-studio'))
+      .toEqual({ ok: true, value: '@hamo-studio' })
+    expect(await call<string | null>('settings:setRegistryScope', ' @hamo-studio '))
+      .toEqual({ ok: true, value: '@hamo-studio' })
+    expect(loadSettings().registryScope).toBe('@hamo-studio')
+  })
+
+  it('refuses a value that is not a scope, naming it', async () => {
+    // Saved-and-ignored would be the worst outcome: the router would fall back to
+    // "no scope", which sends EVERY package to the private registry.
+    expect(await call('settings:setRegistryScope', 'has space'))
+      .toMatchObject({ ok: false, code: 'registry.badScope', params: { detail: 'has space' } })
+    expect(loadSettings().registryScope).toBe('@hamo-studio')
+  })
+
+  it('clears with an empty value, which means "the registry answers for all"', async () => {
+    expect(await call<string | null>('settings:setRegistryScope', '')).toEqual({ ok: true, value: null })
+    expect(loadSettings().registryScope).toBeUndefined()
+  })
+})
+
+describe('settings:registry token', () => {
+  it('answers two facts about the token and never the token', async () => {
+    // The renderer must not be able to read the value back, not even through a
+    // state object that happens to carry it.
+    const saved = await call<{ configured: boolean; encryption: string }>('settings:setRegistryToken', 'secret-token')
+    expect(saved).toEqual({ ok: true, value: { configured: true, encryption: 'plaintext' } })
+    const state = await call<unknown>('settings:getRegistryAuth')
+    expect(JSON.stringify(state)).not.toContain('secret-token')
+  })
+
+  it('clears with an empty value', async () => {
+    expect(await call<{ configured: boolean }>('settings:setRegistryToken', ''))
+      .toEqual({ ok: true, value: { configured: false, encryption: 'none' } })
+    expect(loadSettings().registryTokenEnc).toBeUndefined()
+  })
+})

@@ -28,8 +28,7 @@ import type {
   DownloadSessionInfo,
   GithubAuthState,
   GithubRateLimit,
-  HealthIssue,
-  ImportProfileResult,
+  HealthIssue,  ImportProfileResult,
   ImportStep,
   InstalledOverviewRow,
   InstalledPlugin,
@@ -55,6 +54,8 @@ import type {
   ProfilePatchReload,
   ProfileSummary,
   ProfileValidation,
+  RegistryAuthState,
+  RegistryProbe,
   RowCreateInput,
   PluginApplyResult,
   PluginCleanupResult,
@@ -441,6 +442,18 @@ export interface WindowApi {
     /** Save (or clear, with `''`) the registry URL; returns what was saved.
      * Refused unless the value is an absolute http(s) URL. */
     setRegistryUrl: (url: string) => Promise<IpcResult<string | null>>
+    /** The package scope that belongs to the configured registry, or `null` when
+     * that registry answers for every package. */
+    getRegistryScope: () => Promise<IpcResult<string | null>>
+    /** Save (or clear, with `''`) the scope; normalized to `@name`. */
+    setRegistryScope: (scope: string) => Promise<IpcResult<string | null>>
+    /** Whether the registry has a credential, and how it is protected at rest.
+     * The token itself never crosses this boundary. */
+    getRegistryAuth: () => Promise<IpcResult<RegistryAuthState>>
+    /** Save (or clear, with `''`) the registry token; returns the new state. */
+    setRegistryToken: (token: string) => Promise<IpcResult<RegistryAuthState>>
+    /** Reach the configured registry once (Settings "test" button). */
+    testRegistry: () => Promise<IpcResult<RegistryProbe>>
     /** Export settings to a user-chosen JSON file (`''` = cancelled). */
     exportSettings: () => Promise<IpcResult<string>>
     /** Import settings from a JSON file (`false` = cancelled). */

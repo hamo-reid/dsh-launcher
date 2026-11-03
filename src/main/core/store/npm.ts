@@ -4,10 +4,30 @@
  * one place. The raw-normalization functions are exported for unit tests so the
  * HTTP calls stay out of the test path. */
 
-import type { NpmSearchHit, PackageVersionInfo } from '../../../shared/types.ts'
+import type { NpmSearchHit, PackageVersionInfo, RegistryProbe } from '../../../shared/types.ts'
 import { logger } from '../shared/logger.ts'
-import { registryAuthHeader } from './registry-auth.ts'
+import { registryAuthCandidates } from './registry-auth.ts'
 import { registryBase, registryFor } from './registry.ts'
+
+/**
+ * Fetch from a registry, carrying the credential when the URL belongs to the
+ * configured private one.
+ *
+ * The candidates are tried in order on 401/403: `Bearer` is what pnpm sends for
+ * an `_authToken`, so it is what a registry behind that file expects; `Basic`
+ * covers the registries that authenticate with a user name instead. The point of
+ * the fallback is that the lookup in front of an install must not fail where the
+ * install itself would have succeeded.
+ */
+async function fetchFromRegistry(url: string): Promise<Response> {
+  const [first, ...rest] = registryAuthCandidates(url)
+  let res = await fetch(url, { headers: first ?? {} })
+  for (const headers of rest) {
+    if (res.status !== 401 && res.status !== 403) return res
+    res = await fetch(url, { headers })
+  }
+  return res
+}
 
 /** Raw shape of one registry search result. */
 export interface RawSearchPackage {
@@ -62,7 +82,7 @@ export async function npmSearch(
   const url = `${base}/-/v1/search?text=${encodeURIComponent(query)}&size=${size}&from=${from}`
   // Search is not package-scoped, so it runs against the configured registry and
   // carries the credential only when that IS the private one.
-  const res = await fetch(url, { headers: registryAuthHeader(base) })
+  const res = await fetchFromRegistry(url)
   if (!res.ok) throw new Error(`npm search failed: HTTP ${res.status}`)
   const data = await res.json() as RawSearchResponse
   const result = normalizeSearchResults(data)
@@ -80,7 +100,7 @@ export async function npmSearch(
 export async function fetchPackageVersions(name: string): Promise<PackageVersionInfo> {
   const base = registryFor(name)
   logger.debug(`npm versions: "${name}" @ ${base}`)
-  const res = await fetch(`${base}/${encodeURIComponent(name)}`, { headers: registryAuthHeader(base) })
+  const res = await fetchFromRegistry(`${base}/${encodeURIComponent(name)}`)
   if (!res.ok) throw new Error(`npm 包不存在或不可访问：HTTP ${res.status}`)
   const data = await res.json() as {
     'dist-tags'?: Record<string, string>
@@ -92,4 +112,22 @@ export async function fetchPackageVersions(name: string): Promise<PackageVersion
   }
   logger.debug(`npm versions: "${name}" → ${info.versions.length} available, dist-tags ${Object.keys(info.distTags).join(',') || 'none'}`)
   return info
+}
+
+/**
+ * Reach the configured registry once, and report what happened.
+ *
+ * This answers "is this address usable from here", not "does it have my
+ * package": a registry that answers 401 has proved the address and the token are
+ * the thing to look at, which is exactly what the person who just pasted an
+ * address needs to know. Nothing is thrown — a wrong address is a result.
+ */
+export async function probeRegistry(): Promise<RegistryProbe> {
+  const registry = registryBase()
+  try {
+    const res = await fetchFromRegistry(`${registry}/`)
+    return { registry, reachable: true, status: res.status }
+  } catch (error) {
+    return { registry, reachable: false, detail: error instanceof Error ? error.message : String(error) }
+  }
 }

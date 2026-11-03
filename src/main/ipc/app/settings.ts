@@ -17,9 +17,12 @@ import { githubAuthState, probeGithubRateLimit, setGithubToken } from '../../cor
 import { nodeEnvironment } from '../../core/dsh/node-env.ts'
 import { nodePreferenceValue } from '../../core/settings/settings.ts'
 import { applyDataRoot } from './data-root.ts'
+import { normalizeScope } from '../../core/store/npmrc.ts'
+import { registryAuthState, setRegistryToken } from '../../core/store/registry-auth.ts'
+import { probeRegistry } from '../../core/store/npm.ts'
 import type {
   AppUpdateInfo, GithubAuthState, GithubRateLimit, HealthIssue, IpcResult, NodeEnvironment, OnboardingPayload,
-  OnboardingState,
+  OnboardingState, RegistryAuthState, RegistryProbe,
 } from '../../../shared/types.ts'
 
 export function registerSettingsIpc(): void {
@@ -162,8 +165,65 @@ export function registerSettingsIpc(): void {
     }
   })
 
-  handle('settings:getOnboardingState', (): IpcResult<OnboardingState> => {
+  /** The scope that belongs to the configured registry, or `null` when the
+   * registry answers for every package. */
+  handle('settings:getRegistryScope', (): IpcResult<string | null> => {
     try {
+      return { ok: true, value: loadSettings().registryScope ?? null }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  /** Save (or clear, with `''`/`null`) the scope. Normalized to `@name` here so
+   * one value has one spelling; `@` alone or a value that is not a scope at all is
+   * refused rather than saved and silently ignored by the router. */
+  handle('settings:setRegistryScope', (_event, value: string | null): IpcResult<string | null> => {
+    try {
+      const raw = typeof value === 'string' ? value.trim() : ''
+      if (raw === '') {
+        patchSettings({ registryScope: undefined })
+        return { ok: true, value: null }
+      }
+      const scope = normalizeScope(raw)
+      if (scope === undefined) return fail(E.registryBadScope, { detail: raw })
+      patchSettings({ registryScope: scope })
+      return { ok: true, value: scope }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  /** Whether the registry has a credential, and how it is protected. The value
+   * itself never crosses this boundary. */
+  handle('settings:getRegistryAuth', (): IpcResult<RegistryAuthState> => {
+    try {
+      return { ok: true, value: registryAuthState() }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  /** Save (or clear, with `''`) the registry token; returns the new state. */
+  handle('settings:setRegistryToken', (_event, value: string | null): IpcResult<RegistryAuthState> => {
+    try {
+      return { ok: true, value: setRegistryToken(typeof value === 'string' ? value : null) }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  /** Reach the configured registry once, so a pasted address can be checked
+   * before it is trusted with an install. */
+  handle('settings:testRegistry', async (): Promise<IpcResult<RegistryProbe>> => {
+    try {
+      return { ok: true, value: await probeRegistry() }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  handle('settings:getOnboardingState', (): IpcResult<OnboardingState> => {    try {
       return {
         ok: true,
         value: {

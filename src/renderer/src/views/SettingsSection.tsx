@@ -11,7 +11,7 @@ import { useThemeMode } from '../ThemeProvider.tsx'
 import { useAppLang } from '../i18n'
 import { apiErrorText, requestHealthRefresh } from '../lib/ipc.ts'
 import type { ThemeMode } from '../theme.ts'
-import type { DataRootState, GithubAuthState, GithubRateLimit, NodeEnvironment } from '../../../shared/types.ts'
+import type { DataRootState, GithubAuthState, GithubRateLimit, NodeEnvironment, RegistryAuthState, RegistryProbe } from '../../../shared/types.ts'
 
 /** 设置页：外观(主题 + 语言) + 目录配置(DSH 版本库 / 插件保存位置)。 */
 export default function SettingsSection() {
@@ -32,6 +32,10 @@ export default function SettingsSection() {
   const [githubLimit, setGithubLimit] = useState<GithubRateLimit>()
   const [registryInput, setRegistryInput] = useState('')
   const [registryBusy, setRegistryBusy] = useState(false)
+  const [registryScopeInput, setRegistryScopeInput] = useState('')
+  const [registryTokenInput, setRegistryTokenInput] = useState('')
+  const [registryAuth, setRegistryAuth] = useState<RegistryAuthState>()
+  const [registryProbe, setRegistryProbe] = useState<RegistryProbe>()
 
   const load = async (): Promise<void> => {
     const d = await window.api.settings.getDataRoot()
@@ -50,6 +54,10 @@ export default function SettingsSection() {
     // URL, which would persist the default as if the user had chosen it.
     const r = await window.api.settings.getRegistryUrl()
     if (r.ok) setRegistryInput(r.value ?? '')
+    const rs = await window.api.settings.getRegistryScope()
+    if (rs.ok) setRegistryScopeInput(rs.value ?? '')
+    const ra = await window.api.settings.getRegistryAuth()
+    if (ra.ok) setRegistryAuth(ra.value)
   }
 
   useEffect(() => { void load() }, [])
@@ -90,7 +98,49 @@ export default function SettingsSection() {
     setRegistryBusy(false)
     if (!r.ok) { void message.error(apiErrorText(r)); return }
     setRegistryInput(r.value ?? '')
+    // A new address invalidates whatever the last reachability check said.
+    setRegistryProbe(undefined)
     void message.success(t('settings.registry.saved'))
+  }
+
+  const saveRegistryScope = async (): Promise<void> => {
+    setRegistryBusy(true)
+    const r = await window.api.settings.setRegistryScope(registryScopeInput.trim())
+    setRegistryBusy(false)
+    if (!r.ok) { void message.error(apiErrorText(r)); return }
+    setRegistryScopeInput(r.value ?? '')
+    setRegistryProbe(undefined)
+    void message.success(t('settings.registry.scope.saved'))
+  }
+
+  const saveRegistryToken = async (): Promise<void> => {
+    setRegistryBusy(true)
+    const r = await window.api.settings.setRegistryToken(registryTokenInput.trim())
+    setRegistryBusy(false)
+    if (!r.ok) { void message.error(apiErrorText(r)); return }
+    setRegistryAuth(r.value)
+    // The value is never read back, so the field is emptied as soon as it is saved.
+    setRegistryTokenInput('')
+    setRegistryProbe(undefined)
+    void message.success(t('settings.registry.token.saved'))
+  }
+
+  const clearRegistryToken = async (): Promise<void> => {
+    setRegistryBusy(true)
+    const r = await window.api.settings.setRegistryToken('')
+    setRegistryBusy(false)
+    if (!r.ok) { void message.error(apiErrorText(r)); return }
+    setRegistryAuth(r.value)
+    setRegistryProbe(undefined)
+    void message.success(t('settings.registry.token.cleared'))
+  }
+
+  const testRegistry = async (): Promise<void> => {
+    setRegistryBusy(true)
+    const r = await window.api.settings.testRegistry()
+    setRegistryBusy(false)
+    if (!r.ok) { void message.error(apiErrorText(r)); return }
+    setRegistryProbe(r.value)
   }
 
   const clearGithubToken = async (): Promise<void> => {
@@ -340,6 +390,79 @@ export default function SettingsSection() {
             <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, marginTop: token.paddingSM }}>
               {t('settings.registry.hint')}
             </div>
+
+            <div style={{ fontWeight: 500, marginTop: token.paddingLG }}>{t('settings.registry.scope.label')}</div>
+            <Space.Compact style={{ width: '100%', maxWidth: 560, marginTop: 6 }}>
+              <Input
+                value={registryScopeInput}
+                onChange={e => setRegistryScopeInput(e.target.value)}
+                placeholder={t('settings.registry.scope.placeholder')}
+                disabled={registryInput.trim() === ''}
+                autoComplete="off"
+              />
+              <Button
+                loading={registryBusy}
+                disabled={registryInput.trim() === ''}
+                onClick={() => void saveRegistryScope()}
+              >
+                {t('common.save')}
+              </Button>
+            </Space.Compact>
+            <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, marginTop: token.paddingSM }}>
+              {t('settings.registry.scope.hint')}
+            </div>
+
+            <div style={{ fontWeight: 500, marginTop: token.paddingLG }}>{t('settings.registry.token.label')}</div>
+            <Space.Compact style={{ width: '100%', maxWidth: 560, marginTop: 6 }}>
+              <Input.Password
+                value={registryTokenInput}
+                onChange={e => setRegistryTokenInput(e.target.value)}
+                placeholder={registryAuth?.configured === true
+                  ? t('settings.registry.token.replace')
+                  : t('settings.registry.token.placeholder')}
+                disabled={registryInput.trim() === ''}
+                autoComplete="new-password"
+              />
+              <Button
+                type="primary"
+                loading={registryBusy}
+                disabled={registryInput.trim() === '' || registryTokenInput.trim() === ''}
+                onClick={() => void saveRegistryToken()}
+              >
+                {t('common.save')}
+              </Button>
+              <Button loading={registryBusy} disabled={registryAuth?.configured !== true} onClick={() => void clearRegistryToken()}>
+                {t('settings.registry.token.clear')}
+              </Button>
+            </Space.Compact>
+            <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM, marginTop: token.paddingSM }}>
+              {t('settings.registry.token.hint')}
+            </div>
+
+            <Space style={{ marginTop: token.paddingLG }}>
+              <Button loading={registryBusy} disabled={registryInput.trim() === ''} onClick={() => void testRegistry()}>
+                {t('settings.registry.test')}
+              </Button>
+              {registryAuth?.configured === true && (
+                <Tag color={registryAuth.encryption === 'safe' ? 'green' : 'orange'}>
+                  {registryAuth.encryption === 'safe'
+                    ? t('settings.registry.encryption.safe')
+                    : t('settings.registry.encryption.plaintext')}
+                </Tag>
+              )}
+            </Space>
+            {registryProbe !== undefined && (
+              <Alert
+                style={{ marginTop: token.paddingSM }}
+                type={registryProbe.reachable && registryProbe.status !== undefined && registryProbe.status < 400 ? 'success' : 'warning'}
+                showIcon
+                title={registryProbe.reachable
+                  ? registryProbe.status === 401 || registryProbe.status === 403
+                    ? t('settings.registry.testDenied', { registry: registryProbe.registry, status: registryProbe.status })
+                    : t('settings.registry.testOk', { registry: registryProbe.registry, status: registryProbe.status ?? 0 })
+                  : t('settings.registry.testFailed', { detail: registryProbe.detail ?? '' })}
+              />
+            )}
           </div>
         </Panel>
 

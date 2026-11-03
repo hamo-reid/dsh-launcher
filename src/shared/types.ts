@@ -795,6 +795,27 @@ export interface GithubRateLimit {
   resetAt?: string
 }
 
+/** Whether the private npm registry has a credential, and how it is protected.
+ * Two facts only — the value itself never leaves the main process. */
+export interface RegistryAuthState {
+  /** True when a token is saved. */
+  configured: boolean
+  /** How the saved token is protected at rest. */
+  encryption: 'none' | 'safe' | 'plaintext'
+}
+
+/** Result of reaching the configured registry (Settings "test" button). */
+export interface RegistryProbe {
+  /** The registry that was asked, already normalized. */
+  registry: string
+  /** False when the request never completed (offline, bad host, TLS). */
+  reachable: boolean
+  /** The HTTP status, when a response came back at all. */
+  status?: number
+  /** The transport error, when `reachable` is false. */
+  detail?: string
+}
+
 // ── dsh official install ─────────────────────────────────────────────────────
 
 /** Successful official-install payload, returned to the renderer so the dialog
