@@ -49,6 +49,8 @@ export default function SettingsSection() {
   /** Market catalogs: the list plus which one is active. */
   const [market, setMarket] = useState<{ activeId: string | null; catalogs: MarketCatalogView[] }>({ activeId: null, catalogs: [] })
   const [catalogForm, setCatalogForm] = useState<{ id?: string; name: string; url: string; token: string } | null>(null)
+  /** A catalog save is in flight: one click, one request. */
+  const [catalogBusy, setCatalogBusy] = useState(false)
   const [registries, setRegistries] = useState<RegistryEntryView[]>([])
   /** The entry being added or edited, or null while the list is shown. */
   const [form, setForm] = useState<{ id?: string; label: string; url: string; scopes: string; token: string; catchAll: boolean } | null>(null)
@@ -244,6 +246,8 @@ export default function SettingsSection() {
   }
 
   const submitCatalog = async (): Promise<void> => {
+    if (catalogBusy) return
+    setCatalogBusy(true)
     if (catalogForm === null) return
     const name = catalogForm.name.trim()
     const r = await window.api.market.saveCatalog({
@@ -251,21 +255,21 @@ export default function SettingsSection() {
       name,
       url: catalogForm.url.trim(),
     })
-    if (!r.ok) { void message.error(apiErrorText(r)); return }
+    if (!r.ok) { setCatalogBusy(false); void message.error(apiErrorText(r)); return }
     // The token is written in the same pass: a new catalog takes its id from the
     // list that just came back, so there is no half-configured window.
     if (catalogForm.token !== '') {
       const saved = (r.value.catalogs ?? []).find(c => c.id === catalogForm.id || c.name === name)
       if (saved !== undefined) {
         const tk = await window.api.market.setCatalogToken(saved.id, catalogForm.token)
-        if (!tk.ok) { void message.error(apiErrorText(tk)); return }
+        if (!tk.ok) { setCatalogBusy(false); void message.error(apiErrorText(tk)); return }
         setMarket({ activeId: tk.value.activeId ?? null, catalogs: tk.value.catalogs ?? [] })
-        setCatalogForm(null)
+        setCatalogBusy(false); setCatalogForm(null)
         return
       }
     }
     setMarket({ activeId: r.value.activeId ?? null, catalogs: r.value.catalogs ?? [] })
-    setCatalogForm(null)
+    setCatalogBusy(false); setCatalogForm(null)
   }
 
   const removeCatalog = async (id: string): Promise<void> => {
@@ -509,7 +513,7 @@ export default function SettingsSection() {
                     cancelText={t('common.cancel')}
                     onCancel={() => setCatalogForm(null)}
                     onOk={() => void submitCatalog()}
-                    okButtonProps={{ disabled: catalogForm === null || catalogForm.url.trim() === '' || catalogForm.name.trim() === '' }}
+                    okButtonProps={{ loading: catalogBusy, disabled: catalogForm === null || catalogForm.url.trim() === '' || catalogForm.name.trim() === '' }}
                     width={520}
                   >
                     <Space orientation="vertical" size={10} style={{ width: '100%' }}>
