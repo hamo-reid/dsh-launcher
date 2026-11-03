@@ -20,7 +20,6 @@ export default function ExtensionsSection(): JSX.Element {
 
   return (
     <AppShell
-      siderWidth={200}
       sider={(
         <Menu
           selectedKeys={[tab]}

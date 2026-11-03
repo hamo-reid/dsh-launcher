@@ -277,7 +277,6 @@ export default function PluginsSection() {
   return (
     <>
     <AppShell
-      siderWidth={200}
       sider={
         <Menu
           selectedKeys={[view]}

@@ -29,7 +29,7 @@ import ScrollModal from '../components/ScrollModal.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
 import { BundleVersionModal, PluginUpdatesModal, type BundleVersionTarget } from './PluginsModals.tsx'
 import McpManagePanel from './McpManagePanel.tsx'
-import { MODAL } from '../theme.ts'
+import { LAYOUT, MODAL } from '../theme.ts'
 
 interface Props {
   /** The dsh this profile belongs to (no global active dsh). */
@@ -518,7 +518,7 @@ const loadSeq = useRef(0)
       )} />
 
       <div style={{ display: 'flex', gap: token.paddingSM, flex: 1, minHeight: 0 }}>
-        <div style={{ width: 208, flexShrink: 0, minHeight: 0, overflowY: 'auto' }}>
+        <div style={{ width: LAYOUT.sidebarWidth, flexShrink: 0, minHeight: 0, overflowY: 'auto' }}>
           <NavList
             items={navItems}
             keyOf={item => item.key}

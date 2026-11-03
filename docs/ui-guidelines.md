@@ -73,7 +73,7 @@
 </AppShell>
 ```
 
-约定:侧栏承载导航与列表;内容区承载详情与主操作。侧栏宽度用 `LAYOUT.sidebarWidth`,确有需要再 `siderWidth` 覆盖。
+约定:侧栏承载导航与列表;内容区承载详情与主操作。**宽度只有一个值** —— `LAYOUT.sidebarWidth`(280)。所有 Section 的侧栏,以及详情页内部的二级侧栏(Profile 详情那条 section 导航),都取这个常量,不传 `siderWidth`。曾经有三处自己定了窄宽度(扩展、插件管理 200,Profile 详情 208),结果是每换一页侧栏就变一次宽,已经统一。
 
 ### 3.2 SectionHeading(`SectionHeading.tsx`)
 页头:标题 + 可选说明 + 右对齐操作区。一个内容区**只允许一个**页头;作为 Main Header 自带一条细的底部界定线(`borderBottom`),把它从画布内容中「界定」出来,不再是浮在背景上的裸文字。加上 `sticky` 会把页头钉在滚动区顶部(用于固定工具栏,如 Profile 的启动/中止条),并换成实心底色。
