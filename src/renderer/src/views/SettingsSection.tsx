@@ -463,28 +463,36 @@ export default function SettingsSection() {
             </Panel>
 
             <Panel title={t('settings.section.market')}>
-              <div style={{ maxWidth: 720 }}>
+              <div style={{ maxWidth: 760 }}>
                 <div style={{ ...muted, margin: '4px 0 12px' }}>{t('settings.market.desc')}</div>
-                <Radio.Group value={market.activeId ?? 'public'} onChange={e => void activateCatalog(e.target.value === 'public' ? null : String(e.target.value))}>
-                  <Space orientation="vertical" size={6}>
-                    <Radio value="public">{t('plugin.market.source.official')}</Radio>
-                    {market.catalogs.map(c => (
-                      <Radio key={c.id} value={c.id}>
-                        {c.name}
-                        {c.isCnb && <Tag style={{ marginInlineStart: 6 }}>CNB</Tag>}
-                        {c.hasToken && <Tag color="green" style={{ marginInlineStart: 6 }}>{t('settings.registry.token.safe')}</Tag>}
-                      </Radio>
-                    ))}
-                  </Space>
-                </Radio.Group>
-                <div style={{ marginTop: token.padding }}>
+                <Space orientation="vertical" size={8} style={{ width: '100%' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Radio checked={market.activeId === null} onChange={() => void activateCatalog(null)} />
+                    <span style={{ fontWeight: 500 }}>{t('plugin.market.source.official')}</span>
+                  </div>
                   {market.catalogs.map(c => (
-                    <div key={c.id} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
-                      <span style={{ ...muted, wordBreak: 'break-all', flex: 1 }}>{c.url}</span>
+                    <div
+                      key={c.id}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
+                        border: `1px solid ${token.colorBorder}`, borderRadius: token.borderRadiusLG,
+                      }}
+                    >
+                      <Radio checked={market.activeId === c.id} onChange={() => void activateCatalog(c.id)} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <span style={{ fontWeight: 500 }}>{c.name}</span>
+                          {c.isCnb && <Tag>CNB</Tag>}
+                          {c.hasToken && <Tag color="green">{t('settings.registry.token.safe')}</Tag>}
+                        </div>
+                        <div style={{ ...muted, wordBreak: 'break-all' }}>{c.url}</div>
+                      </div>
                       <Button size="small" onClick={() => setCatalogForm({ id: c.id, name: c.name, url: c.url, token: '' })}>{t('common.edit')}</Button>
                       <Button size="small" danger onClick={() => void removeCatalog(c.id)}>{t('common.delete')}</Button>
                     </div>
                   ))}
+                </Space>
+                <div style={{ marginTop: token.padding }}>
                   {catalogForm === null
                     ? <Button onClick={() => setCatalogForm({ name: '', url: '', token: '' })}>{t('settings.market.add')}</Button>
                     : (
