@@ -83,6 +83,56 @@ body .ant-modal-wrap {
   align-items: flex-start;
 }
 
+/* The About page's link list (views/AboutView.tsx). The rows read as one list
+   inside a panel, so they carry no borders of their own — only a hover tint, the
+   same `--pm-hover` the other click regions use. */
+.pm-about-links {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pm-about-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 10px;
+  margin-inline: -10px;
+  border-radius: 8px;
+  color: inherit;
+  text-decoration: none;
+  transition: background 0.15s;
+}
+
+.pm-about-link:hover {
+  background: var(--pm-hover);
+  color: inherit;
+}
+
+.pm-about-link:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 1px;
+}
+
+.pm-about-link-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  font-size: 15px;
+  color: var(--pm-scrollbar);
+}
+
+.pm-about-link-hint {
+  display: block;
+  font-size: 12px;
+  line-height: 1.5;
+  opacity: 0.65;
+}
+
 /* A Tabs instance that fills its parent height, with each pane owning its own
    scroll. Used by the Run page's 启动 / 进程管理 tabs so the process pane can
    host a full-height AppShell. antd v6 structure:

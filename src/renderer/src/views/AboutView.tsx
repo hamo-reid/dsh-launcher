@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Button, Divider, Space, Tag, theme } from 'antd'
-import { GithubOutlined, LoadingOutlined, ReloadOutlined } from '@ant-design/icons'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { Button, Descriptions, Tooltip, theme } from 'antd'
+import {
+  BugOutlined, ExportOutlined, GithubOutlined, LoadingOutlined, ReloadOutlined, TagOutlined,
+} from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import SectionHeading from '../components/SectionHeading.tsx'
 import Panel from '../components/Panel.tsx'
@@ -12,9 +14,45 @@ type UpdateStatus =
   | { status: 'ok'; latest: AppRelease | null }
   | { status: 'error'; message: string }
 
-/** About page: app version + a GitHub link + a manual/automatic update check
- * against the GitHub releases API. Links are plain `<a target=…>` — the main
- * process forwards every http(s) link to the system default browser. */
+/** The project's own addresses. One place, so the rows below cannot drift apart. */
+const REPO = 'https://github.com/hamo-reid/dsh-launcher'
+
+/** A value in the app's monospace ramp — versions and dates line up when several
+ * of them are stacked. */
+const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
+
+/** ISO timestamp → `YYYY-MM-DD`, or `—`. Deliberately not locale-formatted: a
+ * release date has one right reading, and it is the unambiguous one. */
+function isoDay(value: string | undefined): string {
+  if (value === undefined || value === '') return '—'
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? '—' : parsed.toISOString().slice(0, 10)
+}
+
+/** One row of the link list: icon, what it is, and what you will find there. */
+function LinkRow({ href, icon, title, hint }: {
+  href: string
+  icon: ReactNode
+  title: string
+  hint: string
+}) {
+  return (
+    <a className="pm-about-link" href={href} target="_blank" rel="noreferrer">
+      <span className="pm-about-link-icon" aria-hidden>{icon}</span>
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ display: 'block', fontWeight: 500 }}>{title}</span>
+        <span className="pm-about-link-hint">{hint}</span>
+      </span>
+      <ExportOutlined aria-hidden style={{ flex: '0 0 auto', opacity: 0.45 }} />
+    </a>
+  )
+}
+
+/** About page: what this app is, which build is installed, whether a newer one
+ * exists, and where the project lives.
+ *
+ * Links are plain `<a target=…>` — the main process forwards every http(s) link
+ * to the system default browser. */
 export default function AboutView() {
   const { t } = useTranslation()
   const { token } = theme.useToken()
@@ -35,67 +73,166 @@ export default function AboutView() {
 
   useEffect(() => { check() }, [check])
 
-  const repo = 'https://github.com/hamo-reid/dsh-launcher'
+  const checking = update.status === 'checking' || update.status === 'idle'
+  const latest = update.status === 'ok' ? update.latest : null
+
+  /** The verdict as one pill: a dot carries the state, the words say it. */
+  const pill = ((): { color: string; label: ReactNode } => {
+    if (checking) return { color: token.colorTextTertiary, label: t('about.update.checking') }
+    if (update.status === 'error') return { color: token.colorError, label: t('about.update.failed') }
+    if (latest !== null) return { color: token.colorWarning, label: t('about.update.available', { version: latest.version }) }
+    return { color: token.colorSuccess, label: t('about.update.upToDate') }
+  })()
 
   return (
     <div style={{ height: '100%', overflowY: 'auto', padding: token.paddingLG }}>
-      <SectionHeading title={t('app.tab.about')} />
-      <Space orientation="vertical" size="middle" style={{ width: '100%', maxWidth: 640 }}>
-        <Panel title="DSH Launcher">
-          <Space orientation="vertical" size="small">
-            <div>{t('about.about')}</div>
-            <div style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>
-              {t('about.version', { version: version || t('common.unknown') })}
+      <div style={{ maxWidth: 960, margin: '0 auto' }}>
+        <SectionHeading title={t('app.tab.about')} />
+
+        {/* Product identity. The tinittest possible version of a hero: a mark, the
+            two facts that identify the build, and the one action this page owns. */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: token.paddingLG,
+            flexWrap: 'wrap',
+            padding: `${token.paddingLG}px`,
+            borderRadius: token.borderRadiusLG,
+            border: `1px solid ${token.colorBorder}`,
+            background: `linear-gradient(135deg, ${token.colorPrimaryBg} 0%, ${token.colorBgContainer} 62%)`,
+          }}
+        >
+          <div
+            aria-hidden
+            style={{
+              width: 56,
+              height: 56,
+              flex: '0 0 auto',
+              borderRadius: 16,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#fff',
+              fontSize: 24,
+              fontWeight: 700,
+              letterSpacing: 0.5,
+              background: `linear-gradient(140deg, ${token.colorPrimary} 0%, ${token.colorPrimaryActive} 100%)`,
+              boxShadow: `inset 0 1px 0 rgba(255,255,255,0.35), 0 6px 16px ${token.colorPrimaryBgHover}`,
+            }}
+          >
+            D
+          </div>
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 20, fontWeight: 600, lineHeight: 1.4 }}>DSH Launcher</span>
+              <span
+                style={{
+                  fontFamily: MONO,
+                  fontSize: token.fontSizeSM,
+                  padding: '1px 8px',
+                  borderRadius: 6,
+                  color: token.colorTextSecondary,
+                  background: token.colorBgLayout,
+                  border: `1px solid ${token.colorBorderSecondary}`,
+                }}
+              >
+                {version === '' ? '—' : version}
+              </span>
             </div>
-            <Space size="middle" wrap>
-              {update.status === 'idle' || update.status === 'checking'
-                ? (
-                  <>
-                    {update.status === 'checking' && <LoadingOutlined spin />}
-                    <span style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>
-                      {t('about.update.checking')}
-                    </span>
-                  </>
-                )
-                : update.status === 'error'
-                  ? (
-                    <>
-                      <Tag color="error">{t('about.update.failed')}</Tag>
-                      <span style={{ color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>{update.message}</span>
-                    </>
-                  )
-                  : update.latest
-                    ? (
-                      <>
-                        <Tag color="warning">{t('about.update.available', { version: update.latest.version })}</Tag>
-                        <a
-                          target="_blank"
-                          rel="noreferrer"
-                          href={update.latest.url || repo}
-                          style={{ color: token.colorPrimary }}
-                        >
-                          {t('about.update.release')}
-                        </a>
-                      </>
-                    )
-                    : <Tag color="success">{t('about.update.upToDate')}</Tag>}
-              <Button size="small" type="text" icon={<ReloadOutlined />} onClick={check} disabled={update.status === 'checking'}>
-                {t('about.update.check')}
-              </Button>
-            </Space>
-            <Divider style={{ margin: '10px 0 8px' }} />
-            <a
-              target="_blank"
-              rel="noreferrer"
-              href={repo}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: token.colorPrimary }}
-            >
-              <GithubOutlined />
-              <span>{t('about.github')}</span>
-            </a>
-          </Space>
-        </Panel>
-      </Space>
+            <div style={{ color: token.colorTextSecondary, marginTop: 6 }}>{t('about.about')}</div>
+          </div>
+          <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, color: pill.color, whiteSpace: 'nowrap' }}>
+              {checking
+                ? <LoadingOutlined spin aria-hidden />
+                : <span aria-hidden style={{ width: 6, height: 6, borderRadius: 3, background: pill.color }} />}
+              <span style={{ color: token.colorText, fontSize: token.fontSizeSM }}>{pill.label}</span>
+            </span>
+            <Button icon={<ReloadOutlined />} loading={checking} onClick={check}>
+              {t('about.update.check')}
+            </Button>
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+            gap: token.paddingLG,
+            marginTop: token.paddingLG,
+            alignItems: 'start',
+          }}
+        >
+          <Panel title={t('about.section.update')}>
+            <Descriptions column={1} size="small" colon={false}>
+              <Descriptions.Item label={t('about.label.current')}>
+                <span style={{ fontFamily: MONO }}>{version === '' ? '—' : version}</span>
+              </Descriptions.Item>
+              <Descriptions.Item label={t('about.label.latest')}>
+                <span style={{ fontFamily: MONO }}>{latest?.version ?? '—'}</span>
+              </Descriptions.Item>
+              <Descriptions.Item label={t('about.label.published')}>
+                <span style={{ fontFamily: MONO }}>{isoDay(latest?.publishedAt)}</span>
+              </Descriptions.Item>
+            </Descriptions>
+            {latest !== null && (
+              <div style={{ marginTop: token.paddingSM }}>
+                <Button type="primary" href={latest.url || REPO} target="_blank" rel="noreferrer">
+                  {t('about.update.release')}
+                </Button>
+              </div>
+            )}
+            {update.status === 'error' && (
+              <div style={{ marginTop: token.paddingSM, color: token.colorTextSecondary, fontSize: token.fontSizeSM }}>
+                {/* The transport detail belongs to whoever is filing a bug, not to
+                    everyone who opens this page — hence the tooltip. */}
+                <Tooltip title={update.message}>
+                  <span style={{ borderBottom: `1px dashed ${token.colorBorder}` }}>
+                    {t('about.update.errorHint')}
+                  </span>
+                </Tooltip>
+              </div>
+            )}
+          </Panel>
+
+          <Panel title={t('about.section.links')}>
+            <div className="pm-about-links">
+              <LinkRow
+                href={REPO}
+                icon={<GithubOutlined />}
+                title={t('about.link.repo')}
+                hint={t('about.link.repoHint')}
+              />
+              <LinkRow
+                href={`${REPO}/releases`}
+                icon={<TagOutlined />}
+                title={t('about.link.releases')}
+                hint={t('about.link.releasesHint')}
+              />
+              <LinkRow
+                href={`${REPO}/issues`}
+                icon={<BugOutlined />}
+                title={t('about.link.issues')}
+                hint={t('about.link.issuesHint')}
+              />
+            </div>
+          </Panel>
+        </div>
+
+        <div
+          style={{
+            marginTop: token.paddingLG,
+            paddingTop: token.padding,
+            borderTop: `1px solid ${token.colorSplit}`,
+            color: token.colorTextTertiary,
+            fontSize: token.fontSizeSM,
+            textAlign: 'center',
+          }}
+        >
+          {t('about.footer')}
+        </div>
+      </div>
     </div>
   )
 }
