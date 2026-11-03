@@ -54,6 +54,8 @@ export const E = {
   marketBadName: 'market.badName',
   /** Another catalog already uses this name. */
   marketDuplicateName: 'market.duplicateName',
+  /** The catalog address did not answer with a plugin list. */
+  marketUnreachable: 'market.unreachable',
   marketEntryNotFound: 'market.entryNotFound',
   // registry (the configured npm registry a lookup / install reads from)
   registryBadUrl: 'registry.badUrl',

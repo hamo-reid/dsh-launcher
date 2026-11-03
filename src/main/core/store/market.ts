@@ -161,9 +161,9 @@ function hostOf(url: string): string {
 /** Add or update one catalog. Returns false when the input cannot be saved:
  * the URL must be http(s), the name non-empty, and names are unique
  * case-insensitively because the picker shows names. */
-export type SaveCatalogResult = 'ok' | 'badUrl' | 'badName' | 'duplicateName'
+export type SaveCatalogResult = 'ok' | 'badUrl' | 'badName' | 'duplicateName' | 'unreachable'
 
-export function saveMarketCatalog(input: { id?: string; name: string; url: string }): SaveCatalogResult {
+export async function saveMarketCatalog(input: { id?: string; name: string; url: string }): Promise<SaveCatalogResult> {
   const url = input.url.trim()
   const name = input.name.trim()
   if (!isHttpUrl(url)) return 'badUrl'
@@ -172,6 +172,21 @@ export function saveMarketCatalog(input: { id?: string; name: string; url: strin
   const id = input.id !== undefined && input.id !== '' ? input.id : 'market-' + String(Date.now())
   const clash = list.some(c => c.id !== id && c.name.toLowerCase() === name.toLowerCase())
   if (clash) return 'duplicateName'
+  // Fetch it once before saving. A web page URL and a raw file URL look alike in
+  // a text box and behave completely differently - CNB answers 400 for the page -
+  // so the mistake has to be caught here, not at the first refresh.
+  try {
+    const token = marketCatalogs().find(c => c.id === input.id)?.tokenEnc
+    const probe = await fetch(url, {
+      headers: token !== undefined ? { authorization: 'Bearer ' + String(codec.decode(token)) } : {},
+      signal: AbortSignal.timeout(8000),
+    })
+    if (!probe.ok) return 'unreachable'
+    const body = await probe.json() as { plugins?: unknown }
+    if (!Array.isArray(body.plugins)) return 'unreachable'
+  } catch {
+    return 'unreachable'
+  }
   updateSettings((draft) => {
     const entry = { id, name, url, ...(draft.marketCatalogs?.find(c => c.id === id)?.tokenEnc !== undefined
       ? { tokenEnc: draft.marketCatalogs?.find(c => c.id === id)?.tokenEnc }

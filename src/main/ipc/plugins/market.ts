@@ -85,9 +85,9 @@ export function registerMarketIpc(): void {
   })
 
   /** Add or rename a catalog; returns the new list. */
-  handle('market:saveCatalog', (_event, input: { id?: string; name: string; url: string }): IpcResult<MarketSourceState> => {
+  handle('market:saveCatalog', async (_event, input: { id?: string; name: string; url: string }): Promise<IpcResult<MarketSourceState>> => {
     try {
-      const saved = saveMarketCatalog({
+      const saved = await saveMarketCatalog({
         ...(typeof input?.id === 'string' ? { id: input.id } : {}),
         name: typeof input?.name === 'string' ? input.name : '',
         url: typeof input?.url === 'string' ? input.url : '',
@@ -95,6 +95,7 @@ export function registerMarketIpc(): void {
       if (saved === 'badUrl') return fail(E.marketBadUrl)
       if (saved === 'badName') return fail(E.marketBadName)
       if (saved === 'duplicateName') return fail(E.marketDuplicateName)
+      if (saved === 'unreachable') return fail(E.marketUnreachable)
       return { ok: true, value: marketSourceState() }
     } catch (error) {
       return failFromError(error)
