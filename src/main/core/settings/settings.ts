@@ -299,6 +299,9 @@ export function exportSettings(): string {
   delete app.marketTokenEnc
   // Registry tokens live one per entry; a backup is a file that gets emailed
   // around, so the entries travel without them.
+  if (app.marketCatalogs !== undefined) {
+    app.marketCatalogs = app.marketCatalogs.map(({ tokenEnc: _dropped, ...entry }) => entry)
+  }
   if (app.registries !== undefined) {
     app.registries = app.registries.map(({ tokenEnc: _dropped, ...entry }) => entry)
   }

@@ -34,6 +34,21 @@ export interface RegistryEntryRecord {
   tokenEnc?: string
 }
 
+/** One user-configured market catalog (a `plugins.json` somewhere).
+ *
+ * The public catalog is NOT in this list: it is built in, always available and
+ * not editable, so the list only ever holds catalogs the user added. */
+export interface MarketCatalogRecord {
+  /** Stable identity. The token hangs off this, so it survives a URL edit. */
+  id: string
+  /** What the market's picker shows. Unique, case-insensitively. */
+  name: string
+  /** The `plugins.json` address. */
+  url: string
+  /** Token for this catalog, encrypted at rest. A secret: stripped from exports. */
+  tokenEnc?: string
+}
+
 /** The merged settings shape callers see (a union of the three stored rows). */
 export interface AppSettings {  /** Single launcher data root. When set, the three launcher-owned directories
    * derive from it — `<dataRoot>/plugins`, `<dataRoot>/skill-library`,
@@ -67,6 +82,11 @@ export interface AppSettings {  /** Single launcher data root. When set, the thr
   onboarded?: boolean
   /** Which origin the community market loads its catalog from (`'official'`
    * = the canonical `plugins.json`; `'custom'` = a user-supplied mirror URL). */
+  /** The market catalogs this machine knows about. The public one is implicit. */
+  marketCatalogs?: MarketCatalogRecord[]
+  /** Which catalog the market shows. Absent = the public one. */
+  marketActiveId?: string
+  /** @deprecated Replaced by `marketCatalogs` in the v5 -> v6 migration. */
   marketSource?: MarketSource
   /** Custom market catalog URL, used when `marketSource === 'custom'`. */
   marketUrl?: string
@@ -117,7 +137,7 @@ export interface AppSettings {  /** Single launcher data root. When set, the thr
 /** The `prefs` row: user preferences (no registry / no per-profile config). */
 export type PrefsSettings = Pick<AppSettings,
   'dataRoot' | 'pluginDir' | 'dshVersionDir' | 'uiLanguage' | 'closeToTray' | 'askOnClose' |
-  'nodePreference' | 'onboarded' | 'marketSource' | 'marketUrl' | 'marketTokenEnc' | 'registries' |
+  'nodePreference' | 'onboarded' | 'marketCatalogs' | 'marketActiveId' | 'marketSource' | 'marketUrl' | 'marketTokenEnc' | 'registries' |
   'registryUrl' | 'registryScope' | 'registryTokenEnc' | 'githubTokenEnc' |
   'mcpSecrets' | 'mcpLibrary' | 'devPlugins'>
 /** The `dsh` row: the registered dsh installs. */
@@ -126,7 +146,7 @@ export type DshSettings = Pick<AppSettings, 'dshes'>
 export type LaunchSettings = Pick<AppSettings, 'launchOptions' | 'runModes'>
 
 /** Current on-disk schema version. Bump when a migration is added. */
-export const CURRENT_SCHEMA_VERSION = 5
+export const CURRENT_SCHEMA_VERSION = 6
 
 type Migration = (s: AppSettings) => AppSettings
 /** Ordered migrations keyed by the version they upgrade FROM (`v → v+1`).
@@ -177,6 +197,25 @@ const MIGRATIONS: Record<number, Migration> = {
       }),
     }
   },
+  5: (s) => {
+    // One custom catalog became a named list. The single URL keeps its token and
+    // becomes the active entry, so an upgrade does not lose a credential or start
+    // showing a different catalog.
+    const url = typeof s.marketUrl === 'string' ? s.marketUrl.trim() : ''
+    const { marketSource: _source, marketUrl: _url, marketTokenEnc: _token, ...rest } = s
+    if (url === '') return rest
+    const id = 'market-1'
+    return {
+      ...rest,
+      marketCatalogs: [{
+        id,
+        name: hostLabel(url),
+        url,
+        ...(typeof s.marketTokenEnc === 'string' && s.marketTokenEnc !== '' ? { tokenEnc: s.marketTokenEnc } : {}),
+      }],
+      marketActiveId: id,
+    }
+  },
 }
 
 /** A URL's host, for the label a migrated entry gets. Falls back to the raw text
@@ -199,6 +238,8 @@ export function splitPrefs(s: AppSettings): PrefsSettings {
     ...(s.askOnClose !== undefined ? { askOnClose: s.askOnClose } : {}),
     ...(s.nodePreference !== undefined ? { nodePreference: s.nodePreference } : {}),
     ...(s.onboarded !== undefined ? { onboarded: s.onboarded } : {}),
+    ...(s.marketCatalogs !== undefined ? { marketCatalogs: s.marketCatalogs } : {}),
+    ...(s.marketActiveId !== undefined ? { marketActiveId: s.marketActiveId } : {}),
     ...(s.marketSource !== undefined ? { marketSource: s.marketSource } : {}),
     ...(s.marketUrl !== undefined ? { marketUrl: s.marketUrl } : {}),
     ...(s.marketTokenEnc !== undefined ? { marketTokenEnc: s.marketTokenEnc } : {}),
@@ -322,6 +363,32 @@ function readRegistries(raw: unknown[]): RegistryEntryRecord[] {
   return out
 }
 
+/** Normalize the market catalog list: an entry needs an id and a URL, names are
+ * unique case-insensitively (the picker shows names, so two alike are one too
+ * many). An unusable entry is dropped rather than shown as a broken row. */
+function readMarketCatalogs(raw: unknown[]): MarketCatalogRecord[] {
+  const out: MarketCatalogRecord[] = []
+  const ids = new Set<string>()
+  const names = new Set<string>()
+  for (const item of raw) {
+    if (!isRecord(item)) continue
+    const id = typeof item.id === 'string' ? item.id.trim() : ''
+    const url = typeof item.url === 'string' ? item.url.trim() : ''
+    if (id === '' || url === '' || ids.has(id)) continue
+    const name = typeof item.name === 'string' && item.name.trim() !== '' ? item.name.trim() : hostLabel(url)
+    if (names.has(name.toLowerCase())) continue
+    ids.add(id)
+    names.add(name.toLowerCase())
+    out.push({
+      id,
+      name,
+      url,
+      ...(typeof item.tokenEnc === 'string' && item.tokenEnc !== '' ? { tokenEnc: item.tokenEnc } : {}),
+    })
+  }
+  return out
+}
+
 /** Coerce an arbitrary parsed value into a valid `AppSettings`, dropping bad
  * fields. Defends against hand-edited / partially-corrupt input. */
 
@@ -350,6 +417,12 @@ export function normalizeSettings(raw: unknown): AppSettings {
   if (raw.marketSource === 'official' || raw.marketSource === 'custom') out.marketSource = raw.marketSource
   const marketTokenEnc = nonEmptyString(raw.marketTokenEnc)
   if (marketTokenEnc !== undefined) out.marketTokenEnc = marketTokenEnc
+  if (Array.isArray(raw.marketCatalogs)) {
+    const catalogs = readMarketCatalogs(raw.marketCatalogs)
+    if (catalogs.length > 0) out.marketCatalogs = catalogs
+  }
+  const marketActiveId = nonEmptyString(raw.marketActiveId)
+  if (marketActiveId !== undefined) out.marketActiveId = marketActiveId
   const marketUrl = nonEmptyString(raw.marketUrl)
   if (marketUrl !== undefined) out.marketUrl = marketUrl
   const registryUrl = nonEmptyString(raw.registryUrl)
