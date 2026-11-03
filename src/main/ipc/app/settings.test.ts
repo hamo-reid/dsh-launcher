@@ -69,7 +69,7 @@ describe('settings:registries', () => {
   it('accepts a mirror URL normalized, deriving a label from the host', async () => {
     reset()
     const r = await call<{ id: string; label: string; url: string }[]>('settings:saveRegistry',
-      { label: '', url: 'https://mirror.example/npm/', scope: '' })
+      { label: '', url: 'https://mirror.example/npm/', scope: '@mirror' })
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.value).toHaveLength(1)
@@ -94,21 +94,25 @@ describe('settings:registries', () => {
     expect(r.code).toBe('registry.badScope')
   })
 
-  it('allows several sources, but only one of them unscoped', async () => {
-    // Routing needs exactly one answer for a package no scope claims; two
-    // unscoped entries would be two answers, so the second is refused.
+  it('refuses an entry with no scope', async () => {
+    // Without a scope the entry would answer for every package no other scope
+    // claims — the ambiguity this model removed. A source always owns a set.
     reset()
-    const scoped = await call('settings:saveRegistry',
+    const r = await call('settings:saveRegistry', { label: 'mirror', url: 'https://mirror.example', scope: '' })
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.code).toBe('registry.scopeRequired')
+  })
+
+  it('allows several sources, each owning a different scope', async () => {
+    reset()
+    const first = await call('settings:saveRegistry',
       { label: 'team', url: 'https://npm.internal.example/team', scope: '@team' })
-    expect(scoped.ok).toBe(true)
-    const fallback = await call('settings:saveRegistry',
-      { label: 'mirror', url: 'https://mirror.example', scope: '' })
-    expect(fallback.ok).toBe(true)
+    expect(first.ok).toBe(true)
     const second = await call('settings:saveRegistry',
-      { label: 'mirror2', url: 'https://mirror2.example', scope: '' })
-    expect(second.ok).toBe(false)
-    if (second.ok) return
-    expect(second.code).toBe('registry.duplicateFallback')
+      { label: 'other', url: 'https://npm.other.example', scope: '@other' })
+    expect(second.ok).toBe(true)
+    if (second.ok) expect(second.value).toHaveLength(2)
   })
 
   it('refuses a second entry claiming the same scope', async () => {

@@ -65,9 +65,11 @@ describe('applyRegistryConfig', () => {
     // that the user's own npm configuration is not read while entries exist —
     // stated in the module doc and in the settings copy.
     const dir = mkdtempSync(join(root, 'pub-'))
-    patchSettings({ registries: [{ id: 'default', label: 'internal', url: PRIVATE }] })
+    patchSettings({ registries: [{ id: 'default', label: 'internal', url: PRIVATE, scope: '@hamo-studio' }] })
     expect(applyRegistryConfig(dir)).toEqual({ NPM_CONFIG_USERCONFIG: join(dir, REGISTRY_NPMRC) })
-    expect(readFileSync(join(dir, REGISTRY_NPMRC), 'utf8')).toBe(`registry=${PRIVATE}\n`)
+    expect(readFileSync(join(dir, REGISTRY_NPMRC), 'utf8')).toBe(
+      `registry=https://registry.npmjs.org\n@hamo-studio:registry=${PRIVATE}\n`,
+    )
   })
 
   it('answers nothing when no registry is configured at all', () => {
@@ -79,7 +81,7 @@ describe('applyRegistryConfig', () => {
   it('is idempotent, and rewrites when the settings move on', () => {
     const dir = mkdtempSync(join(root, 'churn-'))
     const file = join(dir, REGISTRY_NPMRC)
-    patchSettings({ registries: [{ id: 'default', label: 'internal', url: PRIVATE }] })
+    patchSettings({ registries: [{ id: 'default', label: 'internal', url: PRIVATE, scope: '@hamo-studio' }] })
     setRegistryToken('default', 'one')
     applyRegistryConfig(dir)
     const first = readFileSync(file, 'utf8')
@@ -99,7 +101,7 @@ describe('applyRegistryConfig', () => {
     // run with whatever npm configuration the machine already has.
     const dir = join(mkdtempSync(join(root, 'blocked-')), 'not-a-dir')
     writeFileSync(dir, 'x', 'utf8')
-    patchSettings({ registries: [{ id: 'default', label: 'internal', url: PRIVATE }] })
+    patchSettings({ registries: [{ id: 'default', label: 'internal', url: PRIVATE, scope: '@hamo-studio' }] })
     setRegistryToken('default', 'secret-token')
     expect(applyRegistryConfig(dir)).toEqual({})
   })
@@ -107,7 +109,7 @@ describe('applyRegistryConfig', () => {
   it('does not nest the file inside a directory that already exists empty', () => {
     const dir = join(mkdtempSync(join(root, 'existing-')), 'nested')
     mkdirSync(dir)
-    patchSettings({ registries: [{ id: 'default', label: 'internal', url: PRIVATE }] })
+    patchSettings({ registries: [{ id: 'default', label: 'internal', url: PRIVATE, scope: '@hamo-studio' }] })
     setRegistryToken('default', 'secret-token')
     applyRegistryConfig(dir)
     expect(existsSync(join(dir, REGISTRY_NPMRC))).toBe(true)

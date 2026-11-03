@@ -10,7 +10,7 @@ import type { NpmSearchHit, PackageVersionInfo, RegistryProbe, RegistrySource } 
 import { throwE } from '../shared/errors.ts'
 import { logger } from '../shared/logger.ts'
 import { registryAuthHeader, registryTokenOf } from './registry-auth.ts'
-import { defaultRegistry, fallbackRegistry, registryById, registryForSource, SEARCH_REGISTRY } from './registry.ts'
+import { PUBLIC_REGISTRY, registryById, registryForSource, SEARCH_REGISTRY } from './registry.ts'
 
 /**
  * Fetch from the configured registry, carrying the credential when the URL
@@ -123,12 +123,12 @@ export async function fetchPackageVersions(name: string, source: RegistrySource 
  * verdict. Nothing is thrown — a wrong address is a result, not an exception.
  */
 export async function probeRegistry(id?: string): Promise<RegistryProbe> {
-  // A named entry is what the settings editor tests; without one this asks the
-  // registry that answers for unclaimed packages, which is what an operator
-  // means when they hit "test" with no row in mind.
-  const entry = id !== undefined ? registryById(id) : fallbackRegistry()
+  // A named entry is what the settings editor tests. Without one this asks the
+  // public registry — where every package no scope claims comes from, which is the
+  // only "default" left now that a fallback entry no longer exists.
+  const entry = id !== undefined ? registryById(id) : undefined
   if (id !== undefined && entry === undefined) throwE('registry.notConfigured')
-  const registry = entry?.url ?? defaultRegistry()
+  const registry = entry?.url ?? PUBLIC_REGISTRY
   const hasToken = entry !== undefined ? registryTokenOf(entry) !== undefined : false
   try {
     const who = await fetchFromRegistry(`${registry}/-/whoami`)

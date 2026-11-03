@@ -454,7 +454,10 @@ export default function SettingsSection() {
                             <span style={{ fontWeight: 500 }}>{entry.label}</span>
                             {entry.scope !== undefined
                               ? <Tag color="blue">{entry.scope}</Tag>
-                              : <Tag>{t('settings.registry.fallbackTag')}</Tag>}
+                              // An entry saved before a scope was required. It owns
+                              // nothing, so it does nothing — said here, because a
+                              // silent non-participating row is the worst outcome.
+                              : <Tag color="orange">{t('settings.registry.scopeMissing')}</Tag>}
                             {entry.hasToken && (
                               <Tag color={entry.encryption === 'safe' ? 'green' : 'orange'}>
                                 {entry.encryption === 'safe'
@@ -524,7 +527,7 @@ export default function SettingsSection() {
                         <div style={{ ...muted, marginTop: 4 }}>{t('settings.registry.token.hint')}</div>
                       </div>
                       <Space>
-                        <Button type="primary" loading={registryBusy} disabled={form.url.trim() === ''} onClick={() => void submitRegistry()}>
+                        <Button type="primary" loading={registryBusy} disabled={form.url.trim() === '' || form.scope.trim() === ''} onClick={() => void submitRegistry()}>
                           {t('common.save')}
                         </Button>
                         <Button onClick={() => setForm(null)}>{t('common.cancel')}</Button>

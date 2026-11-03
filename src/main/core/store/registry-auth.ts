@@ -92,7 +92,11 @@ export function setRegistryToken(id: string, value: string | null): RegistryEntr
  * each naming its own token variable when it has a token. Invalid URLs are
  * already filtered out by `registries()`, so nothing here can build a bad file. */
 export function privateSources(): PrivateSource[] {
-  return registries().map((entry) => {
+  // Only scoped entries: a source with no scope owns nothing, so it must not
+  // appear in pnpm's configuration either — pnpm and the launcher have to agree.
+  return registries()
+    .filter(entry => normalizeScope(entry.scope) !== undefined)
+    .map((entry) => {
     const scope = normalizeScope(entry.scope)
     return {
       registry: entry.url,
@@ -104,10 +108,12 @@ export function privateSources(): PrivateSource[] {
   })
 }
 
-/** Every token as environment entries, for the pnpm child. */
+/** Every token as environment entries, for the pnpm child. Unscoped entries are
+ * left out for the same reason they are left out of the file. */
 export function registryTokenEnv(): Record<string, string> {
   const env: Record<string, string> = {}
   for (const entry of registries()) {
+    if (normalizeScope(entry.scope) === undefined) continue
     const token = registryTokenOf(entry)
     if (token !== undefined) env[registryTokenEnvName(entry.id)] = token
   }

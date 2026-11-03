@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openDatabase, patchSettings } from '../settings/settings.ts'
 import {
-  PUBLIC_REGISTRY, defaultRegistry, fallbackRegistry, registries, registryFor, registryForSource,
+  PUBLIC_REGISTRY, registries, registryFor, registryForSource,
   registrySignature, SEARCH_REGISTRY,
 } from './registry.ts'
 
@@ -57,11 +57,13 @@ describe('registryFor', () => {
     expect(withRegistries()).toBe(PUBLIC_REGISTRY)
   })
 
-  it('sends everything to an unscoped entry — the internal-mirror reading', () => {
-    expect(withRegistries({ id: 'm', label: 'mirror', url: MIRROR })).toBe(MIRROR)
-    patchSettings({ registries: [{ id: 'm', label: 'mirror', url: MIRROR }] })
-    expect(registryFor('lodash')).toBe(MIRROR)
-    expect(registryFor('@deepseek-ai/dsh')).toBe(MIRROR)
+  it('ignores an entry with no scope instead of letting it claim everything', () => {
+    // A source owns a set of packages. One that names none would answer for every
+    // package no other scope claims — the ambiguity this model removed — so it
+    // resolves nothing and the public registry keeps those packages.
+    expect(withRegistries({ id: 'm', label: 'mirror', url: MIRROR })).toBe(PUBLIC_REGISTRY)
+    expect(registryFor('lodash')).toBe(PUBLIC_REGISTRY)
+    expect(registryFor('@deepseek-ai/dsh')).toBe(PUBLIC_REGISTRY)
   })
 
   it('keeps a scoped entry to its own scope', () => {
@@ -71,13 +73,14 @@ describe('registryFor', () => {
     expect(registryFor('lodash')).toBe(PUBLIC_REGISTRY)
   })
 
-  it('falls back to the unscoped entry for names no scope claims', () => {
+  it('leaves names no scope claims on the public registry', () => {
     withRegistries(
       { id: 'p', label: 'private', url: PRIVATE, scope: '@drahamo' },
-      { id: 'm', label: 'mirror', url: MIRROR },
+      { id: 'm', label: 'other', url: MIRROR, scope: '@other' },
     )
     expect(registryFor('@drahamo/x')).toBe(PRIVATE)
-    expect(registryFor('lodash')).toBe(MIRROR)
+    expect(registryFor('@other/y')).toBe(MIRROR)
+    expect(registryFor('lodash')).toBe(PUBLIC_REGISTRY)
   })
 
   it('matches the scope as a whole segment, never as a prefix of a name', () => {
@@ -91,21 +94,17 @@ describe('registryFor', () => {
 
   it('does not care about the order entries were added in', () => {
     withRegistries(
-      { id: 'm', label: 'mirror', url: MIRROR },
+      { id: 'm', label: 'other', url: MIRROR, scope: '@other' },
       { id: 'p', label: 'private', url: PRIVATE, scope: '@drahamo' },
     )
     expect(registryFor('@drahamo/x')).toBe(PRIVATE)
-    const reversed = withRegistries(
-      { id: 'p', label: 'private', url: PRIVATE, scope: '@drahamo' },
-      { id: 'm', label: 'mirror', url: MIRROR },
-    )
-    expect(reversed).toBe(MIRROR)
+    expect(registryFor('@other/y')).toBe(MIRROR)
   })
 })
 
 describe('registryForSource', () => {
   it('honours an explicit public choice whatever is configured', () => {
-    withRegistries({ id: 'm', label: 'mirror', url: MIRROR })
+    withRegistries({ id: 'm', label: 'mirror', url: MIRROR, scope: '@mirror' })
     expect(registryForSource('lodash', 'public')).toBe(PUBLIC_REGISTRY)
   })
 
@@ -119,7 +118,7 @@ describe('registryForSource', () => {
   it('refuses a choice that names no configured entry', () => {
     // Falling back to public would answer from a place the user did not choose,
     // and the mismatch would only surface at install time.
-    withRegistries({ id: 'm', label: 'mirror', url: MIRROR })
+    withRegistries({ id: 'm', label: 'mirror', url: MIRROR, scope: '@mirror' })
     expect(() => registryForSource('lodash', 'reg:gone')).toThrow()
     try {
       registryForSource('lodash', 'reg:gone')
@@ -130,36 +129,34 @@ describe('registryForSource', () => {
   })
 
   it('keeps `auto` on the routing', () => {
-    withRegistries({ id: 'm', label: 'mirror', url: MIRROR })
-    expect(registryForSource('lodash')).toBe(MIRROR)
-    expect(registryForSource('lodash', 'auto')).toBe(MIRROR)
+    withRegistries({ id: 'm', label: 'mirror', url: MIRROR, scope: '@mirror' })
+    expect(registryForSource('@mirror/x')).toBe(MIRROR)
+    expect(registryForSource('@mirror/x', 'auto')).toBe(MIRROR)
+    expect(registryForSource('lodash', 'auto')).toBe(PUBLIC_REGISTRY)
   })
 })
 
 describe('defaults and discovery', () => {
-  it('answers for unclaimed packages with the fallback entry, else public', () => {
-    withRegistries({ id: 'm', label: 'mirror', url: MIRROR })
-    expect(defaultRegistry()).toBe(MIRROR)
-    expect(fallbackRegistry()?.id).toBe('m')
+  it('keeps every package outside every scope on the public registry', () => {
     withRegistries({ id: 'p', label: 'private', url: PRIVATE, scope: '@drahamo' })
-    expect(defaultRegistry()).toBe(PUBLIC_REGISTRY)
-    expect(fallbackRegistry()).toBeUndefined()
+    expect(registryFor('@deepseek-ai/dsh')).toBe(PUBLIC_REGISTRY)
+    expect(registryFor('lodash')).toBe(PUBLIC_REGISTRY)
   })
 
   it('keeps search on the public catalogue whatever the table says', () => {
     // The table governs RESOLUTION (which versions exist, and where they are
     // installed from), never DISCOVERY. A private registry need not implement
     // `/-/v1/search`; routing a keyword there broke the download centre.
-    withRegistries({ id: 'm', label: 'mirror', url: MIRROR })
+    withRegistries({ id: 'm', label: 'mirror', url: MIRROR, scope: '@mirror' })
     expect(SEARCH_REGISTRY).toBe(PUBLIC_REGISTRY)
   })
 
   it('changes the routing signature whenever the table changes', () => {
     // A cached version list belongs to a host: adding, re-scoping or renaming an
     // entry changes what `latest` means for a whole set of packages.
-    withRegistries({ id: 'm', label: 'mirror', url: MIRROR })
-    const before = registrySignature()
     withRegistries({ id: 'm', label: 'mirror', url: MIRROR, scope: '@team' })
+    const before = registrySignature()
+    withRegistries({ id: 'm', label: 'mirror', url: MIRROR, scope: '@other' })
     expect(registrySignature()).not.toBe(before)
     expect(registrySignature()).toBe(registrySignature())
   })

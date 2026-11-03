@@ -51,7 +51,7 @@ const twoEntries = (): void => {
   patchSettings({
     registries: [
       { id: 'team', label: 'team', url: PRIVATE, scope: '@team' },
-      { id: 'mirror', label: 'mirror', url: OTHER },
+      { id: 'mirror', label: 'mirror', url: OTHER, scope: '@mirror' },
     ],
   })
 }
@@ -154,7 +154,7 @@ describe('privateSources and the pnpm environment', () => {
     setRegistryToken('team', 'secret-token')
     expect(privateSources()).toEqual([
       { registry: PRIVATE, scope: '@team', tokenEnv: registryTokenEnvName('team') },
-      { registry: OTHER },
+      { registry: OTHER, scope: '@mirror' },
     ])
   })
 

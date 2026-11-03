@@ -157,17 +157,18 @@ export function registerSettingsIpc(): void {
           : fail(E.registryBadScheme, { detail: rawUrl })
       }
       const rawScope = typeof input.scope === 'string' ? input.scope.trim() : ''
-      const scope = rawScope === '' ? undefined : normalizeScope(rawScope)
-      if (rawScope !== '' && scope === undefined) return fail(E.registryBadScope, { detail: rawScope })
+      // A scope is required, not optional. Without one the entry would answer for
+      // every package no other scope claims, which is exactly the ambiguity this
+      // model removed: a list of sources must not leave "which one answers" open.
+      if (rawScope === '') return fail(E.registryScopeRequired)
+      const scope = normalizeScope(rawScope)
+      if (scope === undefined) return fail(E.registryBadScope, { detail: rawScope })
 
       const list = [...(loadSettings().registries ?? [])]
       const id = typeof input.id === 'string' && input.id !== '' ? input.id : `reg-${randomUUID().slice(0, 8)}`
       const others = list.filter(entry => entry.id !== id)
 
-      if (scope === undefined && others.some(entry => entry.scope === undefined)) {
-        return fail(E.registryDuplicateFallback)
-      }
-      if (scope !== undefined && others.some(entry => entry.scope?.toLowerCase() === scope.toLowerCase())) {
+      if (others.some(entry => entry.scope?.toLowerCase() === scope.toLowerCase())) {
         return fail(E.registryDuplicateScope, { detail: scope })
       }
 
@@ -179,7 +180,7 @@ export function registerSettingsIpc(): void {
         id,
         label,
         url,
-        ...(scope !== undefined ? { scope } : {}),
+        scope,
         ...(existing?.tokenEnc !== undefined ? { tokenEnc: existing.tokenEnc } : {}),
       }
       const next = existing === undefined

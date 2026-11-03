@@ -91,10 +91,10 @@ describe('authKeyFor', () => {
 describe('buildNpmrc', () => {
   const opts = { defaultRegistry: 'https://registry.npmjs.org' }
 
-  it('sends everything to the private source when no scope is set', () => {
-    // The internal-mirror case: one registry that also proxies the public one.
-    const text = buildNpmrc([{ registry: PRIVATE }], opts)
-    expect(text).toBe(`registry=${PRIVATE}\n`)
+  it('never writes a source with no scope as the default', () => {
+    // `registry=` is the public default, always: a scope-less entry owns
+    // nothing, and writing it would install packages the launcher never routed.
+    expect(buildNpmrc([{ registry: PRIVATE }], opts)).toBe('registry=https://registry.npmjs.org\n')
   })
 
   it('redirects only the scope, and pins the default explicitly', () => {
@@ -174,17 +174,17 @@ describe('buildNpmrc with several registries', () => {
     )
   })
 
-  it('lets an unscoped entry become the default', () => {
+  it('always pins the public registry as the default', () => {
     const text = buildNpmrc([
-      { registry: PRIVATE },
       { registry: 'https://npm.other.example/registry', scope: '@other' },
     ], opts)
-    expect(text).toContain(`registry=${PRIVATE}`)
-    expect(text).toContain('@other:registry=https://npm.other.example/registry')
+    expect(text).toBe('registry=https://registry.npmjs.org\n@other:registry=https://npm.other.example/registry\n')
   })
 
-  it('refuses two unscoped entries instead of picking by line order', () => {
-    expect(buildNpmrc([{ registry: PRIVATE }, { registry: 'https://npm.other.example' }], opts)).toBeUndefined()
+  it('skips an entry with no scope instead of letting it take over every package', () => {
+    // `registry=` is the public default, always. A source without a scope owns no
+    // package, so writing it here would make pnpm disagree with the launcher.
+    expect(buildNpmrc([{ registry: PRIVATE }], opts)).toBe('registry=https://registry.npmjs.org\n')
   })
 
   it('gives each token its own variable and one always-auth', () => {

@@ -138,12 +138,14 @@ export default function PluginsDownloadView(p: Props): JSX.Element {
               aria-label={t('plugin.download.source.label')}
               options={[
                 { value: 'public', label: t('plugin.download.source.public') },
-                ...p.registries.map(entry => ({
-                  value: `reg:${entry.id}` as RegistrySource,
-                  label: entry.scope === undefined
-                    ? t('plugin.download.source.fallback', { label: entry.label })
-                    : t('plugin.download.source.scoped', { label: entry.label, scope: entry.scope }),
-                })),
+                // Only entries with a scope: one without owns no package, so
+                // offering it here would promise a lookup that cannot install.
+                ...p.registries
+                  .filter(entry => entry.scope !== undefined)
+                  .map(entry => ({
+                    value: `reg:${entry.id}` as RegistrySource,
+                    label: t('plugin.download.source.scoped', { label: entry.label, scope: entry.scope }),
+                  })),
               ]}
             />
           )}

@@ -48,10 +48,10 @@ export const E = {
   registryBadScheme: 'registry.badScheme',
   registryBadScope: 'registry.badScope',
   registryNotConfigured: 'registry.notConfigured',
+  /** A registry was saved without a scope, which routing cannot use. */
+  registryScopeRequired: 'registry.scopeRequired',
   /** Two entries claiming the same package scope. */
   registryDuplicateScope: 'registry.duplicateScope',
-  /** Two entries answering for unclaimed packages — only one may. */
-  registryDuplicateFallback: 'registry.duplicateFallback',
   registryEntryMissing: 'registry.entryMissing',
   // extensions (MCP rows)
   extBadServerName: 'ext.badServerName',

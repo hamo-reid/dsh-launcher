@@ -146,13 +146,11 @@ export function buildNpmrc(
     parsed.push({ registry, ...(scope !== undefined ? { scope } : {}), ...(tokenEnv !== '' ? { tokenEnv } : {}) })
   }
 
-  const unscoped = parsed.filter(source => source.scope === undefined)
-  // Two unscoped entries answer the same question differently. The settings
-  // writer refuses that; refusing here keeps a hand-edited row from producing a
-  // file whose meaning depends on line order.
-  if (unscoped.length > 1) return undefined
-
-  const lines = [`registry=${unscoped[0]?.registry ?? opts.defaultRegistry}`]
+  // A source without a scope is not a registry npm can use: `registry=` is the
+  // default, and it is always the public one. The settings writer requires a scope
+  // for exactly this reason, and skipping here keeps a hand-edited row from
+  // silently taking over every package.
+  const lines = [`registry=${opts.defaultRegistry}`]
   for (const source of parsed) {
     if (source.scope !== undefined) lines.push(`${source.scope}:registry=${source.registry}`)
   }

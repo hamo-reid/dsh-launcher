@@ -64,10 +64,6 @@ export function registryEntries(): RegistryEntryRecord[] {
 /** Last-unusable URLs warned about, so a per-package path warns once. */
 const warnedUrls = new Map<string, string>()
 
-/** The entry that answers for everything unclaimed, if one is configured. */
-export function fallbackRegistry(): RegistryEntryRecord | undefined {
-  return registries().find(entry => entry.scope === undefined)
-}
 
 /** One entry by id, or `undefined`. */
 export function registryById(id: string): RegistryEntryRecord | undefined {
@@ -82,15 +78,18 @@ export function registryEntryFor(packageName: string): RegistryEntryRecord | und
     .filter((entry): entry is RegistryEntryRecord & { scope: string } => entry.scope !== undefined)
     .filter(entry => matchesScope(packageName, entry.scope))
     .sort((a, b) => b.scope.length - a.scope.length)
-  return scoped[0] ?? fallbackRegistry()
+  return scoped[0]
 }
 
 /**
- * The registry a package resolves from: the longest matching scope wins, then the
- * unscoped fallback, then the public registry.
+ * The registry a package resolves from: the entry whose scope matches, else the
+ * public registry.
  *
- * Longest-match rather than first-match so that overlapping scopes (`@team` and
- * `@team/sub`) resolve the way a person would read them.
+ * There is deliberately no "fallback" entry. An entry with no scope would answer
+ * for every package no other scope claims, which made two configured sources a
+ * question with two answers — and a person cannot tell from a list which one a
+ * given package will use. A scope is required instead: a source is always about a
+ * set of packages, and everything outside every set comes from npm.
  */
 export function registryFor(packageName: string): string {
   return registryEntryFor(packageName)?.url ?? PUBLIC_REGISTRY
@@ -119,14 +118,6 @@ export function registryForSource(packageName: string, source: RegistrySource = 
   return registryFor(packageName)
 }
 
-/**
- * The registry that answers when no package name is in hand — the unscoped entry
- * if there is one, else the public registry. Used by the settings "test" action
- * when it is not testing a specific entry.
- */
-export function defaultRegistry(): string {
-  return fallbackRegistry()?.url ?? PUBLIC_REGISTRY
-}
 
 /**
  * The registry a SEARCH runs against: always the public catalogue.
