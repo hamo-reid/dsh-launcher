@@ -239,12 +239,6 @@ export default function SettingsSection() {
     if (r.ok) setMarket({ activeId: r.value.activeId ?? null, catalogs: r.value.catalogs ?? [] })
   }
 
-  const activateCatalog = async (id: string | null): Promise<void> => {
-    const r = await window.api.market.setActive(id)
-    if (!r.ok) { void message.error(apiErrorText(r)); return }
-    setMarket({ activeId: r.value.activeId ?? null, catalogs: r.value.catalogs ?? [] })
-  }
-
   const submitCatalog = async (): Promise<void> => {
     if (catalogBusy) return
     setCatalogBusy(true)
@@ -478,9 +472,12 @@ export default function SettingsSection() {
               <div style={{ maxWidth: 760 }}>
                 <div style={{ ...muted, margin: '4px 0 12px' }}>{t('settings.market.desc')}</div>
                 <Space orientation="vertical" size={8} style={{ width: '100%' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Radio checked={market.activeId === null} onChange={() => void activateCatalog(null)} />
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
+                    border: `1px solid ${token.colorBorder}`, borderRadius: token.borderRadiusLG,
+                  }}>
                     <span style={{ fontWeight: 500 }}>{t('plugin.market.source.official')}</span>
+                    <Tag>{t('settings.market.builtin')}</Tag>
                   </div>
                   {market.catalogs.map(c => (
                     <div
@@ -490,7 +487,6 @@ export default function SettingsSection() {
                         border: `1px solid ${token.colorBorder}`, borderRadius: token.borderRadiusLG,
                       }}
                     >
-                      <Radio checked={market.activeId === c.id} onChange={() => void activateCatalog(c.id)} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                           <span style={{ fontWeight: 500 }}>{c.name}</span>

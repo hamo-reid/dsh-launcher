@@ -966,6 +966,7 @@ const zh = {
     'settings.nav.storage': '存储与备份',
     'settings.section.market': '市场目录',
     'settings.market.desc': '市场从这些地址拉插件列表。公共目录始终可用，不需要配置；私有目录才需要令牌。',
+    'settings.market.builtin': '内置',
     'settings.market.add': '添加目录',
     'settings.market.name': '名称，例如 Hamo 私有目录',
     'settings.market.token': '访问令牌（私有目录才需要）',

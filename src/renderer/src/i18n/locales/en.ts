@@ -968,6 +968,7 @@ const en: typeof zh = {
     'settings.nav.storage': 'Storage & backup',
     'settings.section.market': 'Market catalogs',
     'settings.market.desc': 'The market reads its plugin list from these addresses. The public catalog is always available and needs no configuration; a private one needs a token.',
+    'settings.market.builtin': 'Built in',
     'settings.market.add': 'Add catalog',
     'settings.market.name': 'Name, e.g. Hamo private catalog',
     'settings.market.token': 'Access token (private catalogs only)',
