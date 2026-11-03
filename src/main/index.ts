@@ -28,8 +28,10 @@ import {
 } from './core/settings/settings.ts'
 import { configureAppState, pluginDir } from './core/profile/appState.ts'
 import { migrateLaunchConfigKeys } from './core/profile/launch-config.ts'
-import { configurePnpmStore } from './core/dsh/pnpm.ts'
+import { configurePnpmRegistryEnv, configurePnpmStore } from './core/dsh/pnpm.ts'
 import { repairArchiveLinks } from './core/store/plugins.ts'
+import { applyRegistryConfig } from './core/store/registry-config.ts'
+import { setRegistryTokenCipher } from './core/store/registry-auth.ts'
 import { initGithubAuth, setTokenCipher } from './core/github/auth.ts'
 import { setMcpSecretCipher } from './core/mcp/secrets.ts'
 import { setSkillTrash } from './core/skills/skills.ts'
@@ -368,6 +370,9 @@ app.whenReady().then(async () => {
   }
   setTokenCipher(secretCipher)
   setMcpSecretCipher(secretCipher)
+  // The private registry's token rides the same cipher: the value only ever
+  // leaves the main process as an HTTP header or a child-process variable.
+  setRegistryTokenCipher(secretCipher)
   // Skill deletion moves the entry to the OS recycle bin (reversible there).
   setSkillTrash(path => shell.trashItem(path))
   // The launcher-global skill library takes its location from the data root
@@ -386,6 +391,12 @@ app.whenReady().then(async () => {
   // library's store (`<pluginDir>/.pnpm-store`), so pnpm never falls back to
   // creating an unmanaged `<drive>\.pnpm-store` at a drive root.
   configurePnpmStore(pluginDir)
+  // A private npm registry needs both halves: the launcher's own version lookups
+  // carry the token as a header (`store/npm.ts`), and pnpm gets a generated
+  // `.npmrc` naming the variable that holds it. Nothing is written unless a token
+  // is configured, so a machine that never used the feature keeps reading its own
+  // npm configuration exactly as before.
+  configurePnpmRegistryEnv(() => applyRegistryConfig(app.getPath('userData')))
 
   // Rewire any pre-existing broken archive top-level links (installed before the
   // install-time re-link existed) so previously-downloaded plugins surface again.

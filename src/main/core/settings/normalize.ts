@@ -55,6 +55,21 @@ export interface AppSettings {
    * the user's `.npmrc` until the `project` split lands; an unset value means the
    * public registry, which is what every call site did before. */
   registryUrl?: string
+  /** The package scope that belongs to `registryUrl` (`@myorg`), when that
+   * registry holds only your own packages.
+   *
+   * Unset means the configured registry answers for every package — the
+   * internal-mirror reading, and what every build before this field assumed.
+   * Set, it narrows the private registry to its own packages and leaves the rest
+   * on the public one, so a registry that does not proxy npmjs can still be
+   * used without breaking every other dependency. See `store/registry.ts`
+   * (`registryFor`) for the resolution order. */
+  registryScope?: string
+  /** Token for the private registry, encrypted at rest via the shared secret
+   * envelope (`settings/secret-at-rest.ts`). A secret: never exported, never
+   * logged, and never written into an `.npmrc` — that file names the environment
+   * variable the child process carries instead. */
+  registryTokenEnc?: string
   /** The user's GitHub token, encrypted at rest (see `core/github/auth.ts`).
    * A secret: never exported and never logged. */
   githubTokenEnc?: string
@@ -82,7 +97,8 @@ export interface AppSettings {
 /** The `prefs` row: user preferences (no registry / no per-profile config). */
 export type PrefsSettings = Pick<AppSettings,
   'dataRoot' | 'pluginDir' | 'dshVersionDir' | 'uiLanguage' | 'closeToTray' | 'askOnClose' |
-  'nodePreference' | 'onboarded' | 'marketSource' | 'marketUrl' | 'registryUrl' | 'githubTokenEnc' |
+  'nodePreference' | 'onboarded' | 'marketSource' | 'marketUrl' | 'registryUrl' | 'registryScope' |
+  'registryTokenEnc' | 'githubTokenEnc' |
   'mcpSecrets' | 'mcpLibrary' | 'devPlugins'>
 /** The `dsh` row: the registered dsh installs. */
 export type DshSettings = Pick<AppSettings, 'dshes'>
@@ -98,7 +114,10 @@ type Migration = (s: AppSettings) => AppSettings
  * 1 → 2 adds the optional `dataRoot` field — purely additive, so there is no
  * step either; the bump exists so `importSettings` refuses a newer export
  * instead of silently dropping the root on an older build.
- * 2 → 3 adds the optional `registryUrl` — same reasoning, no data-shape step. */
+ * 2 → 3 adds the optional `registryUrl` — same reasoning, no data-shape step.
+ * `registryScope` / `registryTokenEnc` are additive in the same way and stay on
+ * v3: the token is machine-local (it is stripped from every export), so an older
+ * build reading a newer export loses nothing it could have used. */
 const MIGRATIONS: Record<number, Migration> = {}
 
 export function splitPrefs(s: AppSettings): PrefsSettings {
@@ -114,6 +133,8 @@ export function splitPrefs(s: AppSettings): PrefsSettings {
     ...(s.marketSource !== undefined ? { marketSource: s.marketSource } : {}),
     ...(s.marketUrl !== undefined ? { marketUrl: s.marketUrl } : {}),
     ...(s.registryUrl !== undefined ? { registryUrl: s.registryUrl } : {}),
+    ...(s.registryScope !== undefined ? { registryScope: s.registryScope } : {}),
+    ...(s.registryTokenEnc !== undefined ? { registryTokenEnc: s.registryTokenEnc } : {}),
     ...(s.githubTokenEnc !== undefined ? { githubTokenEnc: s.githubTokenEnc } : {}),
     ...(s.mcpSecrets !== undefined ? { mcpSecrets: s.mcpSecrets } : {}),
     ...(s.mcpLibrary !== undefined ? { mcpLibrary: s.mcpLibrary } : {}),
@@ -216,6 +237,10 @@ export function normalizeSettings(raw: unknown): AppSettings {
   if (marketUrl !== undefined) out.marketUrl = marketUrl
   const registryUrl = nonEmptyString(raw.registryUrl)
   if (registryUrl !== undefined) out.registryUrl = registryUrl
+  const registryScope = nonEmptyString(raw.registryScope)
+  if (registryScope !== undefined) out.registryScope = registryScope
+  const registryTokenEnc = nonEmptyString(raw.registryTokenEnc)
+  if (registryTokenEnc !== undefined) out.registryTokenEnc = registryTokenEnc
   const githubTokenEnc = nonEmptyString(raw.githubTokenEnc)
   if (githubTokenEnc !== undefined) out.githubTokenEnc = githubTokenEnc
   if (isRecord(raw.mcpSecrets)) {

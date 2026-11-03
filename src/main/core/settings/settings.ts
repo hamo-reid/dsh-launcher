@@ -294,6 +294,7 @@ export function exportSettings(): string {
   const app = loadSettings()
   delete app.githubTokenEnc
   delete app.mcpSecrets
+  delete app.registryTokenEnc
   return JSON.stringify(
     { schemaVersion, exportedAt: new Date().toISOString(), app },
     null, 2,
@@ -313,8 +314,10 @@ export function importSettings(json: string): void {
   // An export never carries secrets; keep the ones already on this machine.
   const existingToken = current.githubTokenEnc
   const existingSecrets = current.mcpSecrets
+  const existingRegistryToken = current.registryTokenEnc
   current = existingToken !== undefined ? { ...migrated, githubTokenEnc: existingToken } : migrated
   current = existingSecrets !== undefined ? { ...current, mcpSecrets: existingSecrets } : current
+  current = existingRegistryToken !== undefined ? { ...current, registryTokenEnc: existingRegistryToken } : current
   schemaVersion = CURRENT_SCHEMA_VERSION
   lastSignature = ''
   persist()

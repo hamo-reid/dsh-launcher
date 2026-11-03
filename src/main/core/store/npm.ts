@@ -6,7 +6,8 @@
 
 import type { NpmSearchHit, PackageVersionInfo } from '../../../shared/types.ts'
 import { logger } from '../shared/logger.ts'
-import { registryBase } from './registry.ts'
+import { registryAuthHeader } from './registry-auth.ts'
+import { registryBase, registryFor } from './registry.ts'
 
 /** Raw shape of one registry search result. */
 export interface RawSearchPackage {
@@ -59,7 +60,9 @@ export async function npmSearch(
   logger.debug(`npm search: "${query}" (${size})`)
   const base = registryBase()
   const url = `${base}/-/v1/search?text=${encodeURIComponent(query)}&size=${size}&from=${from}`
-  const res = await fetch(url)
+  // Search is not package-scoped, so it runs against the configured registry and
+  // carries the credential only when that IS the private one.
+  const res = await fetch(url, { headers: registryAuthHeader(base) })
   if (!res.ok) throw new Error(`npm search failed: HTTP ${res.status}`)
   const data = await res.json() as RawSearchResponse
   const result = normalizeSearchResults(data)
@@ -67,11 +70,17 @@ export async function npmSearch(
   return result
 }
 
-/** Fetch the full version list + dist-tags for a package (for the version picker). */
+/** Fetch the full version list + dist-tags for a package (for the version picker).
+ *
+ * The registry is chosen per package (`registryFor`), not globally: with a scope
+ * configured, a private plugin resolves from the private registry while every
+ * other package keeps resolving from the public one. Asking the wrong host here
+ * is what makes an install fail later, because pnpm then installs something the
+ * user never chose. */
 export async function fetchPackageVersions(name: string): Promise<PackageVersionInfo> {
-  const base = registryBase()
+  const base = registryFor(name)
   logger.debug(`npm versions: "${name}" @ ${base}`)
-  const res = await fetch(`${base}/${encodeURIComponent(name)}`)
+  const res = await fetch(`${base}/${encodeURIComponent(name)}`, { headers: registryAuthHeader(base) })
   if (!res.ok) throw new Error(`npm 包不存在或不可访问：HTTP ${res.status}`)
   const data = await res.json() as {
     'dist-tags'?: Record<string, string>
