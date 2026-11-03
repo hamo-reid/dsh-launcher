@@ -1133,12 +1133,26 @@ export interface MarketCatalog {
 export type MarketSource = 'official' | 'custom'
 
 /** The market's current loading route + any custom URL, for the UI picker. */
+/** One catalog as the picker shows it. The public catalog is not in this list. */
+export interface MarketCatalogView {
+  id: string
+  name: string
+  url: string
+  /** True when the host is CNB: its raw-file URL has a shape worth naming. */
+  isCnb: boolean
+  hasToken: boolean
+}
+
 export interface MarketSourceState {
   /** True when a token is saved for a private catalog. The value never crosses. */
   hasToken?: boolean
   source: MarketSource
   /** Custom `plugins.json` URL, only meaningful when `source === 'custom'`. */
   url: string
+  /** The catalog the market shows; null = the public one. */
+  activeId?: string | null
+  /** The catalogs the picker offers (the public one is implicit). */
+  catalogs?: MarketCatalogView[]
 }
 
 /** Sort orders for the market list. */

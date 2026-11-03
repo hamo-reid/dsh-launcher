@@ -55,7 +55,10 @@ export function registerMarketIpc(): void {
   /** Save (or clear, with '') the private-catalog token; returns the new state. */
   handle('market:setToken', (_event, value: string | null): IpcResult<MarketSourceState> => {
     try {
-      setMarketToken(typeof value === 'string' ? value : null)
+      // The token belongs to a catalog: without an id there is nothing to write to.
+      const active = marketSourceState().activeId
+      if (active === null || active === undefined) return fail(E.marketEntryNotFound)
+      setMarketToken(active, typeof value === 'string' ? value : null)
       return { ok: true, value: marketSourceState() }
     } catch (error) {
       return failFromError(error)

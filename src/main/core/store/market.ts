@@ -15,10 +15,11 @@
 
 import { loadSettings, patchSettings, updateSettings } from '../settings/settings.ts'
 import { createSecretCodec, type SecretCipher } from '../settings/secret-at-rest.ts'
+import type { MarketCatalogRecord } from '../settings/normalize.ts'
 import { AppError, throwE } from '../shared/errors.ts'
 import { child, logger } from '../shared/logger.ts'
 import type {
-  MarketAnnotations, MarketCatalog, MarketPage, MarketPlugin, MarketSort, MarketSourceState,
+  MarketAnnotations, MarketCatalog, MarketCatalogView, MarketPage, MarketPlugin, MarketSort, MarketSourceState,
 } from '../../../shared/types.ts'
 
 
@@ -42,59 +43,119 @@ const codec = createSecretCodec('market catalog token')
 export function setMarketTokenCipher(next: SecretCipher | null): void {
   codec.setCipher(next)
 }
-
-/** The plaintext catalog token, or `undefined` when none is saved. */
-export function marketToken(): string | undefined {
-  const stored = loadSettings().marketTokenEnc
-  return typeof stored === 'string' && stored !== '' ? codec.decode(stored) : undefined
+/** The configured catalogs, as stored. The public one is never in this list. */
+export function marketCatalogs(): MarketCatalogRecord[] {
+  return loadSettings().marketCatalogs ?? []
 }
 
-/** Save (or clear, with `''`/`null`) the catalog token. Never logs the value. */
-export function setMarketToken(value: string | null): boolean {
-  const plain = value?.trim() ?? ''
-  updateSettings((draft) => {
-    if (plain === '') delete draft.marketTokenEnc
-    else draft.marketTokenEnc = codec.encode(plain)
-  })
-  mlog.info(`market: catalog token ${plain === '' ? 'cleared' : 'saved'}`)
-  return plain !== ''
+/** The catalog the market shows, or `undefined` for the public one. */
+export function activeCatalog(): MarketCatalogRecord | undefined {
+  const id = loadSettings().marketActiveId
+  if (typeof id !== 'string' || id === '') return undefined
+  return marketCatalogs().find(c => c.id === id)
 }
 
-/** The canonical catalog address (GitHub Pages behind a CDN). */
-const MARKET_OFFICIAL_URL = 'https://awesome-dsh-plugin.com/plugins.json'
-
-/** npm package names are plain, allowlisted shape — guards the store's package.json. */
-const NPM_NAME_RE = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/
-
-/** How long to wait for the catalog. Generous: on a slow/remote link a 280 KB
- * catalog is not a 2-second job, and a provenance string that hangs is worse
- * than one that eventually resolves. */
-const FETCH_TIMEOUT_MS = 15_000
-
-// ── loading-route state ──────────────────────────────────────────────────────
-
-/** The market's configured origin, falling back to `official`. */
-export function marketSourceState(): MarketSourceState {
-  const s = loadSettings()
-  return {
-    source: s.marketSource === 'custom' ? 'custom' : 'official',
-    url: s.marketUrl ?? '',
-    hasToken: marketToken() !== undefined,
+/** True when the host is CNB, whose raw-file URL has a shape worth naming. */
+function isCnbHost(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase()
+    return host === 'cnb.cool' || host.endsWith('.cnb.cool')
+  } catch {
+    return false
   }
 }
 
-/** Persist the user's chosen loading route. Empty/malformed custom URLs are
- * refused so the UI can't save a route that would silently fail on next load. */
-export function setMarketSourceState(next: MarketSourceState): boolean {
-  const url = next.url.trim()
-  if (next.source === 'custom' && !isHttpUrl(url)) return false
-  patchSettings({
-    marketSource: next.source,
-    ...(next.source === 'custom' ? { marketUrl: url } : {}),
+/** The plaintext token of one catalog, or `undefined`. */
+function catalogToken(catalog: MarketCatalogRecord | undefined): string | undefined {
+  const stored = catalog?.tokenEnc
+  return typeof stored === 'string' && stored !== '' ? codec.decode(stored) : undefined
+}
+
+/** The catalogs the picker offers, with the facts it shows. */
+export function marketCatalogViews(): MarketCatalogView[] {
+  return marketCatalogs().map(c => ({
+    id: c.id,
+    name: c.name,
+    url: c.url,
+    isCnb: isCnbHost(c.url),
+    hasToken: catalogToken(c) !== undefined,
+  }))
+}
+
+/** The active catalog's token, or `undefined`. */
+export function marketToken(): string | undefined {
+  return catalogToken(activeCatalog())
+}
+
+/** Save (or clear, with `''`/`null`) one catalog's token. Never logs the value. */
+export function setMarketToken(id: string, value: string | null): boolean {
+  const plain = value?.trim() ?? ''
+  updateSettings((draft) => {
+    const entry = draft.marketCatalogs?.find(c => c.id === id)
+    if (entry === undefined) return
+    if (plain === '') delete entry.tokenEnc
+    else entry.tokenEnc = codec.encode(plain)
   })
+  mlog.info('market: catalog token ' + (plain === '' ? 'cleared' : 'saved'))
+  return plain !== ''
+}
+
+/** Switch the market to one catalog (or to the public one, with `null`). */
+export function setMarketActive(id: string | null): boolean {
+  if (id !== null && !marketCatalogs().some(c => c.id === id)) return false
+  patchSettings({ marketActiveId: id ?? undefined })
   // A route change must not serve a catalog fetched from another origin.
   forgetCatalog()
   return true
+}
+
+/** The canonical public catalog address (GitHub Pages behind a CDN). */
+const MARKET_OFFICIAL_URL = 'https://awesome-dsh-plugin.com/plugins.json'
+
+/** npm package names are plain, allowlisted shape - guards the store's package.json. */
+const NPM_NAME_RE = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/
+
+/** How long to wait for the catalog. Generous: a 2 MB catalog on a slow link is
+ * not a 2-second job, and a provenance string that hangs is worse than one that
+ * eventually resolves. */
+const FETCH_TIMEOUT_MS = 15_000
+
+/** The market's route: the active catalog, or the public one. */
+export function marketSourceState(): MarketSourceState {
+  const active = activeCatalog()
+  return {
+    source: active === undefined ? 'official' : 'custom',
+    url: active?.url ?? '',
+    hasToken: marketToken() !== undefined,
+    activeId: active?.id ?? null,
+    catalogs: marketCatalogViews(),
+  }
+}
+
+/** Old entry point, kept so an older renderer keeps working: switch to the
+ * public catalog, or to the one matching `url` (adding it when it is new). */
+export function setMarketSourceState(next: MarketSourceState): boolean {
+  if (next.source !== 'custom') return setMarketActive(null)
+  const url = next.url.trim()
+  if (!isHttpUrl(url)) return false
+  const existing = marketCatalogs().find(c => c.url === url)
+  if (existing !== undefined) return setMarketActive(existing.id)
+  const id = 'market-' + String(Date.now())
+  updateSettings((draft) => {
+    draft.marketCatalogs = [...(draft.marketCatalogs ?? []), { id, name: hostOf(url), url }]
+    draft.marketActiveId = id
+  })
+  forgetCatalog()
+  return true
+}
+
+/** A URL's host, for the name a new catalog gets. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host
+  } catch {
+    return url
+  }
 }
 
 function isHttpUrl(value: string): boolean {
