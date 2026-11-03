@@ -64,6 +64,9 @@ export interface AppSettings {  /** Single launcher data root. When set, the thr
   marketSource?: MarketSource
   /** Custom market catalog URL, used when `marketSource === 'custom'`. */
   marketUrl?: string
+  /** Token for a private catalog. A secret: never exported, never logged. Only
+   * ever sent to the configured catalog URL, so it cannot leak to the official one. */
+  marketTokenEnc?: string
   /** The npm registries this machine points at.
    *
    * **At most one entry may omit `scope`.** An unscoped registry answers for
@@ -108,7 +111,7 @@ export interface AppSettings {  /** Single launcher data root. When set, the thr
 /** The `prefs` row: user preferences (no registry / no per-profile config). */
 export type PrefsSettings = Pick<AppSettings,
   'dataRoot' | 'pluginDir' | 'dshVersionDir' | 'uiLanguage' | 'closeToTray' | 'askOnClose' |
-  'nodePreference' | 'onboarded' | 'marketSource' | 'marketUrl' | 'registries' |
+  'nodePreference' | 'onboarded' | 'marketSource' | 'marketUrl' | 'marketTokenEnc' | 'registries' |
   'registryUrl' | 'registryScope' | 'registryTokenEnc' | 'githubTokenEnc' |
   'mcpSecrets' | 'mcpLibrary' | 'devPlugins'>
 /** The `dsh` row: the registered dsh installs. */
@@ -176,6 +179,7 @@ export function splitPrefs(s: AppSettings): PrefsSettings {
     ...(s.onboarded !== undefined ? { onboarded: s.onboarded } : {}),
     ...(s.marketSource !== undefined ? { marketSource: s.marketSource } : {}),
     ...(s.marketUrl !== undefined ? { marketUrl: s.marketUrl } : {}),
+    ...(s.marketTokenEnc !== undefined ? { marketTokenEnc: s.marketTokenEnc } : {}),
     ...(s.registries !== undefined ? { registries: s.registries } : {}),
     ...(s.registryUrl !== undefined ? { registryUrl: s.registryUrl } : {}),
     ...(s.registryScope !== undefined ? { registryScope: s.registryScope } : {}),
@@ -312,6 +316,8 @@ export function normalizeSettings(raw: unknown): AppSettings {
   const onboarded = bool(raw.onboarded)
   if (onboarded !== undefined) out.onboarded = onboarded
   if (raw.marketSource === 'official' || raw.marketSource === 'custom') out.marketSource = raw.marketSource
+  const marketTokenEnc = nonEmptyString(raw.marketTokenEnc)
+  if (marketTokenEnc !== undefined) out.marketTokenEnc = marketTokenEnc
   const marketUrl = nonEmptyString(raw.marketUrl)
   if (marketUrl !== undefined) out.marketUrl = marketUrl
   const registryUrl = nonEmptyString(raw.registryUrl)

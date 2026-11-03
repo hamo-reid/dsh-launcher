@@ -1089,6 +1089,8 @@ const en: typeof zh = {
     'plugin.market.colSearch': 'Search',
     'plugin.market.source.official': 'awesome-dsh-plugin.com',
     'plugin.market.source.custom': 'Custom mirror URL',
+    'plugin.market.tokenPlaceholder': 'Catalog token (private catalogs only)',
+    'plugin.market.tokenReplace': 'Token saved - type a new one to replace it',
     'plugin.market.customUrlPlaceholder': 'https://your-mirror.example/plugins.json',
     'plugin.market.sourceSaved': 'Catalog source saved',
     'plugin.market.loadFailed': 'Could not load the community catalog',
@@ -1105,6 +1107,7 @@ const en: typeof zh = {
     'plugin.market.field.category': 'Category',
     'plugin.market.field.source': 'Source',
     'plugin.market.added': 'Added {{date}}',
+    'errors.market.unauthorized': 'This catalog requires a token (HTTP {{detail}}) - add the catalog token in the source settings.',
     'errors.market.entryNotFound': 'This plugin is no longer in the loaded catalog — refresh the market.',
 
     'ext.tab.mcp': 'MCP servers',

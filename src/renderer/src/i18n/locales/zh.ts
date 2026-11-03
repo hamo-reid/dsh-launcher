@@ -1087,6 +1087,8 @@ const zh = {
     'plugin.market.colSearch': '搜索',
     'plugin.market.source.official': 'awesome-dsh-plugin.com',
     'plugin.market.source.custom': '自定义镜像 URL',
+    'plugin.market.tokenPlaceholder': '目录令牌（私有目录才需要）',
+    'plugin.market.tokenReplace': '已保存令牌 —— 输入新值可替换',
     'plugin.market.customUrlPlaceholder': 'https://你的镜像.example/plugins.json',
     'plugin.market.sourceSaved': '目录来源已保存',
     'plugin.market.loadFailed': '无法加载社区目录',
@@ -1103,6 +1105,7 @@ const zh = {
     'plugin.market.field.category': '分类',
     'plugin.market.field.source': '来源',
     'plugin.market.added': '收录于 {{date}}',
+    'errors.market.unauthorized': '这个目录需要令牌（HTTP {{detail}}）—— 在来源设置里填入目录令牌。',
     'errors.market.entryNotFound': '该插件已不在当前目录中——请刷新市场。',
 
     'ext.tab.mcp': 'MCP 服务器',

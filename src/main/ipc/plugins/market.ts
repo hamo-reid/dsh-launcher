@@ -5,6 +5,7 @@
 import { handle } from '../handle.ts'
 import {
   annotationsFor, installSpecFor, marketSourceState, pageCatalog, resolveMarket, setMarketSourceState,
+  setMarketToken,
 } from '../../core/store/market.ts'
 import { fail, failFromError, E } from '../../core/shared/errors.ts'
 import type {
@@ -45,6 +46,16 @@ export function registerMarketIpc(): void {
 
   handle('market:source', (): IpcResult<MarketSourceState> => {
     try {
+      return { ok: true, value: marketSourceState() }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  /** Save (or clear, with '') the private-catalog token; returns the new state. */
+  handle('market:setToken', (_event, value: string | null): IpcResult<MarketSourceState> => {
+    try {
+      setMarketToken(typeof value === 'string' ? value : null)
       return { ok: true, value: marketSourceState() }
     } catch (error) {
       return failFromError(error)

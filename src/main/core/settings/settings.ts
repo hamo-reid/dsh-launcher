@@ -296,6 +296,7 @@ export function exportSettings(): string {
   delete app.githubTokenEnc
   delete app.mcpSecrets
   delete app.registryTokenEnc
+  delete app.marketTokenEnc
   // Registry tokens live one per entry; a backup is a file that gets emailed
   // around, so the entries travel without them.
   if (app.registries !== undefined) {

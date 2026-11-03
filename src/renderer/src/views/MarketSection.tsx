@@ -35,6 +35,8 @@ export default function MarketSection(): JSX.Element {
   const [srcState, setSrcState] = useState<MarketSourceState | null>(null)
   const [customUrl, setCustomUrl] = useState('')
   const [savingSource, setSavingSource] = useState(false)
+  /** Token for a private catalog. Empty = leave the saved one alone. */
+  const [customToken, setCustomToken] = useState('')
 
   // Server-side query → one page of rows + total (never the whole catalog).
   const [rows, setRows] = useState<MarketPlugin[]>([])
@@ -237,7 +239,18 @@ export default function MarketSection(): JSX.Element {
                     />
                   </div>
                   {srcState.source === 'custom' && (
-                    <Input allowClear value={customUrl} onChange={e => setCustomUrl(e.target.value)} placeholder={t('plugin.market.customUrlPlaceholder')} />
+                    <>
+                      <Input allowClear value={customUrl} onChange={e => setCustomUrl(e.target.value)} placeholder={t('plugin.market.customUrlPlaceholder')} />
+                      <Input.Password
+                        style={{ marginTop: 8 }}
+                        value={customToken}
+                        onChange={e => setCustomToken(e.target.value)}
+                        autoComplete="new-password"
+                        placeholder={srcState?.hasToken === true
+                          ? t('plugin.market.tokenReplace')
+                          : t('plugin.market.tokenPlaceholder')}
+                      />
+                    </>
                   )}
                   <div style={{ color: token.colorTextTertiary, fontSize: token.fontSizeSM }}>{t('plugin.market.sourceHint')}</div>
                   <Button type="primary" size="small" loading={savingSource} disabled={srcState.source === 'custom' && !customUrl.trim()} onClick={() => void applySource()}>

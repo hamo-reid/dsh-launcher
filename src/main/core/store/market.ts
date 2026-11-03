@@ -13,7 +13,9 @@
  */
 
 
-import { loadSettings, patchSettings } from '../settings/settings.ts'
+import { loadSettings, patchSettings, updateSettings } from '../settings/settings.ts'
+import { createSecretCodec, type SecretCipher } from '../settings/secret-at-rest.ts'
+import { AppError, throwE } from '../shared/errors.ts'
 import { child, logger } from '../shared/logger.ts'
 import type {
   MarketAnnotations, MarketCatalog, MarketPage, MarketPlugin, MarketSort, MarketSourceState,
@@ -23,6 +25,40 @@ import type {
 
 /** Domain-tagged logger for market-catalog traffic. */
 const mlog = child('market')
+
+/**
+ * Token for a PRIVATE catalog — a mirror, or an artifact host that serves the
+ * same `plugins.json` shape behind authentication.
+ *
+ * Its own secret, not the registry's: a catalog is fetched from one URL, and a
+ * registry credential belongs to a registry. Reusing one by guessing at host
+ * names would send a token somewhere the user never pointed it. It is only ever
+ * attached to the custom URL, so pointing the market back at the official
+ * catalog cannot leak it.
+ */
+const codec = createSecretCodec('market catalog token')
+
+/** Inject the at-rest cipher (main process wires safeStorage; tests inject a fake). */
+export function setMarketTokenCipher(next: SecretCipher | null): void {
+  codec.setCipher(next)
+}
+
+/** The plaintext catalog token, or `undefined` when none is saved. */
+export function marketToken(): string | undefined {
+  const stored = loadSettings().marketTokenEnc
+  return typeof stored === 'string' && stored !== '' ? codec.decode(stored) : undefined
+}
+
+/** Save (or clear, with `''`/`null`) the catalog token. Never logs the value. */
+export function setMarketToken(value: string | null): boolean {
+  const plain = value?.trim() ?? ''
+  updateSettings((draft) => {
+    if (plain === '') delete draft.marketTokenEnc
+    else draft.marketTokenEnc = codec.encode(plain)
+  })
+  mlog.info(`market: catalog token ${plain === '' ? 'cleared' : 'saved'}`)
+  return plain !== ''
+}
 
 /** The canonical catalog address (GitHub Pages behind a CDN). */
 const MARKET_OFFICIAL_URL = 'https://awesome-dsh-plugin.com/plugins.json'
@@ -43,6 +79,7 @@ export function marketSourceState(): MarketSourceState {
   return {
     source: s.marketSource === 'custom' ? 'custom' : 'official',
     url: s.marketUrl ?? '',
+    hasToken: marketToken() !== undefined,
   }
 }
 
@@ -149,6 +186,12 @@ export async function loadMarket(state = marketSourceState()): Promise<MarketCat
       const headers: Record<string, string> = {}
       if (reusable?.etag != null) headers['if-none-match'] = reusable.etag
       else if (reusable?.modified != null) headers['if-modified-since'] = reusable.modified
+      // Only the custom route gets a credential. The official catalog is public,
+      // and a token must never travel to a host the user did not point at.
+      if (label === 'custom') {
+        const token = marketToken()
+        if (token !== undefined) headers.authorization = `Bearer ${token}`
+      }
       // eslint-disable-next-line no-undef
       const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), headers })
       if (res.status === 304) {
@@ -156,12 +199,18 @@ export async function loadMarket(state = marketSourceState()): Promise<MarketCat
         mlog.debug('market catalog reused (304)', { label })
         return reusable.data
       }
+      if (res.status === 401 || res.status === 403) {
+        // A private catalog that refuses us is a configuration answer, not a
+        // transport failure: say which of the two fixes is missing.
+        throwE('market.unauthorized', { detail: `HTTP ${String(res.status)}` })
+      }
       if (!res.ok) throw new Error(`HTTP ${String(res.status)}`)
       const data = asCatalog(await res.json() as unknown)
       served = { url, etag: res.headers.get('etag'), modified: res.headers.get('last-modified'), data }
       mlog.debug('market catalog fetched', { label })
       return data
     } catch (error) {
+      if (error instanceof AppError) throw error
       last = error
       logger.warn(`market catalog fetch failed (${label}): ${error instanceof Error ? error.message : String(error)}`)
     }

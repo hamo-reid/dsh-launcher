@@ -377,6 +377,7 @@ const api = {
       ipcRenderer.invoke('market:list', opts),
     source: (): Promise<IpcResult<MarketSourceState>> => ipcRenderer.invoke('market:source'),
     setSource: (next: MarketSourceState): Promise<IpcResult<boolean>> => ipcRenderer.invoke('market:setSource', next),
+    setToken: (value: string | null): Promise<IpcResult<MarketSourceState>> => ipcRenderer.invoke('market:setToken', value),
     resolve: (url: string): Promise<IpcResult<{ spec: string | null; plugin: MarketPlugin | null }>> =>
       ipcRenderer.invoke('market:resolve', url),
     annotations: (): Promise<IpcResult<MarketAnnotations>> =>

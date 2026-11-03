@@ -13,6 +13,7 @@ import { registerPluginsIpc } from './ipc/plugins/plugins.ts'
 import { registerDshIpc } from './ipc/dsh/dsh.ts'
 import { registerHomeDataIpc } from './ipc/profile/home-data.ts'
 import { registerTrashIpc } from './ipc/profile/trash.ts'
+import { setMarketTokenCipher } from './core/store/market.ts'
 import { registerMarketIpc } from './ipc/plugins/market.ts'
 import { registerSettingsIpc } from './ipc/app/settings.ts'
 import { registerDataRootIpc } from './ipc/app/data-root.ts'
@@ -373,6 +374,7 @@ app.whenReady().then(async () => {
   // The private registry's token rides the same cipher: the value only ever
   // leaves the main process as an HTTP header or a child-process variable.
   setRegistryTokenCipher(secretCipher)
+  setMarketTokenCipher(secretCipher)
   // Skill deletion moves the entry to the OS recycle bin (reversible there).
   setSkillTrash(path => shell.trashItem(path))
   // The launcher-global skill library takes its location from the data root

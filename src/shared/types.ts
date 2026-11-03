@@ -1125,6 +1125,8 @@ export type MarketSource = 'official' | 'custom'
 
 /** The market's current loading route + any custom URL, for the UI picker. */
 export interface MarketSourceState {
+  /** True when a token is saved for a private catalog. The value never crosses. */
+  hasToken?: boolean
   source: MarketSource
   /** Custom `plugins.json` URL, only meaningful when `source === 'custom'`. */
   url: string

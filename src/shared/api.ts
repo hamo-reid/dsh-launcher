@@ -389,6 +389,8 @@ export interface WindowApi {
     source: () => Promise<IpcResult<MarketSourceState>>
     /** Persist a loading-route change (`false` when the custom URL is invalid). */
     setSource: (next: MarketSourceState) => Promise<IpcResult<boolean>>
+    /** Save (or clear, with '') the token a private catalog requires. */
+    setToken: (value: string | null) => Promise<IpcResult<MarketSourceState>>
     /** Resolve one catalog entry (by url) to its install spec + meta. */
     resolve: (url: string) => Promise<IpcResult<{ spec: string | null; plugin: MarketPlugin | null }>>
     /** Category / deprecation annotations for the installed-plugin overview. */
