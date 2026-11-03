@@ -9,6 +9,8 @@ import {
   archivedPluginNames, latestStoreVersion, pluginVersionDir, readVersion, storeVersions, versionsRoot,
   type StoreManifest,
 } from './layout.ts'
+import { aggregateBinding, bindingOf, devDirKey } from './binding.ts'
+import { listDevPlugins } from './dev.ts'
 import { readPluginSources } from './sources.ts'
 import { readRef } from './refstate.ts'
 import { resolveInstallAnchor } from '../dsh/dsh.ts'
@@ -393,6 +395,43 @@ export function versionSizes(storeDir: string, name: string): Record<string, num
     sizes[version] = total
   }
   return sizes
+}
+
+/**
+ * Attach which identity the profiles are bound to, per name.
+ *
+ * Read straight from each profile's dependency spec rather than from the row's
+ * own aggregation: `link:` versus `file:` is the whole answer, and re-deriving it
+ * here cannot disagree with what dsh will actually load.
+ */
+export function attachBindings(rows: InstalledOverviewRow[], dshes: DshScope[]): InstalledOverviewRow[] {
+  const devDirs = new Set(listDevPlugins().map(dev => devDirKey(dev.dir)))
+  const seen = new Map<string, ReturnType<typeof bindingOf>[]>()
+  for (const dsh of dshes) {
+    const root = profilesRoot(dsh.home)
+    if (!existsSync(root)) continue
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      let manifest: { dependencies?: Record<string, string> }
+      try {
+        manifest = JSON.parse(readFileSync(join(root, entry.name, 'package.json'), 'utf8')) as typeof manifest
+      } catch {
+        continue
+      }
+      for (const [name, spec] of Object.entries(manifest.dependencies ?? {})) {
+        const list = seen.get(name) ?? []
+        list.push(bindingOf(spec, devDirs))
+        seen.set(name, list)
+      }
+    }
+  }
+  for (const row of rows) {
+    const bindings = seen.get(row.name)
+    if (bindings === undefined) continue
+    const binding = aggregateBinding(bindings)
+    if (binding !== 'missing') row.binding = binding
+  }
+  return rows
 }
 
 /**

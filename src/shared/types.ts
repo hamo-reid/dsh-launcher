@@ -329,6 +329,11 @@ export interface InstalledOverviewRow {
   /** Real on-disk bytes of this plugin's own files (inode-dedup across its archive
    * versions / profile copy). Absent when nothing resolved on disk. */
   sizeBytes?: number
+  /** Which identity the profiles are bound to for this name. `mixed` means they
+   * disagree - some run a dev link, others the archived version. Mirrors
+   * `store/binding.ts`; the union is repeated here because shared types cannot
+   * import from the main process. */
+  binding?: 'dev' | 'store' | 'external' | 'missing' | 'mixed'
   /** The label of the configured registry the archived version came from. Absent
    * when it came from the public registry (or before the origin was recorded).
    * Shown wherever "which source" is the question: with several registries

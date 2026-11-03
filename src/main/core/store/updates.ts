@@ -148,6 +148,13 @@ export async function checkPluginUpdates(
       const i = next++
       if (i >= rows.length) return
       const row = rows[i]
+      // A name the profiles load from a dev link has no published counterpart to
+      // compare against: asking the registry would answer about a build this
+      // machine is not running.
+      if (row.binding === 'dev') {
+        list[i] = toUpdateInfo({ ...row, origin: row.origin ?? 'unknown' }, undefined)
+        continue
+      }
       const origin: PluginOrigin = row.origin ?? 'unknown'
       let latest: string | undefined
       if (origin === 'npm' || origin === 'unknown') {

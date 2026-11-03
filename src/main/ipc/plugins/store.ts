@@ -12,7 +12,7 @@ import { listComboPlugins } from '../../core/store/combo.ts'
 import { dshScopes, pluginDir, profilesRootFor, type DshScope } from '../../core/profile/appState.ts'
 import { inlineRelativeImages } from '../../core/shared/app-util.ts'
 import { fetchPackageVersions, npmSearch } from '../../core/store/npm.ts'
-import { attachPluginSizes, attachRegistryLabels, versionSizes } from '../../core/store/overview.ts'
+import { attachBindings, attachPluginSizes, attachRegistryLabels, versionSizes } from '../../core/store/overview.ts'
 import { storeVersions } from '../../core/store/layout.ts'
 import { fail, failFromError, E } from '../../core/shared/errors.ts'
 import { pathIdentifierInvalid, versionInvalid } from '../validate.ts'
@@ -261,6 +261,7 @@ export function registerStoreIpc(): void {
       const rows = buildInstalledOverview(dshScopes(), pluginDir())
       attachPluginSizes(rows, dshScopes(), pluginDir())
       attachRegistryLabels(rows, pluginDir())
+      attachBindings(rows, dshScopes())
       const sizes: Record<string, number> = {}
       for (const row of rows) if (row.sizeBytes !== undefined) sizes[row.name] = row.sizeBytes
       return { ok: true, value: sizes }
