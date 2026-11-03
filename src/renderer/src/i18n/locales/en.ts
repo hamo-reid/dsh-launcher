@@ -970,6 +970,7 @@ const en: typeof zh = {
     'settings.market.desc': 'The market reads its plugin list from these addresses. The public catalog is always available and needs no configuration; a private one needs a token.',
     'settings.market.add': 'Add catalog',
     'settings.market.name': 'Name, e.g. Hamo private catalog',
+    'settings.market.token': 'Access token (private catalogs only)',
     'settings.market.url': 'plugins.json address',
     'settings.section.registry': 'Private npm registry',
     'settings.registry.desc': 'These sources decide where versions come from and where installs go: version lists in the market, the plugin update check, and the dsh install/update lookup. A source owns the scopes you list and nothing else; every other package comes from public npm. The download centre\'s search is unaffected — it always searches public npm.',

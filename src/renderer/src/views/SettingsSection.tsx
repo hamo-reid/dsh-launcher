@@ -245,19 +245,27 @@ export default function SettingsSection() {
 
   const submitCatalog = async (): Promise<void> => {
     if (catalogForm === null) return
+    const name = catalogForm.name.trim()
     const r = await window.api.market.saveCatalog({
       ...(catalogForm.id !== undefined ? { id: catalogForm.id } : {}),
-      name: catalogForm.name.trim(),
+      name,
       url: catalogForm.url.trim(),
     })
     if (!r.ok) { void message.error(apiErrorText(r)); return }
-    // The token is written after the row exists: a new catalog has no id yet.
-    if (catalogForm.id !== undefined && catalogForm.token !== '') {
-      const tk = await window.api.market.setCatalogToken(catalogForm.id, catalogForm.token)
-      if (!tk.ok) { void message.error(apiErrorText(tk)); return }
+    // The token is written in the same pass: a new catalog takes its id from the
+    // list that just came back, so there is no half-configured window.
+    if (catalogForm.token !== '') {
+      const saved = (r.value.catalogs ?? []).find(c => c.id === catalogForm.id || c.name === name)
+      if (saved !== undefined) {
+        const tk = await window.api.market.setCatalogToken(saved.id, catalogForm.token)
+        if (!tk.ok) { void message.error(apiErrorText(tk)); return }
+        setMarket({ activeId: tk.value.activeId ?? null, catalogs: tk.value.catalogs ?? [] })
+        setCatalogForm(null)
+        return
+      }
     }
+    setMarket({ activeId: r.value.activeId ?? null, catalogs: r.value.catalogs ?? [] })
     setCatalogForm(null)
-    await reloadMarket()
   }
 
   const removeCatalog = async (id: string): Promise<void> => {
@@ -493,21 +501,23 @@ export default function SettingsSection() {
                   ))}
                 </Space>
                 <div style={{ marginTop: token.padding }}>
-                  {catalogForm === null
-                    ? <Button onClick={() => setCatalogForm({ name: '', url: '', token: '' })}>{t('settings.market.add')}</Button>
-                    : (
-                      <Space orientation="vertical" size={8} style={{ width: '100%' }}>
-                        <Input value={catalogForm.name} onChange={e => setCatalogForm({ ...catalogForm, name: e.target.value })} placeholder={t('settings.market.name')} />
-                        <Input value={catalogForm.url} onChange={e => setCatalogForm({ ...catalogForm, url: e.target.value })} placeholder={t('settings.market.url')} />
-                        {catalogForm.id !== undefined && (
-                          <Input.Password value={catalogForm.token} onChange={e => setCatalogForm({ ...catalogForm, token: e.target.value })} placeholder={t('plugin.market.tokenPlaceholder')} />
-                        )}
-                        <Space>
-                          <Button type="primary" disabled={catalogForm.url.trim() === '' || catalogForm.name.trim() === ''} onClick={() => void submitCatalog()}>{t('common.save')}</Button>
-                          <Button onClick={() => setCatalogForm(null)}>{t('common.cancel')}</Button>
-                        </Space>
-                      </Space>
-                    )}
+                  <Button onClick={() => setCatalogForm({ name: '', url: '', token: '' })}>{t('settings.market.add')}</Button>
+                  <Modal
+                    open={catalogForm !== null}
+                    title={catalogForm?.id === undefined ? t('settings.market.add') : t('common.edit')}
+                    okText={t('common.save')}
+                    cancelText={t('common.cancel')}
+                    onCancel={() => setCatalogForm(null)}
+                    onOk={() => void submitCatalog()}
+                    okButtonProps={{ disabled: catalogForm === null || catalogForm.url.trim() === '' || catalogForm.name.trim() === '' }}
+                    width={520}
+                  >
+                    <Space orientation="vertical" size={10} style={{ width: '100%' }}>
+                      <Input value={catalogForm?.name ?? ''} onChange={e => setCatalogForm(catalogForm === null ? null : { ...catalogForm, name: e.target.value })} placeholder={t('settings.market.name')} />
+                      <Input value={catalogForm?.url ?? ''} onChange={e => setCatalogForm(catalogForm === null ? null : { ...catalogForm, url: e.target.value })} placeholder={t('settings.market.url')} />
+                      <Input.Password value={catalogForm?.token ?? ''} onChange={e => setCatalogForm(catalogForm === null ? null : { ...catalogForm, token: e.target.value })} autoComplete="new-password" placeholder={t('settings.market.token')} />
+                    </Space>
+                  </Modal>
                 </div>
               </div>
             </Panel>
