@@ -281,8 +281,8 @@ const api = {
       ipcRenderer.invoke('plugins:add', source, name),
     addLocal: (): Promise<IpcResult<string>> =>
       ipcRenderer.invoke('plugins:addLocal'),
-    installToProfile: (dshId: string, profile: string, pkg: string, version?: string): Promise<IpcResult<string>> =>
-      ipcRenderer.invoke('plugins:installToProfile', dshId, profile, pkg, version),
+    installToProfile: (dshId: string, profile: string, pkg: string, version?: string, force?: boolean): Promise<IpcResult<{ text: string; needsConfirm?: 'replaces-dev-link' }>> =>
+      ipcRenderer.invoke('plugins:installToProfile', dshId, profile, pkg, version, force),
     installOptions: (): Promise<IpcResult<{ id: string; name: string; version?: string; profiles: string[] }[]>> =>
       ipcRenderer.invoke('plugins:installOptions'),
     remove: (

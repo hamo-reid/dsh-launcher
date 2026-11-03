@@ -44,7 +44,27 @@ export function InstallToProfileModal(p: InstallToProfileModalProps): JSX.Elemen
     const res = await window.api.plugins.installToProfile(installDsh, installProfile, p.installPkg, version)
     setInstalling(false)
     if (!res.ok) { void message.error(apiErrorText(res)); return }
-    void message.success(`${p.installPkg}${version !== undefined ? `@${version}` : ''} → ${installProfile}：${res.value}`)
+    // The profile may be on a dev link: the store answered with a question rather
+    // than doing it, and the answer decides whether the working copy is replaced.
+    if (res.value.needsConfirm !== undefined) {
+      Modal.confirm({
+        title: t('plugin.install.replaceDevTitle'),
+        content: res.value.text,
+        okText: t('plugin.install.replaceDevOk'),
+        cancelText: t('common.cancel'),
+        onOk: async () => {
+          const forced = await window.api.plugins.installToProfile(installDsh, installProfile, String(p.installPkg), version, true)
+          if (!forced.ok) { void message.error(apiErrorText(forced)); return }
+          void message.success(`${p.installPkg}${version !== undefined ? `@${version}` : ''} → ${installProfile}：${forced.value.text}`)
+          p.onClose()
+          setInstallDsh(undefined)
+          setInstallProfile(undefined)
+          await p.onDone()
+        },
+      })
+      return
+    }
+    void message.success(`${p.installPkg}${version !== undefined ? `@${version}` : ''} → ${installProfile}：${res.value.text}`)
     p.onClose()
     setInstallDsh(undefined)
     setInstallProfile(undefined)

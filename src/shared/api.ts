@@ -289,7 +289,10 @@ export interface WindowApi {
     add: (source: string, name?: string) => Promise<IpcResult<string>>
     addLocal: () => Promise<IpcResult<string>>
     installOptions: () => Promise<IpcResult<{ id: string; name: string; version?: string; profiles: string[] }[]>>
-    installToProfile: (dshId: string, profile: string, pkg: string, version?: string) => Promise<IpcResult<string>>
+    /** orce confirms replacing a dev link the profile is currently on; without
+     * it the store answers 
+eedsConfirm instead of doing it. */
+    installToProfile: (dshId: string, profile: string, pkg: string, version?: string, force?: boolean) => Promise<IpcResult<{ text: string; needsConfirm?: 'replaces-dev-link' }>>
     /** Delete an archived version (or the whole plugin when `version` is omitted).
      * A single version is REFUSED while a profile still points at it — the failure
      * comes back as `store.versionInUse` carrying the profile list. Re-call with

@@ -337,6 +337,8 @@ const zh = {
     'plugin.detail.inUseBy': '被「{{profiles}}」使用',
     'plugin.detail.notInStore': '内置 / 本地',
     'plugin.detail.installToProfile': '安装到 profile…',
+    'plugin.install.replaceDevTitle': '替换本地链接？',
+    'plugin.install.replaceDevOk': '替换',
     'plugin.install.title': '安装到 profile · {{name}}',
     'plugin.install.prompt': '选择要把「{{name}}」指向的 DSH 与 profile（采用 link: 软链接）',
     'plugin.install.dsh': 'DSH',

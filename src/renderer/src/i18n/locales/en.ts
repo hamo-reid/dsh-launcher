@@ -339,6 +339,8 @@ const en: typeof zh = {
     'plugin.detail.inUseBy': 'Used by "{{profiles}}"',
     'plugin.detail.notInStore': 'built-in / local',
     'plugin.detail.installToProfile': 'Install to profile…',
+    'plugin.install.replaceDevTitle': 'Replace the dev link?',
+    'plugin.install.replaceDevOk': 'Replace',
     'plugin.install.title': 'Install to profile · {{name}}',
     'plugin.install.prompt': 'Choose the DSH and profile to point “{{name}}” at (uses a link: dependency)',
     'plugin.install.dsh': 'DSH',

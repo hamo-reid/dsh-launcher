@@ -118,14 +118,23 @@ export function registerStoreIpc(): void {
   })
 
   // Point a profile (under an explicit dsh) at a locally-downloaded plugin.
-  handle('plugins:installToProfile', async (_event, dshId: string, profile: string, pkg: string, version?: string): Promise<IpcResult<string>> => {
+  // Point a profile (under an explicit dsh) at a locally-downloaded plugin.
+  // `force` answers the confirmation the store asks for when the profile is on a
+  // dev link: the caller has seen what it replaces and means it.
+  handle('plugins:installToProfile', async (_event, dshId: string, profile: string, pkg: string, version?: string, force?: boolean): Promise<IpcResult<{ text: string; needsConfirm?: 'replaces-dev-link' }>> => {
     try {
       const ctx = ctxOf(dshId)
       if (ctx === null) return fail(E.dshNotFound)
       if (pathIdentifierInvalid(profile) || pathIdentifierInvalid(pkg)) return fail(E.nameInvalid)
       if (version !== undefined && versionInvalid(version)) return fail(E.nameInvalid)
-      const result = await installIntoProfile(profilesRootFor(ctx), profile, pkg, pluginDir(), { version })
-      return result.ok ? { ok: true, value: result.text } : fail(E.storeOperationFailed, { detail: result.text })
+      const result = await installIntoProfile(profilesRootFor(ctx), profile, pkg, pluginDir(), {
+        ...(version !== undefined ? { version } : {}),
+        ...(force === true ? { force: true } : {}),
+      })
+      // A refusal that asks a question is not a failure: the renderer turns it
+      // into a confirmation instead of an error toast.
+      if (result.needsConfirm !== undefined) return { ok: true, value: { text: result.text, needsConfirm: result.needsConfirm } }
+      return result.ok ? { ok: true, value: { text: result.text } } : fail(E.storeOperationFailed, { detail: result.text })
     } catch (error) {
       return failFromError(error)
     }
