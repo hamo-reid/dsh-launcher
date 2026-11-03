@@ -74,6 +74,10 @@ export default function SettingsSection() {
     if (g.ok) setGithubAuth(g.value)
     const list = await window.api.settings.listRegistries()
     if (list.ok) setRegistries(list.value)
+      // The catalog list is only rendered from this state, so a fresh mount has to
+      // fetch it: without this the panel showed the public row and nothing else.
+      const mc = await window.api.market.catalogs()
+      if (mc.ok) setMarket({ activeId: mc.value.activeId ?? null, catalogs: mc.value.catalogs ?? [] })
   }
 
   useEffect(() => { void load() }, [])
