@@ -6,8 +6,8 @@
 
 import type { NpmSearchHit, PackageVersionInfo, RegistryProbe } from '../../../shared/types.ts'
 import { logger } from '../shared/logger.ts'
-import { registryAuthCandidates } from './registry-auth.ts'
-import { registryBase, registryFor } from './registry.ts'
+import { registryAuthCandidates, registryToken } from './registry-auth.ts'
+import { registryBase, registryFor, registryForSearch } from './registry.ts'
 
 /**
  * Fetch from a registry, carrying the credential when the URL belongs to the
@@ -78,10 +78,11 @@ export async function npmSearch(
   const size = opts.size ?? 25
   const from = opts.from ?? 0
   logger.debug(`npm search: "${query}" (${size})`)
-  const base = registryBase()
+  const base = registryForSearch()
   const url = `${base}/-/v1/search?text=${encodeURIComponent(query)}&size=${size}&from=${from}`
-  // Search is not package-scoped, so it runs against the configured registry and
-  // carries the credential only when that IS the private one.
+  // Search has no package name to route by, so it follows the broad half of the
+  // routing (see `registryForSearch`). It carries the credential only when that
+  // IS the private registry.
   const res = await fetchFromRegistry(url)
   if (!res.ok) throw new Error(`npm search failed: HTTP ${res.status}`)
   const data = await res.json() as RawSearchResponse
@@ -115,19 +116,46 @@ export async function fetchPackageVersions(name: string): Promise<PackageVersion
 }
 
 /**
- * Reach the configured registry once, and report what happened.
+ * Reach the configured registry and report what the credential did.
  *
- * This answers "is this address usable from here", not "does it have my
- * package": a registry that answers 401 has proved the address and the token are
- * the thing to look at, which is exactly what the person who just pasted an
- * address needs to know. Nothing is thrown — a wrong address is a result.
+ * The endpoint is `/-/whoami`, not the registry root: a registry's root is not a
+ * package and answers 404 on a perfectly healthy source, so probing it can only
+ * ever prove "some host answered". `/-/whoami` needs no package name and answers
+ * with the authenticated user, which is the thing the person who just pasted a
+ * token actually wants to know.
+ *
+ * A source without that endpoint falls back to the root: `auth: 'unknown'` says
+ * the host answers and the credential went unchecked, rather than inventing a
+ * verdict. Nothing is thrown — a wrong address is a result, not an exception.
  */
 export async function probeRegistry(): Promise<RegistryProbe> {
   const registry = registryBase()
+  const hasToken = registryToken() !== undefined
   try {
-    const res = await fetchFromRegistry(`${registry}/`)
-    return { registry, reachable: true, status: res.status }
+    const who = await fetchFromRegistry(`${registry}/-/whoami`)
+    if (who.ok) {
+      const body = await who.json().catch(() => ({})) as { username?: unknown }
+      return {
+        registry,
+        reachable: true,
+        auth: 'ok',
+        status: who.status,
+        ...(typeof body.username === 'string' && body.username !== '' ? { user: body.username } : {}),
+      }
+    }
+    if (who.status === 401 || who.status === 403) {
+      // The endpoint exists and refused us: that is a verdict about the token,
+      // and whether a token was sent at all decides which one.
+      return { registry, reachable: true, auth: hasToken ? 'rejected' : 'required', status: who.status }
+    }
+    const root = await fetchFromRegistry(`${registry}/`)
+    return { registry, reachable: true, auth: 'unknown', status: root.status }
   } catch (error) {
-    return { registry, reachable: false, detail: error instanceof Error ? error.message : String(error) }
+    return {
+      registry,
+      reachable: false,
+      auth: 'unknown',
+      detail: error instanceof Error ? error.message : String(error),
+    }
   }
 }

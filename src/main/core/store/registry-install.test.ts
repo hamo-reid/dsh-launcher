@@ -31,6 +31,7 @@ import type { AddressInfo } from 'node:net'
 import { openDatabase, patchSettings } from '../settings/settings.ts'
 import { configurePnpmRegistryEnv, configurePnpmStore, runPnpm } from '../dsh/pnpm.ts'
 import { applyRegistryConfig } from './registry-config.ts'
+import { probeRegistry } from './npm.ts'
 import { REGISTRY_TOKEN_ENV, setRegistryToken, setRegistryTokenCipher } from './registry-auth.ts'
 
 /** The only credential the probe registry accepts. `_authToken` reaches the wire
@@ -67,6 +68,9 @@ async function buildTarball(dir: string): Promise<Uint8Array<ArrayBufferLike>> {
   return new Uint8Array(readFileSync(join(out, file)))
 }
 
+/** Whether this source implements `/-/whoami` (a real one may not). */
+let whoamiEnabled = true
+
 /** One request answered the way a private registry answers it. */
 function respond(req: { url?: string; headers: Record<string, unknown> }, res: import('node:http').ServerResponse): void {
   if (req.headers.authorization !== expectedAuth) {
@@ -75,6 +79,17 @@ function respond(req: { url?: string; headers: Record<string, unknown> }, res: i
     return
   }
   const path = decodeURIComponent((req.url ?? '/').split('?')[0] ?? '/')
+  if (path === '/-/whoami') {
+    if (!whoamiEnabled) {
+      // The shape CNB gives for a route it does not implement.
+      res.writeHead(404, { 'content-type': 'application/json' })
+      res.end('{"error":"route not matched"}')
+      return
+    }
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end('{"username":"probe-user"}')
+    return
+  }
   if (path === `/${PACKAGE}`) {
     const metadata = {
       name: PACKAGE,
@@ -173,4 +188,33 @@ describe('installing from a private registry', () => {
     expect(result.text).toMatch(/401|unauthori[sz]ed|ERR_PNPM/i)
     expect(existsSync(join(dir, 'node_modules', '@probe', 'thing'))).toBe(false)
   }, 120000)
+})
+
+describe('the connection test', () => {
+  // The button exists to separate two questions with different fixes: is the
+  // ADDRESS right, and is the TOKEN right. A registry's root answering 404 is
+  // normal, so the root is not what gets probed.
+  beforeEach(() => { whoamiEnabled = true })
+
+  it('names the authenticated user', async () => {
+    setRegistryToken(TOKEN)
+    expect(await probeRegistry()).toMatchObject({ reachable: true, auth: 'ok', user: 'probe-user' })
+  })
+
+  it('reports a wrong token as rejected, not as an unreachable host', async () => {
+    setRegistryToken('not-the-right-token')
+    expect(await probeRegistry()).toMatchObject({ reachable: true, auth: 'rejected', status: 401 })
+  })
+
+  it('asks for a token when none was sent', async () => {
+    expect(await probeRegistry()).toMatchObject({ reachable: true, auth: 'required', status: 401 })
+  })
+
+  it('says the credential went unchecked when the source has no whoami route', async () => {
+    // The honest answer for a source that only implements packages: the host
+    // answered, and nothing here can vouch for the token.
+    whoamiEnabled = false
+    setRegistryToken(TOKEN)
+    expect(await probeRegistry()).toMatchObject({ reachable: true, auth: 'unknown', status: 404 })
+  })
 })

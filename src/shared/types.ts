@@ -804,13 +804,22 @@ export interface RegistryAuthState {
   encryption: 'none' | 'safe' | 'plaintext'
 }
 
-/** Result of reaching the configured registry (Settings "test" button). */
+/** Result of reaching the configured registry (Settings "test" button).
+ *
+ * Split into the two questions a person actually has: did the address answer, and
+ * did the credential work. They have different fixes, so they get different
+ * answers — `unknown` is a real answer for a source with no `/-/whoami`. */
 export interface RegistryProbe {
   /** The registry that was asked, already normalized. */
   registry: string
   /** False when the request never completed (offline, bad host, TLS). */
   reachable: boolean
-  /** The HTTP status, when a response came back at all. */
+  /** How the credential checked out. `required` = no token configured and the
+   * source wants one; `rejected` = a token was sent and refused. */
+  auth: 'ok' | 'rejected' | 'required' | 'unknown'
+  /** The authenticated user, when the source names one. */
+  user?: string
+  /** The HTTP status behind the verdict, when a response came back. */
   status?: number
   /** The transport error, when `reachable` is false. */
   detail?: string

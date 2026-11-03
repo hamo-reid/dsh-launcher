@@ -82,6 +82,20 @@ export function registryFor(packageName: string): string {
 let warnedScope: string | undefined
 
 /**
+ * The registry a *search* runs against.
+ *
+ * Search has no package name, so it cannot be routed per package — it takes the
+ * broad half of the routing instead. With no scope the configured registry
+ * answers for everything, and so it answers searches too. With a scope it holds
+ * one scope and nothing else, and a scoped artifact repository (CNB's, for one)
+ * typically implements no `/-/v1/search` at all: searching it would 404 while
+ * every package the user is looking for sits on the public registry.
+ */
+export function registryForSearch(): string {
+  return normalizeScope(loadSettings().registryScope) === undefined ? registryBase() : PUBLIC_REGISTRY
+}
+
+/**
  * A stable description of the current routing, for cache keys.
  *
  * A version list comes from a HOST, and both halves of the routing decide which

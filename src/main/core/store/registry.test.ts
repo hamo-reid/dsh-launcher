@@ -15,7 +15,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { exportSettings, importSettings, loadSettings, openDatabase, patchSettings } from '../settings/settings.ts'
-import { PUBLIC_REGISTRY, registryBase, registryFor } from './registry.ts'
+import { PUBLIC_REGISTRY, registryBase, registryFor, registryForSearch } from './registry.ts'
 import { normalizeSettings, splitPrefs, CURRENT_SCHEMA_VERSION } from '../settings/normalize.ts'
 
 let root: string
@@ -99,6 +99,19 @@ describe('registryFor', () => {
     // make the user's own plugins unfindable with no explanation.
     expect(routed('has space', '@hamo-studio/x')).toBe(privateBase)
     expect(routed('has space', 'lodash')).toBe(privateBase)
+  })
+
+  it('searches the private source only when it answers for everything', () => {
+    // Search has no package name, so it cannot be routed per package. A scoped
+    // private source holds one scope and may implement no search endpoint at all
+    // (CNB's answers 404 on /-/v1/search), while everything being searched for
+    // lives on the public one.
+    patchSettings({ registryUrl: privateBase, registryScope: '@hamo-studio' })
+    expect(registryForSearch()).toBe(PUBLIC_REGISTRY)
+    patchSettings({ registryScope: undefined })
+    expect(registryForSearch()).toBe(privateBase)
+    patchSettings({ registryUrl: undefined })
+    expect(registryForSearch()).toBe(PUBLIC_REGISTRY)
   })
 })
 

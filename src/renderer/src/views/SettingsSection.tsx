@@ -228,6 +228,32 @@ export default function SettingsSection() {
     })
   }
 
+  /** What the probe means, as one severity and one sentence.
+   *
+   * A registry's root answering 404 is normal, so a status code is never the
+   * headline: the answer is about the ADDRESS and the CREDENTIAL, which need
+   * different fixes. */
+  const probeAlert = (probe: RegistryProbe): { type: 'success' | 'info' | 'warning' | 'error'; text: string } => {
+    if (!probe.reachable) {
+      return { type: 'error', text: t('settings.registry.probeUnreachable', { detail: probe.detail ?? '' }) }
+    }
+    if (probe.auth === 'ok') {
+      return {
+        type: 'success',
+        text: probe.user !== undefined
+          ? t('settings.registry.probeOkUser', { registry: probe.registry, user: probe.user })
+          : t('settings.registry.probeOk', { registry: probe.registry }),
+      }
+    }
+    if (probe.auth === 'rejected') {
+      return { type: 'warning', text: t('settings.registry.probeRejected', { registry: probe.registry, status: probe.status ?? 0 }) }
+    }
+    if (probe.auth === 'required') {
+      return { type: 'warning', text: t('settings.registry.probeNeedsToken', { registry: probe.registry }) }
+    }
+    return { type: 'info', text: t('settings.registry.probeUnverified', { registry: probe.registry }) }
+  }
+
   const muted = { color: token.colorTextSecondary, fontSize: token.fontSizeSM }
 
   return (
@@ -495,13 +521,9 @@ export default function SettingsSection() {
                 {registryProbe !== undefined && (
                   <Alert
                     style={{ marginTop: token.paddingSM }}
-                    type={registryProbe.reachable && registryProbe.status !== undefined && registryProbe.status < 400 ? 'success' : 'warning'}
+                    type={probeAlert(registryProbe).type}
                     showIcon
-                    title={registryProbe.reachable
-                      ? registryProbe.status === 401 || registryProbe.status === 403
-                        ? t('settings.registry.testDenied', { registry: registryProbe.registry, status: registryProbe.status })
-                        : t('settings.registry.testOk', { registry: registryProbe.registry, status: registryProbe.status ?? 0 })
-                      : t('settings.registry.testFailed', { detail: registryProbe.detail ?? '' })}
+                    title={probeAlert(registryProbe).text}
                   />
                 )}
               </div>
