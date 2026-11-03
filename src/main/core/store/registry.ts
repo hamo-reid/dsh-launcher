@@ -82,18 +82,21 @@ export function registryFor(packageName: string): string {
 let warnedScope: string | undefined
 
 /**
- * The registry a *search* runs against.
+ * The registry a SEARCH runs against.
  *
- * Search has no package name, so it cannot be routed per package — it takes the
- * broad half of the routing instead. With no scope the configured registry
- * answers for everything, and so it answers searches too. With a scope it holds
- * one scope and nothing else, and a scoped artifact repository (CNB's, for one)
- * typically implements no `/-/v1/search` at all: searching it would 404 while
- * every package the user is looking for sits on the public registry.
+ * Deliberately **not** `registryBase()`, and the distinction is the whole point:
+ * search is discovery, resolution is installation. A private registry is a place
+ * packages are fetched from *by name*; the standard registry protocol puts no
+ * obligation on it to implement `/-/v1/search`, and plenty do not. Routing search
+ * there turned "I configured a private source" into "the download centre stopped
+ * working" — one setting quietly breaking an unrelated feature.
+ *
+ * Everything package-scoped still routes through `registryFor`, so a private
+ * plugin is still resolved (and installed) from the private source. Only the
+ * catalogue you browse stays public, which is also the only catalogue that can
+ * answer a keyword.
  */
-export function registryForSearch(): string {
-  return normalizeScope(loadSettings().registryScope) === undefined ? registryBase() : PUBLIC_REGISTRY
-}
+export const SEARCH_REGISTRY = PUBLIC_REGISTRY
 
 /**
  * A stable description of the current routing, for cache keys.

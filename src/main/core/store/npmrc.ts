@@ -96,9 +96,9 @@ export function matchesScope(name: string, scope: string): boolean {
  * `//host[:port]/path/`, path included and always ending in `/`.
  *
  * The path is what keeps the token from being offered to every other repository
- * on the same host — a CNB artifact repository lives under
- * `/<org>/<repo>/-/packages/`, and `//host/` alone would authorize the whole
- * domain.
+ * on the same host — a registry mounted under a path prefix (an artifact
+ * repository at `/<org>/<repo>/-/packages/`, say) would otherwise be authorized
+ * for the whole domain.
  */
 export function authKeyFor(registry: string): string | undefined {
   let url: URL

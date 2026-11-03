@@ -103,18 +103,31 @@ describe('fetchPackageVersions', () => {
 describe('npmSearch', () => {
   afterEach(() => vi.unstubAllGlobals())
 
-  it('asks the CONFIGURED registry, not the public one', async () => {
-    // The invariant this module exists for: choosing a version and installing it
-    // must resolve against the same registry. Both URLs were hardcoded before.
+  it('asks the CONFIGURED registry for a package\'s versions', async () => {
+    // The invariant `fetchPackageVersions` exists for: choosing a version and
+    // installing it must resolve against the same registry.
     const seen: string[] = []
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       seen.push(url)
       return { ok: true, status: 200, json: async () => ({}) }
     }))
     await fetchPackageVersions('@deepseek-ai/dsh')
-    await npmSearch('dsh')
     expect(seen[0]).toBe(`https://registry.internal.example/${encodeURIComponent('@deepseek-ai/dsh')}`)
-    expect(seen[1]).toContain('https://registry.internal.example/-/v1/search')
+  })
+
+  it('asks the PUBLIC registry even when a private one is configured', async () => {
+    // Search is discovery, not resolution. Routing it at the configured source
+    // meant one setting silently broke the download centre: a private registry
+    // is under no obligation to answer `/-/v1/search`, and the ones that do not
+    // answer 404.
+    const seen: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      seen.push(url)
+      return { ok: true, status: 200, json: async () => ({}) }
+    }))
+    await npmSearch('dsh')
+    expect(seen[0]).toContain('https://registry.npmjs.org/-/v1/search')
+    expect(seen[0]).not.toContain('registry.internal.example')
   })
 
   it('falls back to the public registry with no configured one', async () => {

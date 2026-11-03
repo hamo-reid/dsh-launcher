@@ -16,12 +16,14 @@ import { join } from 'node:path'
 import { openDatabase, patchSettings, loadSettings } from '../settings/settings.ts'
 import { exportSettings } from '../settings/settings.ts'
 import {
-  REGISTRY_TOKEN_ENV, REGISTRY_USER, privateRegistrySource, registryAuthCandidates, registryAuthState,
+  REGISTRY_TOKEN_ENV, privateRegistrySource, registryAuthHeader, registryAuthState,
   registryToken, setRegistryToken, setRegistryTokenCipher,
 } from './registry-auth.ts'
 import type { SecretCipher } from '../settings/secret-at-rest.ts'
 
-const CNB = 'https://npm.cnb.cool/hamo-studio/hamo-dsh/-/packages'
+/** Any private registry URL. The host is incidental — nothing in this module
+ * branches on one. */
+const PRIVATE = 'https://npm.internal.example/hamo-studio/hamo-dsh/-/packages'
 
 /** A stand-in for Electron safeStorage: reversible and obviously not the secret. */
 const fakeCipher: SecretCipher = {
@@ -48,7 +50,7 @@ beforeEach(() => {
 
 describe('registryToken', () => {
   it('round-trips a token through the encrypted envelope', () => {
-    patchSettings({ registryUrl: CNB })
+    patchSettings({ registryUrl: PRIVATE })
     setRegistryToken('secret-token')
     expect(loadSettings().registryTokenEnc).toBe('enc(secret-token)')
     expect(registryToken()).toBe('secret-token')
@@ -87,67 +89,66 @@ describe('registryToken', () => {
   })
 })
 
-describe('registryAuthCandidates', () => {
-  it('offers Bearer first, because that is what an _authToken becomes on the wire', () => {
-    // Verified end to end in `registry-install.test.ts`: pnpm sends `_authToken`
-    // as `Bearer`. The lookup must authenticate the same way as the install it
-    // precedes.
-    patchSettings({ registryUrl: CNB })
+describe('registryAuthHeader', () => {
+  it('sends the token the way the generated .npmrc does', () => {
+    // Verified end to end in `registry-install.test.ts`: pnpm puts an
+    // `_authToken` on the wire as `Bearer`. One scheme and no fallback — a
+    // user-name-and-password pair is a different npm mechanism (`_auth`), and
+    // guessing a user name on the caller's behalf is not this module's job.
+    patchSettings({ registryUrl: PRIVATE })
     setRegistryToken('secret-token')
-    expect(registryAuthCandidates(`${CNB}/@hamo-studio%2Fplugin`)).toEqual([
-      { authorization: 'Bearer secret-token' },
-      { authorization: basic(REGISTRY_USER, 'secret-token') },
-    ])
+    expect(registryAuthHeader(`${PRIVATE}/@hamo-studio%2Fplugin`)).toEqual({
+      authorization: 'Bearer secret-token',
+    })
   })
 
-  it('signs the registry base itself, including the search endpoint', () => {
-    patchSettings({ registryUrl: CNB })
+  it('signs the registry base itself', () => {
+    patchSettings({ registryUrl: PRIVATE })
     setRegistryToken('secret-token')
-    expect(registryAuthCandidates(CNB)[0]?.authorization).toBe('Bearer secret-token')
-    expect(registryAuthCandidates(`${CNB}/-/v1/search?text=x`)[0]?.authorization).toBe('Bearer secret-token')
+    expect(registryAuthHeader(PRIVATE)).toEqual({ authorization: 'Bearer secret-token' })
   })
 
   it('never signs a request to another host', () => {
     // The whole point: `registryFor` sends every out-of-scope package to the
     // public registry, and that request must not carry a private credential.
-    patchSettings({ registryUrl: CNB })
+    patchSettings({ registryUrl: PRIVATE })
     setRegistryToken('secret-token')
-    expect(registryAuthCandidates('https://registry.npmjs.org/lodash')).toEqual([])
+    expect(registryAuthHeader('https://registry.npmjs.org/lodash')).toEqual({})
     // A host that merely starts with the same characters is not the same host.
-    expect(registryAuthCandidates('https://npm.cnb.cool.evil.example/x')).toEqual([])
+    expect(registryAuthHeader('https://npm.internal.example.evil.example/x')).toEqual({})
   })
 
   it('answers nothing when no token is configured', () => {
-    patchSettings({ registryUrl: CNB })
-    expect(registryAuthCandidates(`${CNB}/x`)).toEqual([])
+    patchSettings({ registryUrl: PRIVATE })
+    expect(registryAuthHeader(`${PRIVATE}/x`)).toEqual({})
   })
 
   it('answers nothing when no registry is configured', () => {
     setRegistryToken('secret-token')
-    expect(registryAuthCandidates(`${CNB}/x`)).toEqual([])
+    expect(registryAuthHeader(`${PRIVATE}/x`)).toEqual({})
   })
 })
 
 describe('privateRegistrySource', () => {
   it('names the token variable, never the token', () => {
-    patchSettings({ registryUrl: CNB, registryScope: '@hamo-studio' })
+    patchSettings({ registryUrl: PRIVATE, registryScope: '@hamo-studio' })
     setRegistryToken('secret-token')
     const source = privateRegistrySource()
-    expect(source).toEqual({ registry: CNB, scope: '@hamo-studio', tokenEnv: REGISTRY_TOKEN_ENV })
+    expect(source).toEqual({ registry: PRIVATE, scope: '@hamo-studio', tokenEnv: REGISTRY_TOKEN_ENV })
     expect(JSON.stringify(source)).not.toContain('secret-token')
   })
 
   it('describes a scope-less source, which means "everything goes here"', () => {
-    patchSettings({ registryUrl: CNB })
+    patchSettings({ registryUrl: PRIVATE })
     setRegistryToken('secret-token')
-    expect(privateRegistrySource()).toEqual({ registry: CNB, tokenEnv: REGISTRY_TOKEN_ENV })
+    expect(privateRegistrySource()).toEqual({ registry: PRIVATE, tokenEnv: REGISTRY_TOKEN_ENV })
   })
 
   it('asks for no auth line when there is no token', () => {
     // A public mirror: writing an auth line that points at an unset variable
     // would fail every install with a 401.
-    patchSettings({ registryUrl: CNB })
-    expect(privateRegistrySource()).toEqual({ registry: CNB })
+    patchSettings({ registryUrl: PRIVATE })
+    expect(privateRegistrySource()).toEqual({ registry: PRIVATE })
   })
 
   it('answers undefined when nothing is configured at all', () => {

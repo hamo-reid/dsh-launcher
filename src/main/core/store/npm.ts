@@ -1,32 +1,24 @@
 /** Query the npm registry: search for plugin candidates + list a package's
- * versions. The base URL comes from the configured registry (`store/registry.ts`)
- * so the launcher's own lookups and the packages pnpm later installs come from
- * one place. The raw-normalization functions are exported for unit tests so the
- * HTTP calls stay out of the test path. */
+ * versions.
+ *
+ * The two operations resolve against different bases on purpose: a version list
+ * is package-scoped and follows the routing (`registryFor`), while a keyword
+ * search only ever asks the public catalogue (`SEARCH_REGISTRY`). The
+ * raw-normalization functions are exported so the unit tests stay off the wire. */
 
 import type { NpmSearchHit, PackageVersionInfo, RegistryProbe } from '../../../shared/types.ts'
 import { logger } from '../shared/logger.ts'
-import { registryAuthCandidates, registryToken } from './registry-auth.ts'
-import { registryBase, registryFor, registryForSearch } from './registry.ts'
+import { registryAuthHeader, registryToken } from './registry-auth.ts'
+import { registryBase, registryFor, SEARCH_REGISTRY } from './registry.ts'
 
 /**
- * Fetch from a registry, carrying the credential when the URL belongs to the
- * configured private one.
- *
- * The candidates are tried in order on 401/403: `Bearer` is what pnpm sends for
- * an `_authToken`, so it is what a registry behind that file expects; `Basic`
- * covers the registries that authenticate with a user name instead. The point of
- * the fallback is that the lookup in front of an install must not fail where the
- * install itself would have succeeded.
+ * Fetch from the configured registry, carrying the credential when the URL
+ * belongs to it. One scheme (`Bearer`) because that is what the generated
+ * `.npmrc` produces — the lookup in front of an install must authenticate the
+ * same way as the install itself.
  */
 async function fetchFromRegistry(url: string): Promise<Response> {
-  const [first, ...rest] = registryAuthCandidates(url)
-  let res = await fetch(url, { headers: first ?? {} })
-  for (const headers of rest) {
-    if (res.status !== 401 && res.status !== 403) return res
-    res = await fetch(url, { headers })
-  }
-  return res
+  return await fetch(url, { headers: registryAuthHeader(url) })
 }
 
 /** Raw shape of one registry search result. */
@@ -78,12 +70,12 @@ export async function npmSearch(
   const size = opts.size ?? 25
   const from = opts.from ?? 0
   logger.debug(`npm search: "${query}" (${size})`)
-  const base = registryForSearch()
-  const url = `${base}/-/v1/search?text=${encodeURIComponent(query)}&size=${size}&from=${from}`
-  // Search has no package name to route by, so it follows the broad half of the
-  // routing (see `registryForSearch`). It carries the credential only when that
-  // IS the private registry.
-  const res = await fetchFromRegistry(url)
+  // The public catalogue, never the configured private source: a registry is a
+  // place packages are fetched from by name, and it is under no obligation to
+  // answer a keyword. No credential goes with this request — it is a different
+  // host, and the token authorizes one registry.
+  const url = `${SEARCH_REGISTRY}/-/v1/search?text=${encodeURIComponent(query)}&size=${size}&from=${from}`
+  const res = await fetch(url)
   if (!res.ok) throw new Error(`npm search failed: HTTP ${res.status}`)
   const data = await res.json() as RawSearchResponse
   const result = normalizeSearchResults(data)

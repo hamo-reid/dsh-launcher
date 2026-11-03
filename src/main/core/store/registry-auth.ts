@@ -20,10 +20,6 @@ import { normalizeScope } from './npmrc.ts'
 import type { PrivateSource } from './npmrc.ts'
 import type { RegistryAuthState } from '../../../shared/types.ts'
 
-/** The user name CNB artifact repositories expect with a token. Registries that
- * authenticate with a bare bearer token ignore it, so one value covers both. */
-export const REGISTRY_USER = 'cnb'
-
 /** The variable the generated `.npmrc` refers to. One name is enough: the token
  * authorizes exactly one registry — the configured one. */
 export const REGISTRY_TOKEN_ENV = 'PM_REGISTRY_TOKEN'
@@ -97,29 +93,26 @@ function bare(value: string): string {
 }
 
 /**
- * `Authorization` candidates for a request to `url`, most likely first; empty
- * when the request is not for the configured registry or there is no token.
+ * The `Authorization` header for a request to `url`, or `{}` when the request is
+ * not for the configured registry (or no token is saved).
  *
- * `Bearer` comes first because that is what pnpm puts on the wire for an
- * `_authToken` line — the spelling the generated `.npmrc` uses — so the lookup
- * that decides "which versions exist" authenticates the same way as the install
- * that follows it. A registry that wants a user name and password instead
- * (GitHub Packages, some self-hosted setups) answers 401 and gets the `Basic`
- * attempt rather than surfacing as "package not found".
+ * `Bearer` is the only scheme: it is what pnpm puts on the wire for the
+ * `_authToken` line in the generated `.npmrc`, so the lookup that decides "which
+ * versions exist" authenticates exactly like the install that follows it. The
+ * registry protocol's `_authToken` is a bearer token — a user name and password
+ * pair is a different mechanism (`_auth`), and inventing one here meant guessing
+ * a user name on the caller's behalf.
  *
- * Only the configured registry gets either: the routing in `store/registry.ts`
- * sends every other package to the public registry, and a token attached to
- * those requests would hand a private credential to a third party.
+ * Only the configured registry gets it: the routing in `store/registry.ts` sends
+ * every other package to the public registry, and attaching the credential there
+ * would hand a private token to a third party.
  */
-export function registryAuthCandidates(url: string): Record<string, string>[] {
+export function registryAuthHeader(url: string): Record<string, string> {
   const token = registryToken()
-  if (token === undefined) return []
+  if (token === undefined) return {}
   const base = bare(loadSettings().registryUrl ?? '')
-  if (base === '') return []
+  if (base === '') return {}
   const target = bare(url)
-  if (target !== base && !target.startsWith(`${base}/`)) return []
-  return [
-    { authorization: `Bearer ${token}` },
-    { authorization: `Basic ${Buffer.from(`${REGISTRY_USER}:${token}`, 'utf8').toString('base64')}` },
-  ]
+  if (target !== base && !target.startsWith(`${base}/`)) return {}
+  return { authorization: `Bearer ${token}` }
 }

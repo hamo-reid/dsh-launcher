@@ -16,7 +16,7 @@ import { openDatabase, patchSettings } from '../settings/settings.ts'
 import { applyRegistryConfig, REGISTRY_NPMRC } from './registry-config.ts'
 import { REGISTRY_TOKEN_ENV, setRegistryToken, setRegistryTokenCipher } from './registry-auth.ts'
 
-const CNB = 'https://npm.cnb.cool/hamo-studio/hamo-dsh/-/packages'
+const PRIVATE = 'https://npm.internal.example/hamo-studio/hamo-dsh/-/packages'
 
 let root: string
 
@@ -39,7 +39,7 @@ beforeEach(() => {
 describe('applyRegistryConfig', () => {
   it('writes the file and returns the environment pnpm needs', () => {
     const dir = mkdtempSync(join(root, 'ok-'))
-    patchSettings({ registryUrl: CNB, registryScope: '@hamo-studio' })
+    patchSettings({ registryUrl: PRIVATE, registryScope: '@hamo-studio' })
     setRegistryToken('secret-token')
     const env = applyRegistryConfig(dir)
     expect(env).toEqual({
@@ -47,9 +47,9 @@ describe('applyRegistryConfig', () => {
       [REGISTRY_TOKEN_ENV]: 'secret-token',
     })
     const text = readFileSync(join(dir, REGISTRY_NPMRC), 'utf8')
-    expect(text).toContain(`@hamo-studio:registry=${CNB}`)
+    expect(text).toContain(`@hamo-studio:registry=${PRIVATE}`)
     expect(text).toContain('registry=https://registry.npmjs.org')
-    expect(text).toContain(`//npm.cnb.cool/hamo-studio/hamo-dsh/-/packages/:_authToken=\${${REGISTRY_TOKEN_ENV}}`)
+    expect(text).toContain(`//npm.internal.example/hamo-studio/hamo-dsh/-/packages/:_authToken=\${${REGISTRY_TOKEN_ENV}}`)
     // The structural half of the guarantee: the file names the variable, so a
     // copy of it is not a copy of the credential.
     expect(text).not.toContain('secret-token')
@@ -59,7 +59,7 @@ describe('applyRegistryConfig', () => {
     // A public mirror. Writing our own file would replace whatever the user has
     // configured — a corporate proxy, another registry's auth — for no gain.
     const dir = mkdtempSync(join(root, 'pub-'))
-    patchSettings({ registryUrl: CNB })
+    patchSettings({ registryUrl: PRIVATE })
     expect(applyRegistryConfig(dir)).toEqual({})
     expect(existsSync(join(dir, REGISTRY_NPMRC))).toBe(false)
   })
@@ -73,7 +73,7 @@ describe('applyRegistryConfig', () => {
   it('is idempotent, and rewrites when the settings move on', () => {
     const dir = mkdtempSync(join(root, 'churn-'))
     const file = join(dir, REGISTRY_NPMRC)
-    patchSettings({ registryUrl: CNB })
+    patchSettings({ registryUrl: PRIVATE })
     setRegistryToken('one')
     applyRegistryConfig(dir)
     const first = readFileSync(file, 'utf8')
@@ -93,7 +93,7 @@ describe('applyRegistryConfig', () => {
     // run with whatever npm configuration the machine already has.
     const dir = join(mkdtempSync(join(root, 'blocked-')), 'not-a-dir')
     writeFileSync(dir, 'x', 'utf8')
-    patchSettings({ registryUrl: CNB })
+    patchSettings({ registryUrl: PRIVATE })
     setRegistryToken('secret-token')
     expect(applyRegistryConfig(dir)).toEqual({})
   })
@@ -101,7 +101,7 @@ describe('applyRegistryConfig', () => {
   it('does not nest the file inside a directory that already exists empty', () => {
     const dir = join(mkdtempSync(join(root, 'existing-')), 'nested')
     mkdirSync(dir)
-    patchSettings({ registryUrl: CNB })
+    patchSettings({ registryUrl: PRIVATE })
     setRegistryToken('secret-token')
     applyRegistryConfig(dir)
     expect(existsSync(join(dir, REGISTRY_NPMRC))).toBe(true)

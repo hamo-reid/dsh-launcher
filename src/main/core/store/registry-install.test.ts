@@ -81,7 +81,7 @@ function respond(req: { url?: string; headers: Record<string, unknown> }, res: i
   const path = decodeURIComponent((req.url ?? '/').split('?')[0] ?? '/')
   if (path === '/-/whoami') {
     if (!whoamiEnabled) {
-      // The shape CNB gives for a route it does not implement.
+      // How a registry that does not implement the route answers.
       res.writeHead(404, { 'content-type': 'application/json' })
       res.end('{"error":"route not matched"}')
       return

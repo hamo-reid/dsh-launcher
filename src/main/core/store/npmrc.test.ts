@@ -13,23 +13,23 @@ import {
   authKeyFor, buildNpmrc, matchesScope, normalizeScope, parseRegistry, registryEnv, scopeOfName,
 } from './npmrc.ts'
 
-const CNB = 'https://npm.cnb.cool/hamo-studio/hamo-dsh/-/packages'
+const PRIVATE = 'https://npm.internal.example/hamo-studio/hamo-dsh/-/packages'
 
 describe('parseRegistry', () => {
   it('drops trailing slashes so one registry has one spelling', () => {
-    expect(parseRegistry(`${CNB}/`)).toBe(CNB)
-    expect(parseRegistry(`${CNB}///`)).toBe(CNB)
+    expect(parseRegistry(`${PRIVATE}/`)).toBe(PRIVATE)
+    expect(parseRegistry(`${PRIVATE}///`)).toBe(PRIVATE)
   })
 
   it('keeps the path a registry is mounted under', () => {
-    // CNB artifact repositories live under `<org>/<repo>/-/packages/`; collapsing
-    // that to the host would ask the wrong endpoint for every package.
-    expect(parseRegistry(CNB)).toBe(CNB)
+    // Plenty of registries live under a path prefix (`<org>/<repo>/-/packages/`);
+    // collapsing that to the host would ask the wrong endpoint for every package.
+    expect(parseRegistry(PRIVATE)).toBe(PRIVATE)
     expect(parseRegistry('https://mirror.example/npm')).toBe('https://mirror.example/npm')
   })
 
   it('trims what a text field hands over', () => {
-    expect(parseRegistry(`  ${CNB}  `)).toBe(CNB)
+    expect(parseRegistry(`  ${PRIVATE}  `)).toBe(PRIVATE)
   })
 
   it('answers undefined for anything unusable, rather than a half-value', () => {
@@ -74,8 +74,8 @@ describe('authKeyFor', () => {
   it('keeps the path and always ends in a slash', () => {
     // The path is the whole point: `//host/` would offer the token to every
     // repository on the same host.
-    expect(authKeyFor(CNB)).toBe('//npm.cnb.cool/hamo-studio/hamo-dsh/-/packages/')
-    expect(authKeyFor(`${CNB}/`)).toBe('//npm.cnb.cool/hamo-studio/hamo-dsh/-/packages/')
+    expect(authKeyFor(PRIVATE)).toBe('//npm.internal.example/hamo-studio/hamo-dsh/-/packages/')
+    expect(authKeyFor(`${PRIVATE}/`)).toBe('//npm.internal.example/hamo-studio/hamo-dsh/-/packages/')
   })
 
   it('keeps a port, because a self-hosted registry usually has one', () => {
@@ -93,26 +93,26 @@ describe('buildNpmrc', () => {
 
   it('sends everything to the private source when no scope is set', () => {
     // The internal-mirror case: one registry that also proxies the public one.
-    const text = buildNpmrc({ registry: CNB }, opts)
-    expect(text).toBe(`registry=${CNB}\n`)
+    const text = buildNpmrc({ registry: PRIVATE }, opts)
+    expect(text).toBe(`registry=${PRIVATE}\n`)
   })
 
   it('redirects only the scope, and pins the default explicitly', () => {
     // Pinning the default matters: the generated file REPLACES the user config
     // pnpm would otherwise read, so leaving it out would change where every
     // other package resolves from.
-    const text = buildNpmrc({ registry: CNB, scope: '@hamo-studio' }, opts)
+    const text = buildNpmrc({ registry: PRIVATE, scope: '@hamo-studio' }, opts)
     expect(text).toBe(
-      `registry=https://registry.npmjs.org\n@hamo-studio:registry=${CNB}\n`,
+      `registry=https://registry.npmjs.org\n@hamo-studio:registry=${PRIVATE}\n`,
     )
   })
 
   it('names the token variable instead of writing a token', () => {
-    const text = buildNpmrc({ registry: CNB, scope: '@hamo-studio', tokenEnv: 'PM_REGISTRY_TOKEN' }, opts)
+    const text = buildNpmrc({ registry: PRIVATE, scope: '@hamo-studio', tokenEnv: 'PM_REGISTRY_TOKEN' }, opts)
     expect(text).toBe(
       'registry=https://registry.npmjs.org\n' +
-      `@hamo-studio:registry=${CNB}\n` +
-      '//npm.cnb.cool/hamo-studio/hamo-dsh/-/packages/:_authToken=${PM_REGISTRY_TOKEN}\n' +
+      `@hamo-studio:registry=${PRIVATE}\n` +
+      '//npm.internal.example/hamo-studio/hamo-dsh/-/packages/:_authToken=${PM_REGISTRY_TOKEN}\n' +
       'always-auth=true\n',
     )
     // The structural half of the guarantee: nothing token-shaped can be in here,
@@ -121,7 +121,7 @@ describe('buildNpmrc', () => {
   })
 
   it('omits the auth lines when the source needs no token', () => {
-    const text = buildNpmrc({ registry: CNB }, opts) ?? ''
+    const text = buildNpmrc({ registry: PRIVATE }, opts) ?? ''
     expect(text).not.toContain('_authToken')
     expect(text).not.toContain('always-auth')
   })
@@ -129,7 +129,7 @@ describe('buildNpmrc', () => {
   it('refuses to describe a source it cannot authenticate to', () => {
     // A bad variable name is a configuration mistake. Emitting the file without
     // the auth line would turn it into a 401 that looks like an expired token.
-    expect(buildNpmrc({ registry: CNB, tokenEnv: 'bad-name' }, opts)).toBeUndefined()
+    expect(buildNpmrc({ registry: PRIVATE, tokenEnv: 'bad-name' }, opts)).toBeUndefined()
     expect(buildNpmrc({ registry: 'nonsense', tokenEnv: 'PM_TOKEN' }, opts)).toBeUndefined()
   })
 })

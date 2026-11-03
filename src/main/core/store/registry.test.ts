@@ -15,7 +15,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { exportSettings, importSettings, loadSettings, openDatabase, patchSettings } from '../settings/settings.ts'
-import { PUBLIC_REGISTRY, registryBase, registryFor, registryForSearch } from './registry.ts'
+import { PUBLIC_REGISTRY, registryBase, registryFor, SEARCH_REGISTRY } from './registry.ts'
 import { normalizeSettings, splitPrefs, CURRENT_SCHEMA_VERSION } from '../settings/normalize.ts'
 
 let root: string
@@ -58,7 +58,7 @@ describe('registryBase', () => {
 })
 
 describe('registryFor', () => {
-  const privateBase = 'https://npm.cnb.cool/hamo-studio/hamo-dsh/-/packages'
+  const privateBase = 'https://npm.internal.example/hamo-studio/hamo-dsh/-/packages'
 
   const routed = (scope: string | undefined, name: string): string => {
     patchSettings({ registryUrl: privateBase, registryScope: scope })
@@ -101,17 +101,15 @@ describe('registryFor', () => {
     expect(routed('has space', 'lodash')).toBe(privateBase)
   })
 
-  it('searches the private source only when it answers for everything', () => {
-    // Search has no package name, so it cannot be routed per package. A scoped
-    // private source holds one scope and may implement no search endpoint at all
-    // (CNB's answers 404 on /-/v1/search), while everything being searched for
-    // lives on the public one.
+  it('keeps search on the public catalogue whatever the source is', () => {
+    // The setting governs RESOLUTION (which versions exist, and where they are
+    // installed from), never DISCOVERY. A private registry is a place packages
+    // are fetched from by name; routing a keyword search there meant one setting
+    // silently broke the download centre's search.
     patchSettings({ registryUrl: privateBase, registryScope: '@hamo-studio' })
-    expect(registryForSearch()).toBe(PUBLIC_REGISTRY)
+    expect(SEARCH_REGISTRY).toBe(PUBLIC_REGISTRY)
     patchSettings({ registryScope: undefined })
-    expect(registryForSearch()).toBe(privateBase)
-    patchSettings({ registryUrl: undefined })
-    expect(registryForSearch()).toBe(PUBLIC_REGISTRY)
+    expect(SEARCH_REGISTRY).toBe(PUBLIC_REGISTRY)
   })
 })
 
@@ -139,7 +137,7 @@ describe('settings plumbing for registryUrl', () => {
 })
 
 describe('settings plumbing for the private source', () => {
-  const privateBase = 'https://npm.cnb.cool/hamo-studio/hamo-dsh/-/packages'
+  const privateBase = 'https://npm.internal.example/hamo-studio/hamo-dsh/-/packages'
 
   it('round-trips the scope through the prefs row', () => {
     expect(normalizeSettings({ registryScope: '@hamo-studio' }).registryScope).toBe('@hamo-studio')
