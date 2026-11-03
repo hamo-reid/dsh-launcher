@@ -1123,6 +1123,9 @@ const en: typeof zh = {
     'plugin.market.added': 'Added {{date}}',
     'errors.market.forbidden': 'The token is valid but cannot read this repository (HTTP {{detail}}).',
     'errors.market.unauthorized': 'This catalog requires a token (HTTP {{detail}}) - add the catalog token in the source settings.',
+    'errors.market.badUrl': 'The address must start with http(s), e.g. https://api.cnb.cool/.../plugins.json.',
+    'errors.market.badName': 'The name cannot be empty - the market uses it to tell catalogs apart.',
+    'errors.market.duplicateName': 'Another catalog already uses that name.',
     'errors.market.badCatalog': 'This catalog cannot be saved: the URL must be http(s), the name non-empty, and no two catalogs may share a name.',
     'errors.market.entryNotFound': 'This plugin is no longer in the loaded catalog — refresh the market.',
 

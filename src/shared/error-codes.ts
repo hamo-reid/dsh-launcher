@@ -48,6 +48,12 @@ export const E = {
   marketForbidden: 'market.forbidden',
   /** A catalog could not be saved: bad URL, empty name, or a duplicate name. */
   marketBadCatalog: 'market.badCatalog',
+  /** The catalog address is not an http(s) URL. */
+  marketBadUrl: 'market.badUrl',
+  /** The catalog name is empty. */
+  marketBadName: 'market.badName',
+  /** Another catalog already uses this name. */
+  marketDuplicateName: 'market.duplicateName',
   marketEntryNotFound: 'market.entryNotFound',
   // registry (the configured npm registry a lookup / install reads from)
   registryBadUrl: 'registry.badUrl',

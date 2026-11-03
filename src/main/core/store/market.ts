@@ -161,14 +161,17 @@ function hostOf(url: string): string {
 /** Add or update one catalog. Returns false when the input cannot be saved:
  * the URL must be http(s), the name non-empty, and names are unique
  * case-insensitively because the picker shows names. */
-export function saveMarketCatalog(input: { id?: string; name: string; url: string }): boolean {
+export type SaveCatalogResult = 'ok' | 'badUrl' | 'badName' | 'duplicateName'
+
+export function saveMarketCatalog(input: { id?: string; name: string; url: string }): SaveCatalogResult {
   const url = input.url.trim()
   const name = input.name.trim()
-  if (!isHttpUrl(url) || name === '') return false
+  if (!isHttpUrl(url)) return 'badUrl'
+  if (name === '') return 'badName'
   const list = marketCatalogs()
   const id = input.id !== undefined && input.id !== '' ? input.id : 'market-' + String(Date.now())
   const clash = list.some(c => c.id !== id && c.name.toLowerCase() === name.toLowerCase())
-  if (clash) return false
+  if (clash) return 'duplicateName'
   updateSettings((draft) => {
     const entry = { id, name, url, ...(draft.marketCatalogs?.find(c => c.id === id)?.tokenEnc !== undefined
       ? { tokenEnc: draft.marketCatalogs?.find(c => c.id === id)?.tokenEnc }
@@ -178,7 +181,7 @@ export function saveMarketCatalog(input: { id?: string; name: string; url: strin
     if (draft.marketActiveId === undefined || draft.marketActiveId === '') draft.marketActiveId = id
   })
   forgetCatalog()
-  return true
+  return 'ok'
 }
 
 /** Drop one catalog. Its token goes with it; the market falls back to public

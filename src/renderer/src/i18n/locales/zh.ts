@@ -1121,6 +1121,9 @@ const zh = {
     'plugin.market.added': '收录于 {{date}}',
     'errors.market.forbidden': '令牌有效，但没有这个仓库的读取权限（HTTP {{detail}}）。',
     'errors.market.unauthorized': '这个目录需要令牌（HTTP {{detail}}）—— 在来源设置里填入目录令牌。',
+    'errors.market.badUrl': '地址要是 http(s) 开头，例如 https://api.cnb.cool/…/plugins.json。',
+    'errors.market.badName': '名称不能为空——市场用它在列表里区分目录。',
+    'errors.market.duplicateName': '已经有同名目录了，换个名称。',
     'errors.market.badCatalog': '这个目录存不下来：地址要是 http(s)，名称不能为空，也不能和别的目录重名。',
     'errors.market.entryNotFound': '该插件已不在当前目录中——请刷新市场。',
 

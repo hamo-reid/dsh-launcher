@@ -92,7 +92,10 @@ export function registerMarketIpc(): void {
         name: typeof input?.name === 'string' ? input.name : '',
         url: typeof input?.url === 'string' ? input.url : '',
       })
-      return saved ? { ok: true, value: marketSourceState() } : fail(E.marketBadCatalog)
+      if (saved === 'badUrl') return fail(E.marketBadUrl)
+      if (saved === 'badName') return fail(E.marketBadName)
+      if (saved === 'duplicateName') return fail(E.marketDuplicateName)
+      return { ok: true, value: marketSourceState() }
     } catch (error) {
       return failFromError(error)
     }
