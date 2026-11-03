@@ -51,13 +51,13 @@ describe('checkPluginUpdates cache', () => {
     seedArchived('@demo/demo', '1.0.0')
     stubRegistries({ 'mirror-a.example': '1.1.0', 'mirror-b.example': '1.0.0' })
 
-    patchSettings({ registries: [{ id: 'default', label: 'mirror', url: 'https://mirror-a.example', scope: '@demo' }] })
+    patchSettings({ registries: [{ id: 'default', label: 'mirror', url: 'https://mirror-a.example', scopes: ['@demo'] }] })
     const first = await checkPluginUpdates([], store())
     expect(first[0]).toMatchObject({ name: '@demo/demo', latest: '1.1.0', updateAvailable: true })
 
     // Same store, same versions — only the registry moved. A cached answer here
     // would report mirror A's "1.1.0 is available" against mirror B.
-    patchSettings({ registries: [{ id: 'default', label: 'mirror', url: 'https://mirror-b.example', scope: '@demo' }] })
+    patchSettings({ registries: [{ id: 'default', label: 'mirror', url: 'https://mirror-b.example', scopes: ['@demo'] }] })
     const second = await checkPluginUpdates([], store())
     expect(second[0]).toMatchObject({ latest: '1.0.0', updateAvailable: false })
   })
@@ -66,7 +66,7 @@ describe('checkPluginUpdates cache', () => {
     // The fix must not turn the cache off: an identical signature is exactly what
     // it is for, and the network check is the expensive part.
     seedArchived('@demo/cached', '1.0.0')
-    patchSettings({ registries: [{ id: 'default', label: 'mirror', url: 'https://mirror-a.example', scope: '@demo' }] })
+    patchSettings({ registries: [{ id: 'default', label: 'mirror', url: 'https://mirror-a.example', scopes: ['@demo'] }] })
     const fetchMock = vi.fn(async () => ({
       ok: true, status: 200, json: async () => ({ 'dist-tags': { latest: '1.2.0' }, versions: { '1.2.0': {} } }),
     }))

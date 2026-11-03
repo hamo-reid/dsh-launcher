@@ -156,20 +156,26 @@ export function registerSettingsIpc(): void {
           ? fail(E.registryBadUrl, { detail: rawUrl })
           : fail(E.registryBadScheme, { detail: rawUrl })
       }
-      const rawScope = typeof input.scope === 'string' ? input.scope.trim() : ''
-      // A scope is required, not optional. Without one the entry would answer for
-      // every package no other scope claims, which is exactly the ambiguity this
-      // model removed: a list of sources must not leave "which one answers" open.
-      if (rawScope === '') return fail(E.registryScopeRequired)
-      const scope = normalizeScope(rawScope)
-      if (scope === undefined) return fail(E.registryBadScope, { detail: rawScope })
+      // One registry may own several scopes; at least one is required, because an
+      // entry with none owns no package at all.
+      const rawScopes: unknown[] = Array.isArray(input.scopes) ? input.scopes : []
+      const scopes: string[] = []
+      for (const value of rawScopes) {
+        const raw = typeof value === 'string' ? value.trim() : ''
+        if (raw === '') continue
+        const scope = normalizeScope(raw)
+        if (scope === undefined) return fail(E.registryBadScope, { detail: raw })
+        if (!scopes.some(existing => existing.toLowerCase() === scope.toLowerCase())) scopes.push(scope)
+      }
+      if (scopes.length === 0) return fail(E.registryScopeRequired)
 
       const list = [...(loadSettings().registries ?? [])]
       const id = typeof input.id === 'string' && input.id !== '' ? input.id : `reg-${randomUUID().slice(0, 8)}`
       const others = list.filter(entry => entry.id !== id)
-
-      if (others.some(entry => entry.scope?.toLowerCase() === scope.toLowerCase())) {
-        return fail(E.registryDuplicateScope, { detail: scope })
+      for (const scope of scopes) {
+        const taken = others.some(entry =>
+          (entry.scopes ?? []).some(existing => existing.toLowerCase() === scope.toLowerCase()))
+        if (taken) return fail(E.registryDuplicateScope, { detail: scope })
       }
 
       const label = typeof input.label === 'string' && input.label.trim() !== ''
@@ -180,7 +186,7 @@ export function registerSettingsIpc(): void {
         id,
         label,
         url,
-        scope,
+        scopes,
         ...(existing?.tokenEnc !== undefined ? { tokenEnc: existing.tokenEnc } : {}),
       }
       const next = existing === undefined

@@ -51,7 +51,7 @@ describe('settings:registries', () => {
 
   it('refuses an unparseable value with its own code AND the offending text', async () => {
     reset()
-    const r = await call('settings:saveRegistry', { label: '', url: 'not a url', scope: '' })
+    const r = await call('settings:saveRegistry', { label: '', url: 'not a url', scopes: [] })
     expect(r.ok).toBe(false)
     if (r.ok) return
     expect(r.code).toBe('registry.badUrl')
@@ -60,7 +60,7 @@ describe('settings:registries', () => {
 
   it('refuses a non-http(s) scheme the same way', async () => {
     reset()
-    const r = await call('settings:saveRegistry', { label: '', url: 'file:///etc', scope: '' })
+    const r = await call('settings:saveRegistry', { label: '', url: 'file:///etc', scopes: [] })
     expect(r.ok).toBe(false)
     if (r.ok) return
     expect(r.code).toBe('registry.badScheme')
@@ -69,7 +69,7 @@ describe('settings:registries', () => {
   it('accepts a mirror URL normalized, deriving a label from the host', async () => {
     reset()
     const r = await call<{ id: string; label: string; url: string }[]>('settings:saveRegistry',
-      { label: '', url: 'https://mirror.example/npm/', scope: '@mirror' })
+      { label: '', url: 'https://mirror.example/npm/', scopes: ['@mirror'] })
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.value).toHaveLength(1)
@@ -79,16 +79,16 @@ describe('settings:registries', () => {
 
   it('normalizes the two spellings of a scope into one', async () => {
     reset()
-    const r = await call<{ scope?: string }[]>('settings:saveRegistry',
-      { label: 'private', url: 'https://npm.internal.example', scope: 'myorg' })
+    const r = await call<{ scopes: string[] }[]>('settings:saveRegistry',
+      { label: 'private', url: 'https://npm.internal.example', scopes: ['myorg'] })
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.value[0]?.scope).toBe('@myorg')
+    expect(r.value[0]?.scopes).toEqual(['@myorg'])
   })
 
   it('refuses a value that is not a scope, naming it', async () => {
     reset()
-    const r = await call('settings:saveRegistry', { label: 'x', url: 'https://npm.internal.example', scope: '@' })
+    const r = await call('settings:saveRegistry', { label: 'x', url: 'https://npm.internal.example', scopes: ['@'] })
     expect(r.ok).toBe(false)
     if (r.ok) return
     expect(r.code).toBe('registry.badScope')
@@ -98,7 +98,7 @@ describe('settings:registries', () => {
     // Without a scope the entry would answer for every package no other scope
     // claims — the ambiguity this model removed. A source always owns a set.
     reset()
-    const r = await call('settings:saveRegistry', { label: 'mirror', url: 'https://mirror.example', scope: '' })
+    const r = await call('settings:saveRegistry', { label: 'mirror', url: 'https://mirror.example', scopes: [] })
     expect(r.ok).toBe(false)
     if (r.ok) return
     expect(r.code).toBe('registry.scopeRequired')
@@ -107,18 +107,18 @@ describe('settings:registries', () => {
   it('allows several sources, each owning a different scope', async () => {
     reset()
     const first = await call('settings:saveRegistry',
-      { label: 'team', url: 'https://npm.internal.example/team', scope: '@team' })
+      { label: 'team', url: 'https://npm.internal.example/team', scopes: ['@team'] })
     expect(first.ok).toBe(true)
     const second = await call('settings:saveRegistry',
-      { label: 'other', url: 'https://npm.other.example', scope: '@other' })
+      { label: 'other', url: 'https://npm.other.example', scopes: ['@other'] })
     expect(second.ok).toBe(true)
     if (second.ok) expect(second.value).toHaveLength(2)
   })
 
   it('refuses a second entry claiming the same scope', async () => {
     reset()
-    await call('settings:saveRegistry', { label: 'a', url: 'https://a.example', scope: '@team' })
-    const r = await call('settings:saveRegistry', { label: 'b', url: 'https://b.example', scope: '@team' })
+    await call('settings:saveRegistry', { label: 'a', url: 'https://a.example', scopes: ['@team'] })
+    const r = await call('settings:saveRegistry', { label: 'b', url: 'https://b.example', scopes: ['@team'] })
     expect(r.ok).toBe(false)
     if (r.ok) return
     expect(r.code).toBe('registry.duplicateScope')
@@ -127,12 +127,12 @@ describe('settings:registries', () => {
   it('updates an entry in place and keeps its credential', async () => {
     reset()
     const added = await call<{ id: string }[]>('settings:saveRegistry',
-      { label: 'a', url: 'https://a.example', scope: '@team' })
+      { label: 'a', url: 'https://a.example', scopes: ['@team'] })
     if (!added.ok) throw new Error('setup failed')
     const id = added.value[0]?.id ?? ''
-    await call('settings:saveRegistry', { id, label: 'renamed', url: 'https://a.example', scope: '@team', token: 'secret' })
+    await call('settings:saveRegistry', { id, label: 'renamed', url: 'https://a.example', scopes: ['@team'], token: 'secret' })
     const r = await call<{ label: string; hasToken: boolean }[]>('settings:saveRegistry',
-      { id, label: 'renamed twice', url: 'https://a.example', scope: '@team' })
+      { id, label: 'renamed twice', url: 'https://a.example', scopes: ['@team'] })
     expect(r.ok).toBe(true)
     if (!r.ok) return
     // No `token` in the input: an edit must not wipe the saved credential.
@@ -143,11 +143,11 @@ describe('settings:registries', () => {
   it('answers two facts about a token and never the token', async () => {
     reset()
     const added = await call<{ id: string }[]>('settings:saveRegistry',
-      { label: 'a', url: 'https://a.example', scope: '@team' })
+      { label: 'a', url: 'https://a.example', scopes: ['@team'] })
     if (!added.ok) throw new Error('setup failed')
     const id = added.value[0]?.id ?? ''
     const r = await call<{ hasToken: boolean; encryption: string }[]>('settings:saveRegistry',
-      { id, label: 'a', url: 'https://a.example', scope: '@team', token: 'secret-token' })
+      { id, label: 'a', url: 'https://a.example', scopes: ['@team'], token: 'secret-token' })
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.value[0]?.hasToken).toBe(true)
@@ -157,11 +157,11 @@ describe('settings:registries', () => {
   it('clears a token with an empty value', async () => {
     reset()
     const added = await call<{ id: string }[]>('settings:saveRegistry',
-      { label: 'a', url: 'https://a.example', scope: '@team', token: 'secret' })
+      { label: 'a', url: 'https://a.example', scopes: ['@team'], token: 'secret' })
     if (!added.ok) throw new Error('setup failed')
     const id = added.value[0]?.id ?? ''
     const r = await call<{ hasToken: boolean }[]>('settings:saveRegistry',
-      { id, label: 'a', url: 'https://a.example', scope: '@team', token: '' })
+      { id, label: 'a', url: 'https://a.example', scopes: ['@team'], token: '' })
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.value[0]?.hasToken).toBe(false)
@@ -170,7 +170,7 @@ describe('settings:registries', () => {
   it('removes an entry, and refuses an unknown id', async () => {
     reset()
     const added = await call<{ id: string }[]>('settings:saveRegistry',
-      { label: 'a', url: 'https://a.example', scope: '@team' })
+      { label: 'a', url: 'https://a.example', scopes: ['@team'] })
     if (!added.ok) throw new Error('setup failed')
     const id = added.value[0]?.id ?? ''
     const removed = await call('settings:removeRegistry', id)
@@ -183,7 +183,7 @@ describe('settings:registries', () => {
 
   it('lists what is configured, without any token value', async () => {
     reset()
-    await call('settings:saveRegistry', { label: 'a', url: 'https://a.example', scope: '@team', token: 'secret' })
+    await call('settings:saveRegistry', { label: 'a', url: 'https://a.example', scopes: ['@team'], token: 'secret' })
     const r = await call<unknown[]>('settings:listRegistries')
     expect(r.ok).toBe(true)
     if (!r.ok) return

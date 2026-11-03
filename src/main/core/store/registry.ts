@@ -47,8 +47,12 @@ export function registries(): RegistryEntryRecord[] {
       }
       continue
     }
-    const scope = normalizeScope(entry.scope)
-    out.push({ ...entry, url, ...(scope !== undefined ? { scope } : {}) })
+    // Every scope is validated independently: one unusable value must not cost the
+    // entry the scopes that are fine.
+    const scopes = (entry.scopes ?? [])
+      .map(scope => normalizeScope(scope))
+      .filter((scope): scope is string => scope !== undefined)
+    out.push({ ...entry, url, scopes })
   }
   return out
 }
@@ -74,11 +78,15 @@ export function registryById(id: string): RegistryEntryRecord | undefined {
  * registry. Same decision as `registryFor`, kept in one place so a recorded origin
  * can never disagree with where the install actually went. */
 export function registryEntryFor(packageName: string): RegistryEntryRecord | undefined {
-  const scoped = registries()
-    .filter((entry): entry is RegistryEntryRecord & { scope: string } => entry.scope !== undefined)
-    .filter(entry => matchesScope(packageName, entry.scope))
+  // One candidate per (entry, scope) pair: an entry owning several scopes competes
+  // with itself, and the longest match decides which of ITS scopes applies.
+  const candidates = registries().flatMap(entry =>
+    (entry.scopes ?? []).map(scope => ({ entry, scope })),
+  )
+  const matched = candidates
+    .filter(candidate => matchesScope(packageName, candidate.scope))
     .sort((a, b) => b.scope.length - a.scope.length)
-  return scoped[0]
+  return matched[0]?.entry
 }
 
 /**
@@ -139,7 +147,7 @@ export const SEARCH_REGISTRY = PUBLIC_REGISTRY
  */
 export function registrySignature(): string {
   return registries()
-    .map(entry => `${entry.id}\u0000${entry.url}\u0000${entry.scope ?? ''}`)
+    .map(entry => `${entry.id}\u0000${entry.url}\u0000${(entry.scopes ?? []).join(',')}`)
     .sort()
     .join('\u0001')
 }

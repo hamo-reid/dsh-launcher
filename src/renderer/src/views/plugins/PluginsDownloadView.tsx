@@ -117,11 +117,11 @@ export default function PluginsDownloadView(p: Props): JSX.Element {
 
   /** True when the name would NOT be installed from the chosen registry: the
    * scope routing decides installs, and an explicit lookup does not change it.
-   * An unscoped entry IS the fallback, so it owns unclaimed names by definition. */
+   * An entry owns several scopes, so a name matching any of them is fine. */
   const outsideScope = (name: string): boolean => {
-    const scope = chosen?.scope
-    if (scope === undefined) return false
-    return !name.toLowerCase().startsWith(`${scope.toLowerCase()}/`)
+    const scopes = chosen?.scopes ?? []
+    if (scopes.length === 0) return false
+    return !scopes.some(scope => name.toLowerCase().startsWith(`${scope.toLowerCase()}/`))
   }
 
   return (
@@ -141,10 +141,10 @@ export default function PluginsDownloadView(p: Props): JSX.Element {
                 // Only entries with a scope: one without owns no package, so
                 // offering it here would promise a lookup that cannot install.
                 ...p.registries
-                  .filter(entry => entry.scope !== undefined)
+                  .filter(entry => entry.scopes.length > 0)
                   .map(entry => ({
                     value: `reg:${entry.id}` as RegistrySource,
-                    label: t('plugin.download.source.scoped', { label: entry.label, scope: entry.scope }),
+                    label: t('plugin.download.source.scoped', { label: entry.label, scope: entry.scopes.join(' ') }),
                   })),
               ]}
             />
@@ -227,7 +227,7 @@ export default function PluginsDownloadView(p: Props): JSX.Element {
                         // pnpm follows the scope. Saying so here is the only place the
                         // mismatch can be caught before it becomes a surprise.
                         <div style={{ color: token.colorWarning, fontSize: token.fontSizeSM, marginTop: 4 }}>
-                          {t('plugin.download.outOfScope', { scope: chosen?.scope ?? '' })}
+                          {t('plugin.download.outOfScope', { scope: (chosen?.scopes ?? []).join(' ') })}
                         </div>
                       )}
                       {(hit.author !== undefined || hit.date !== undefined) && (

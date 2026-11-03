@@ -50,8 +50,8 @@ beforeEach(() => {
 const twoEntries = (): void => {
   patchSettings({
     registries: [
-      { id: 'team', label: 'team', url: PRIVATE, scope: '@team' },
-      { id: 'mirror', label: 'mirror', url: OTHER, scope: '@mirror' },
+      { id: 'team', label: 'team', url: PRIVATE, scopes: ['@team'] },
+      { id: 'mirror', label: 'mirror', url: OTHER, scopes: ['@mirror'] },
     ],
   })
 }
@@ -62,7 +62,7 @@ describe('registryEntryViews', () => {
     setRegistryToken('team', 'secret-token')
     const [team] = registryEntryViews()
     expect(team).toEqual({
-      id: 'team', label: 'team', url: PRIVATE, scope: '@team', hasToken: true, encryption: 'safe',
+      id: 'team', label: 'team', url: PRIVATE, scopes: ['@team'], hasToken: true, encryption: 'safe',
     })
     expect(JSON.stringify(registryEntryViews())).not.toContain('secret-token')
   })
@@ -133,7 +133,7 @@ describe('registryAuthHeader', () => {
     patchSettings({
       registries: [
         { id: 'host', label: 'host', url: 'https://npm.internal.example' },
-        { id: 'repo', label: 'repo', url: PRIVATE, scope: '@team' },
+        { id: 'repo', label: 'repo', url: PRIVATE, scopes: ['@team'] },
       ],
     })
     setRegistryToken('host', 'host-token')

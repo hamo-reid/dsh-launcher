@@ -15,7 +15,7 @@ let root: string
 beforeAll(async () => {
   root = mkdtempSync(join(tmpdir(), 'pm-registry-'))
   await openDatabase(join(root, 'app.sqlite'))
-  patchSettings({ registries: [{ id: 'default', label: 'internal', url: 'https://registry.internal.example', scope: '@deepseek-ai' }] })
+  patchSettings({ registries: [{ id: 'default', label: 'internal', url: 'https://registry.internal.example', scopes: ['@deepseek-ai'] }] })
 }, 20000)
 
 afterAll(() => rmSync(root, { recursive: true, force: true }))
@@ -156,7 +156,7 @@ describe('npmSearch', () => {
     await patchSettings({ registries: undefined })
     await fetchPackageVersions('pkg')
     expect(seen[0]).toBe('https://registry.npmjs.org/pkg')
-    await patchSettings({ registries: [{ id: 'default', label: 'internal', url: 'https://registry.internal.example', scope: '@deepseek-ai' }] })
+    await patchSettings({ registries: [{ id: 'default', label: 'internal', url: 'https://registry.internal.example', scopes: ['@deepseek-ai'] }] })
   })
 
   it('maps a search response and defers to the registry total', async () => {

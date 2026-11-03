@@ -10,10 +10,10 @@ import type { DevPlugin, LaunchOptions, MarketSource, McpLibEntry, RunMode } fro
 
 /** One npm registry a machine points at.
  *
- * `scope` is what makes several of these coexist: a scoped entry owns that
- * package scope and nothing else, while the one entry WITHOUT a scope answers
- * for everything no other scope claims. Without that split there would be no
- * way to say which registry a bare package name belongs to. */
+ * `scopes` is what makes several of these coexist: an entry owns the package
+ * scopes it lists and nothing else, so "which registry answers for this package"
+ * has exactly one answer - the scope match, or the public registry. A registry
+ * with no scope owns nothing and takes part in no lookup. */
 export interface RegistryEntryRecord {
   /** Stable identity. Referenced by the download page's source choice and by the
    * token, so it survives a URL edit. */
@@ -22,8 +22,10 @@ export interface RegistryEntryRecord {
   label: string
   /** Registry base, normalized (no trailing slash). */
   url: string
-  /** `@myorg` — the packages this registry owns. */
-  scope?: string
+  /** The package scopes this registry owns (`['@a', '@b']`). One artifact
+   * repository often holds several; a package outside all of them is not this
+   * registry's, and resolves from the public one. */
+  scopes?: string[]
   /** Encrypted token for this registry. A secret: stripped from every export. */
   tokenEnc?: string
 }
@@ -120,7 +122,7 @@ export type DshSettings = Pick<AppSettings, 'dshes'>
 export type LaunchSettings = Pick<AppSettings, 'launchOptions' | 'runModes'>
 
 /** Current on-disk schema version. Bump when a migration is added. */
-export const CURRENT_SCHEMA_VERSION = 4
+export const CURRENT_SCHEMA_VERSION = 5
 
 type Migration = (s: AppSettings) => AppSettings
 /** Ordered migrations keyed by the version they upgrade FROM (`v → v+1`).
@@ -148,11 +150,27 @@ const MIGRATIONS: Record<number, Migration> = {
         id: 'default',
         label: hostLabel(url),
         url,
-        ...(scope !== '' ? { scope: scope.startsWith('@') ? scope : `@${scope}` } : {}),
+        ...(scope !== '' ? { scopes: [scope.startsWith('@') ? scope : `@${scope}`] } : {}),
         ...(typeof s.registryTokenEnc === 'string' && s.registryTokenEnc !== ''
           ? { tokenEnc: s.registryTokenEnc }
           : {}),
       }],
+    }
+  },
+  4: (s) => {
+    // `scope` became `scopes`: one artifact repository can hold several package
+    // scopes, and a single value could only ever describe one of them.
+    if (s.registries === undefined) return s
+    return {
+      ...s,
+      registries: s.registries.map((entry) => {
+        const legacy = entry as RegistryEntryRecord & { scope?: string }
+        const { scope, ...rest } = legacy
+        return {
+          ...rest,
+          ...(typeof scope === 'string' && scope !== '' ? { scopes: [scope] } : {}),
+        }
+      }),
     }
   },
 }
@@ -256,35 +274,43 @@ function readMcpLibrary(raw: unknown[]): McpLibEntry[] {
   return out
 }
 
-/** Normalize the registry list: an entry needs an id and a URL; the scope is
+/** Normalize the registry list: an entry needs an id and a URL; every scope is
  * coerced to `@name` form; a token is kept verbatim (it is opaque at rest).
- * Entries sharing an id or a scope are dropped after the first, because routing
- * by id or by scope has to have ONE answer. */
+ * Entries sharing an id are dropped after the first, and a scope already claimed
+ * by another entry is dropped from this one, because routing has to have ONE
+ * answer per package. */
 function readRegistries(raw: unknown[]): RegistryEntryRecord[] {
   const out: RegistryEntryRecord[] = []
   const ids = new Set<string>()
-  const scopes = new Set<string>()
-  let fallbackSeen = false
+  const claimed = new Set<string>()
   for (const item of raw) {
     if (!isRecord(item)) continue
-    const id = typeof item.id === 'string' ? item.id.trim() : ''
-    const url = typeof item.url === 'string' ? item.url.trim().replace(/\/+$/, '') : ''
-    if (id === '' || url === '' || ids.has(id)) continue
-    const scopeRaw = typeof item.scope === 'string' ? item.scope.trim() : ''
-    const scope = scopeRaw === '' ? '' : (scopeRaw.startsWith('@') ? scopeRaw : `@${scopeRaw}`)
-    if (scope !== '' && scopes.has(scope.toLowerCase())) continue
-    // Two unscoped entries would answer the same question differently.
-    if (scope === '' && fallbackSeen) continue
+    const id = typeof item.id === "string" ? item.id.trim() : ""
+    const url = typeof item.url === "string" ? item.url.trim().replace(/\/+$/, "") : ""
+    if (id === "" || url === "" || ids.has(id)) continue
+    // `scopes` is the current shape; `scope` is what a v4 row carries.
+    const rawScopes: unknown[] = Array.isArray(item.scopes)
+      ? item.scopes
+      : (typeof item.scope === "string" ? [item.scope] : [])
+    const scopes: string[] = []
+    for (const value of rawScopes) {
+      if (typeof value !== "string") continue
+      const trimmed = value.trim()
+      if (trimmed === "") continue
+      const scope = trimmed.startsWith("@") ? trimmed : `@${trimmed}`
+      const key = scope.toLowerCase()
+      if (claimed.has(key) || scopes.some(s => s.toLowerCase() === key)) continue
+      scopes.push(scope)
+    }
     ids.add(id)
-    if (scope === '') fallbackSeen = true
-    else scopes.add(scope.toLowerCase())
-    const label = typeof item.label === 'string' && item.label.trim() !== '' ? item.label.trim() : hostLabel(url)
+    for (const scope of scopes) claimed.add(scope.toLowerCase())
+    const label = typeof item.label === "string" && item.label.trim() !== "" ? item.label.trim() : hostLabel(url)
     out.push({
       id,
       label,
       url,
-      ...(scope !== '' ? { scope } : {}),
-      ...(typeof item.tokenEnc === 'string' && item.tokenEnc !== '' ? { tokenEnc: item.tokenEnc } : {}),
+      ...(scopes.length > 0 ? { scopes } : {}),
+      ...(typeof item.tokenEnc === "string" && item.tokenEnc !== "" ? { tokenEnc: item.tokenEnc } : {}),
     })
   }
   return out

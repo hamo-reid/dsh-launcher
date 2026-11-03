@@ -42,7 +42,7 @@ beforeEach(() => {
 describe('applyRegistryConfig', () => {
   it('writes the file and returns the environment pnpm needs', () => {
     const dir = mkdtempSync(join(root, 'ok-'))
-    patchSettings({ registries: [{ id: 'default', label: 'internal', url: PRIVATE, scope: '@hamo-studio' }] })
+    patchSettings({ registries: [{ id: 'default', label: 'internal', url: PRIVATE, scopes: ['@hamo-studio'] }] })
     setRegistryToken('default', 'secret-token')
     const env = applyRegistryConfig(dir)
     expect(env).toEqual({
@@ -65,7 +65,7 @@ describe('applyRegistryConfig', () => {
     // that the user's own npm configuration is not read while entries exist —
     // stated in the module doc and in the settings copy.
     const dir = mkdtempSync(join(root, 'pub-'))
-    patchSettings({ registries: [{ id: 'default', label: 'internal', url: PRIVATE, scope: '@hamo-studio' }] })
+    patchSettings({ registries: [{ id: 'default', label: 'internal', url: PRIVATE, scopes: ['@hamo-studio'] }] })
     expect(applyRegistryConfig(dir)).toEqual({ NPM_CONFIG_USERCONFIG: join(dir, REGISTRY_NPMRC) })
     expect(readFileSync(join(dir, REGISTRY_NPMRC), 'utf8')).toBe(
       `registry=https://registry.npmjs.org\n@hamo-studio:registry=${PRIVATE}\n`,
@@ -81,7 +81,7 @@ describe('applyRegistryConfig', () => {
   it('is idempotent, and rewrites when the settings move on', () => {
     const dir = mkdtempSync(join(root, 'churn-'))
     const file = join(dir, REGISTRY_NPMRC)
-    patchSettings({ registries: [{ id: 'default', label: 'internal', url: PRIVATE, scope: '@hamo-studio' }] })
+    patchSettings({ registries: [{ id: 'default', label: 'internal', url: PRIVATE, scopes: ['@hamo-studio'] }] })
     setRegistryToken('default', 'one')
     applyRegistryConfig(dir)
     const first = readFileSync(file, 'utf8')
@@ -90,7 +90,7 @@ describe('applyRegistryConfig', () => {
     applyRegistryConfig(dir)
     expect(readFileSync(file, 'utf8')).toBe(first)
     // A changed scope must produce a new file, not a stale one.
-    patchSettings({ registries: [{ id: 'default', label: 'internal', url: PRIVATE, scope: '@hamo-studio' }] })
+    patchSettings({ registries: [{ id: 'default', label: 'internal', url: PRIVATE, scopes: ['@hamo-studio'] }] })
     applyRegistryConfig(dir)
     expect(readFileSync(file, 'utf8')).toContain('@hamo-studio:registry=')
     expect(readFileSync(file, 'utf8')).not.toBe(first)
@@ -101,7 +101,7 @@ describe('applyRegistryConfig', () => {
     // run with whatever npm configuration the machine already has.
     const dir = join(mkdtempSync(join(root, 'blocked-')), 'not-a-dir')
     writeFileSync(dir, 'x', 'utf8')
-    patchSettings({ registries: [{ id: 'default', label: 'internal', url: PRIVATE, scope: '@hamo-studio' }] })
+    patchSettings({ registries: [{ id: 'default', label: 'internal', url: PRIVATE, scopes: ['@hamo-studio'] }] })
     setRegistryToken('default', 'secret-token')
     expect(applyRegistryConfig(dir)).toEqual({})
   })
@@ -109,7 +109,7 @@ describe('applyRegistryConfig', () => {
   it('does not nest the file inside a directory that already exists empty', () => {
     const dir = join(mkdtempSync(join(root, 'existing-')), 'nested')
     mkdirSync(dir)
-    patchSettings({ registries: [{ id: 'default', label: 'internal', url: PRIVATE, scope: '@hamo-studio' }] })
+    patchSettings({ registries: [{ id: 'default', label: 'internal', url: PRIVATE, scopes: ['@hamo-studio'] }] })
     setRegistryToken('default', 'secret-token')
     applyRegistryConfig(dir)
     expect(existsSync(join(dir, REGISTRY_NPMRC))).toBe(true)

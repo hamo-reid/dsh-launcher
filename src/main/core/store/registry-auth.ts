@@ -65,7 +65,7 @@ export function registryEntryViews(): RegistryEntryView[] {
       id: entry.id,
       label: entry.label,
       url: entry.url,
-      ...(entry.scope !== undefined ? { scope: entry.scope } : {}),
+      scopes: entry.scopes ?? [],
       hasToken,
       encryption: hasToken ? (codec.available() ? 'safe' : 'plaintext') : 'none',
     }
@@ -94,26 +94,27 @@ export function setRegistryToken(id: string, value: string | null): RegistryEntr
 export function privateSources(): PrivateSource[] {
   // Only scoped entries: a source with no scope owns nothing, so it must not
   // appear in pnpm's configuration either — pnpm and the launcher have to agree.
-  return registries()
-    .filter(entry => normalizeScope(entry.scope) !== undefined)
-    .map((entry) => {
-    const scope = normalizeScope(entry.scope)
-    return {
-      registry: entry.url,
-      ...(scope !== undefined ? { scope } : {}),
-      // No token means no auth line: a public mirror needs none, and a line
-      // pointing at an unset variable would fail every install with a 401.
-      ...(registryTokenOf(entry) !== undefined ? { tokenEnv: registryTokenEnvName(entry.id) } : {}),
+  const out: PrivateSource[] = []
+  for (const entry of registries()) {
+    const tokenEnv = registryTokenOf(entry) !== undefined ? registryTokenEnvName(entry.id) : undefined
+    for (const scope of entry.scopes ?? []) {
+      out.push({
+        registry: entry.url,
+        scope,
+        ...(tokenEnv !== undefined ? { tokenEnv } : {}),
+      })
     }
-  })
+  }
+  return out
 }
+
 
 /** Every token as environment entries, for the pnpm child. Unscoped entries are
  * left out for the same reason they are left out of the file. */
 export function registryTokenEnv(): Record<string, string> {
   const env: Record<string, string> = {}
   for (const entry of registries()) {
-    if (normalizeScope(entry.scope) === undefined) continue
+    if ((entry.scopes ?? []).length === 0) continue
     const token = registryTokenOf(entry)
     if (token !== undefined) env[registryTokenEnvName(entry.id)] = token
   }

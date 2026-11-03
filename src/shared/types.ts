@@ -809,9 +809,9 @@ export interface RegistryEntryView {
   id: string
   label: string
   url: string
-  /** The package scope this registry owns. Absent = it answers for whatever no
-   * other scope claims; at most one entry may say that. */
-  scope?: string
+  /** The package scopes this registry owns. Empty = it owns nothing and takes
+   * part in no lookup. */
+  scopes: string[]
   /** True when a token is saved for this entry. The value never crosses. */
   hasToken: boolean
   /** How that token is protected at rest. */
@@ -838,8 +838,8 @@ export interface RegistryEntryInput {
   id?: string
   label: string
   url: string
-  /** Empty string = this registry answers for whatever no scope claims. */
-  scope: string
+  /** At least one scope; each must be unique across entries. */
+  scopes: string[]
   token?: string
 }
 

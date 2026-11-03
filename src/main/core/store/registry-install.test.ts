@@ -149,7 +149,7 @@ afterAll(async () => {
 })
 
 beforeEach(() => {
-  patchSettings({ registries: [{ id: 'default', label: 'stub', url: base, scope: '@probe' }] })
+  patchSettings({ registries: [{ id: 'default', label: 'stub', url: base, scopes: ['@probe'] }] })
 })
 
 /** A fresh pnpm project (and store) so one test cannot read another's cache. */
