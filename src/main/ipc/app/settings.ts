@@ -158,6 +158,7 @@ export function registerSettingsIpc(): void {
       }
       // One registry may own several scopes; at least one is required, because an
       // entry with none owns no package at all.
+      const catchAll = input.catchAll === true
       const rawScopes: unknown[] = Array.isArray(input.scopes) ? input.scopes : []
       const scopes: string[] = []
       for (const value of rawScopes) {
@@ -167,11 +168,17 @@ export function registerSettingsIpc(): void {
         if (scope === undefined) return fail(E.registryBadScope, { detail: raw })
         if (!scopes.some(existing => existing.toLowerCase() === scope.toLowerCase())) scopes.push(scope)
       }
-      if (scopes.length === 0) return fail(E.registryScopeRequired)
+      // Mirror mode and scopes are mutually exclusive: a scope that would be
+      // ignored is the silent inconsistency this model exists to prevent.
+      if (catchAll && scopes.length > 0) return fail(E.registryModeConflict)
+      if (!catchAll && scopes.length === 0) return fail(E.registryScopeRequired)
 
       const list = [...(loadSettings().registries ?? [])]
       const id = typeof input.id === 'string' && input.id !== '' ? input.id : `reg-${randomUUID().slice(0, 8)}`
       const others = list.filter(entry => entry.id !== id)
+      if (catchAll && others.some(entry => entry.catchAll === true)) {
+        return fail(E.registryDuplicateMirror)
+      }
       for (const scope of scopes) {
         const taken = others.some(entry =>
           (entry.scopes ?? []).some(existing => existing.toLowerCase() === scope.toLowerCase()))
@@ -187,6 +194,7 @@ export function registerSettingsIpc(): void {
         label,
         url,
         scopes,
+        ...(catchAll ? { catchAll: true } : {}),
         ...(existing?.tokenEnc !== undefined ? { tokenEnc: existing.tokenEnc } : {}),
       }
       const next = existing === undefined

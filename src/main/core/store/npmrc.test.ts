@@ -197,3 +197,16 @@ describe('buildNpmrc with several registries', () => {
     expect(text.match(/always-auth=true/g)).toHaveLength(1)
   })
 })
+
+describe('buildNpmrc with a mirror', () => {
+  const MIRROR = 'https://nexus.corp.example/npm'
+
+  it('pins registry= to the mirror and keeps the scoped lines', () => {
+    const text = buildNpmrc([{ registry: PRIVATE, scope: '@team' }], { defaultRegistry: MIRROR })
+    expect(text).toBe(`registry=${MIRROR}\n@team:registry=${PRIVATE}\n`)
+  })
+
+  it('writes only the default when the mirror is the whole configuration', () => {
+    expect(buildNpmrc([], { defaultRegistry: MIRROR })).toBe(`registry=${MIRROR}\n`)
+  })
+})

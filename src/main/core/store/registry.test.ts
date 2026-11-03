@@ -32,7 +32,7 @@ const PRIVATE = 'https://npm.internal.example/team/repo/-/packages'
 const MIRROR = 'https://mirror.example/npm'
 
 /** Point the machine at `list` (empty = nothing configured). */
-const withRegistries = (...list: { id: string; label: string; url: string; scopes?: string[] }[]): string =>
+const withRegistries = (...list: { id: string; label: string; url: string; scopes?: string[]; catchAll?: boolean }[]): string =>
   (patchSettings({ registries: list.length > 0 ? list : undefined }), registryFor('anything'))
 
 describe('registries', () => {
@@ -183,5 +183,30 @@ describe('a registry with several scopes', () => {
     expect(registryFor('@team/x')).toBe(PRIVATE)
     expect(registryFor('@other/y')).toBe(MIRROR)
     expect(registries().find(entry => entry.id === 'b')?.scopes).toEqual(['@other'])
+  })
+})
+describe('mirror mode', () => {
+  const MIRROR = 'https://nexus.corp.example/npm'
+
+  it('answers for every package no scope claims', () => {
+    withRegistries({ id: 'm', label: 'nexus', url: MIRROR, catchAll: true })
+    expect(registryFor('lodash')).toBe(MIRROR)
+    expect(registryFor('@deepseek-ai/dsh')).toBe(MIRROR)
+  })
+
+  it('loses to a scope, so a mirror and a private repo can coexist', () => {
+    // The common corporate shape: a proxy for everything, plus the team's own
+    // repository for its own packages. The specific one wins.
+    withRegistries(
+      { id: 'm', label: 'nexus', url: MIRROR, catchAll: true },
+      { id: 'p', label: 'private', url: PRIVATE, scopes: ['@drahamo'] },
+    )
+    expect(registryFor('@drahamo/x')).toBe(PRIVATE)
+    expect(registryFor('lodash')).toBe(MIRROR)
+  })
+
+  it('is opt-in: without it, unclaimed packages still come from public npm', () => {
+    withRegistries({ id: 'p', label: 'private', url: PRIVATE, scopes: ['@drahamo'] })
+    expect(registryFor('lodash')).toBe(PUBLIC_REGISTRY)
   })
 })

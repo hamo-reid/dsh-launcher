@@ -141,10 +141,12 @@ export default function PluginsDownloadView(p: Props): JSX.Element {
                 // Only entries with a scope: one without owns no package, so
                 // offering it here would promise a lookup that cannot install.
                 ...p.registries
-                  .filter(entry => entry.scopes.length > 0)
+                  .filter(entry => entry.catchAll === true || entry.scopes.length > 0)
                   .map(entry => ({
                     value: `reg:${entry.id}` as RegistrySource,
-                    label: t('plugin.download.source.scoped', { label: entry.label, scope: entry.scopes.join(' ') }),
+                    label: entry.catchAll === true
+                      ? t('plugin.download.source.mirror', { label: entry.label })
+                      : t('plugin.download.source.scoped', { label: entry.label, scope: entry.scopes.join(' ') }),
                   })),
               ]}
             />

@@ -44,6 +44,40 @@ beforeAll(async () => {
 
 afterAll(() => rmSync(root, { recursive: true, force: true }))
 
+describe('settings:mirror mode', () => {
+  const reset = (): void => { patchSettings({ registries: undefined }) }
+
+  it('saves a mirror and reports it back', async () => {
+    reset()
+    const r = await call<{ catchAll?: boolean; scopes: string[] }[]>('settings:saveRegistry',
+      { label: 'nexus', url: 'https://nexus.corp.example/npm', scopes: [], catchAll: true })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.value[0]?.catchAll).toBe(true)
+    expect(r.value[0]?.scopes).toEqual([])
+  })
+
+  it('refuses a mirror that also lists scopes', async () => {
+    reset()
+    const r = await call('settings:saveRegistry',
+      { label: 'nexus', url: 'https://nexus.corp.example/npm', scopes: ['@team'], catchAll: true })
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.code).toBe('registry.modeConflict')
+  })
+
+  it('refuses a second mirror', async () => {
+    reset()
+    await call('settings:saveRegistry',
+      { label: 'a', url: 'https://a.example', scopes: [], catchAll: true })
+    const r = await call('settings:saveRegistry',
+      { label: 'b', url: 'https://b.example', scopes: [], catchAll: true })
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.code).toBe('registry.duplicateMirror')
+  })
+})
+
 describe('settings:registries', () => {
   // A clean list for each case: these handlers read and write one array, so a
   // leftover entry would make the next expectation depend on the last one.

@@ -53,6 +53,10 @@ export const E = {
   /** Two entries claiming the same package scope. */
   registryDuplicateScope: 'registry.duplicateScope',
   registryEntryMissing: 'registry.entryMissing',
+  /** Mirror mode and package scopes on the same entry. */
+  registryModeConflict: 'registry.modeConflict',
+  /** A second entry claiming to proxy every package. */
+  registryDuplicateMirror: 'registry.duplicateMirror',
   // extensions (MCP rows)
   extBadServerName: 'ext.badServerName',
   extBadTransport: 'ext.badTransport',

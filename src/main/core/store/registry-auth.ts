@@ -66,6 +66,7 @@ export function registryEntryViews(): RegistryEntryView[] {
       label: entry.label,
       url: entry.url,
       scopes: entry.scopes ?? [],
+      ...(entry.catchAll === true ? { catchAll: true } : {}),
       hasToken,
       encryption: hasToken ? (codec.available() ? 'safe' : 'plaintext') : 'none',
     }

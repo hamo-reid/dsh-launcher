@@ -812,6 +812,9 @@ export interface RegistryEntryView {
   /** The package scopes this registry owns. Empty = it owns nothing and takes
    * part in no lookup. */
   scopes: string[]
+  /** Mirror mode: this registry proxies npm and answers for every package no
+   * scope claims. */
+  catchAll?: boolean
   /** True when a token is saved for this entry. The value never crosses. */
   hasToken: boolean
   /** How that token is protected at rest. */
@@ -838,8 +841,11 @@ export interface RegistryEntryInput {
   id?: string
   label: string
   url: string
-  /** At least one scope; each must be unique across entries. */
+  /** At least one scope; each must be unique across entries. Empty when
+   * catchAll is set (the two are mutually exclusive). */
   scopes: string[]
+  /** Mirror mode: proxy every package. At most one entry may set it. */
+  catchAll?: boolean
   token?: string
 }
 
@@ -860,6 +866,9 @@ export interface RegistryProbe {
   user?: string
   /** The HTTP status behind the verdict, when a response came back. */
   status?: number
+  /** Whether the registry proxies npm (mirror mode only). unknown when the
+   * check itself failed - 'could not tell' is not 'does not proxy'. */
+  proxy?: 'ok' | 'missing' | 'unknown'
   /** The transport error, when `reachable` is false. */
   detail?: string
 }

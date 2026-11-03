@@ -22,7 +22,7 @@ import { join } from 'node:path'
 import { logger } from '../shared/logger.ts'
 import { buildNpmrc, registryEnv as envFor } from './npmrc.ts'
 import { privateSources, registryTokenEnv } from './registry-auth.ts'
-import { PUBLIC_REGISTRY } from './registry.ts'
+import { PUBLIC_REGISTRY, mirrorRegistry } from './registry.ts'
 
 /** The file name inside the directory the caller owns. */
 export const REGISTRY_NPMRC = 'npmrc'
@@ -34,8 +34,13 @@ export const REGISTRY_NPMRC = 'npmrc'
  * convenience file could not be produced. */
 export function applyRegistryConfig(dir: string): Record<string, string> {
   const sources = privateSources()
-  if (sources.length === 0) return {}
-  const text = buildNpmrc(sources, { defaultRegistry: PUBLIC_REGISTRY })
+  // A mirror alone is a valid configuration: it writes `registry=` and nothing
+  // else, and that is exactly what makes every package come from it. Returning
+  // early here would leave the mode silently off.
+  const mirror = mirrorRegistry()
+  if (sources.length === 0 && mirror === undefined) return {}
+  const defaultRegistry = mirror?.url ?? PUBLIC_REGISTRY
+  const text = buildNpmrc(sources, { defaultRegistry })
   if (text === undefined) {
     logger.warn('registry: the configured entries cannot be described; pnpm runs with the user config')
     return {}

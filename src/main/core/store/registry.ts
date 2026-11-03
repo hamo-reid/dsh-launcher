@@ -69,6 +69,14 @@ export function registryEntries(): RegistryEntryRecord[] {
 const warnedUrls = new Map<string, string>()
 
 
+/** The mirror entry: the one that proxies npm and answers for every package no
+ * scope claims. At most one can exist; the settings writer and 
+ormalizeSettings`r
+ * both enforce that, so this is a find, not a choice. */
+export function mirrorRegistry(): RegistryEntryRecord | undefined {
+  return registries().find(entry => entry.catchAll === true)
+}
+
 /** One entry by id, or `undefined`. */
 export function registryById(id: string): RegistryEntryRecord | undefined {
   return registries().find(entry => entry.id === id)
@@ -86,7 +94,7 @@ export function registryEntryFor(packageName: string): RegistryEntryRecord | und
   const matched = candidates
     .filter(candidate => matchesScope(packageName, candidate.scope))
     .sort((a, b) => b.scope.length - a.scope.length)
-  return matched[0]?.entry
+  return matched[0]?.entry ?? mirrorRegistry()
 }
 
 /**

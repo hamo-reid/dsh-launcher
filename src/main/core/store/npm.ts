@@ -109,19 +109,20 @@ export async function fetchPackageVersions(name: string, source: RegistrySource 
   return info
 }
 
-/**
- * Reach the configured registry and report what the credential did.
- *
- * The endpoint is `/-/whoami`, not the registry root: a registry's root is not a
- * package and answers 404 on a perfectly healthy source, so probing it can only
- * ever prove "some host answered". `/-/whoami` needs no package name and answers
- * with the authenticated user, which is the thing the person who just pasted a
- * token actually wants to know.
- *
- * A source without that endpoint falls back to the root: `auth: 'unknown'` says
- * the host answers and the credential went unchecked, rather than inventing a
- * verdict. Nothing is thrown — a wrong address is a result, not an exception.
- */
+/** Whether a mirror serves a package it does not own — the one thing mirror mode
+ * depends on. unknown when the check itself failed: 'could not tell' must not be
+ * reported as 'does not proxy'. */
+async function probeProxy(registry: string): Promise<'ok' | 'missing' | 'unknown'> {
+  try {
+    const res = await fetchFromRegistry(registry + '/lodash')
+    if (res.ok) return 'ok'
+    if (res.status === 404) return 'missing'
+    return 'unknown'
+  } catch {
+    return 'unknown'
+  }
+}
+
 export async function probeRegistry(id?: string): Promise<RegistryProbe> {
   // A named entry is what the settings editor tests. Without one this asks the
   // public registry — where every package no scope claims comes from, which is the
@@ -130,6 +131,9 @@ export async function probeRegistry(id?: string): Promise<RegistryProbe> {
   if (id !== undefined && entry === undefined) throwE('registry.notConfigured')
   const registry = entry?.url ?? PUBLIC_REGISTRY
   const hasToken = entry !== undefined ? registryTokenOf(entry) !== undefined : false
+  // Mirror mode makes one claim the warning cannot: that this host proxies npm.
+  // Ask it for a package that is definitely public, so the verdict is a fact.
+  const proxy = entry?.catchAll === true ? await probeProxy(registry) : undefined
   try {
     const who = await fetchFromRegistry(`${registry}/-/whoami`)
     if (who.ok) {
@@ -139,13 +143,17 @@ export async function probeRegistry(id?: string): Promise<RegistryProbe> {
         reachable: true,
         auth: 'ok',
         status: who.status,
+        ...(proxy !== undefined ? { proxy } : {}),
         ...(typeof body.username === 'string' && body.username !== '' ? { user: body.username } : {}),
       }
     }
     if (who.status === 401 || who.status === 403) {
       // The endpoint exists and refused us: that is a verdict about the token,
       // and whether a token was sent at all decides which one.
-      return { registry, reachable: true, auth: hasToken ? 'rejected' : 'required', status: who.status }
+      return {
+        registry, reachable: true, auth: hasToken ? 'rejected' : 'required', status: who.status,
+        ...(proxy !== undefined ? { proxy } : {}),
+      }
     }
     const root = await fetchFromRegistry(`${registry}/`)
     return { registry, reachable: true, auth: 'unknown', status: root.status }

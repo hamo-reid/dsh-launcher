@@ -26,6 +26,10 @@ export interface RegistryEntryRecord {
    * repository often holds several; a package outside all of them is not this
    * registry's, and resolves from the public one. */
   scopes?: string[]
+  /** Mirror mode: this registry proxies npm, so it answers for every package no
+   * scope claims. Opt-in and exclusive - at most one entry may set it, and it
+   * cannot also list scopes (a scope it ignored would be a silent surprise). */
+  catchAll?: boolean
   /** Encrypted token for this registry. A secret: stripped from every export. */
   tokenEnc?: string
 }
@@ -292,6 +296,7 @@ function readRegistries(raw: unknown[]): RegistryEntryRecord[] {
     const rawScopes: unknown[] = Array.isArray(item.scopes)
       ? item.scopes
       : (typeof item.scope === "string" ? [item.scope] : [])
+    const catchAll = item.catchAll === true
     const scopes: string[] = []
     for (const value of rawScopes) {
       if (typeof value !== "string") continue
@@ -309,7 +314,8 @@ function readRegistries(raw: unknown[]): RegistryEntryRecord[] {
       id,
       label,
       url,
-      ...(scopes.length > 0 ? { scopes } : {}),
+      ...(scopes.length > 0 && catchAll !== true ? { scopes } : {}),
+      ...(catchAll === true ? { catchAll: true } : {}),
       ...(typeof item.tokenEnc === "string" && item.tokenEnc !== "" ? { tokenEnc: item.tokenEnc } : {}),
     })
   }

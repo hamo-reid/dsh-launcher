@@ -48,7 +48,7 @@ export default function SettingsSection() {
   /** The configured registries, as the editor lists them. */
   const [registries, setRegistries] = useState<RegistryEntryView[]>([])
   /** The entry being added or edited, or null while the list is shown. */
-  const [form, setForm] = useState<{ id?: string; label: string; url: string; scopes: string; token: string } | null>(null)
+  const [form, setForm] = useState<{ id?: string; label: string; url: string; scopes: string; token: string; catchAll: boolean } | null>(null)
   /** Last probe per entry id. */
   const [probes, setProbes] = useState<Record<string, RegistryProbe>>({})
   /** A registry write/test is in flight. */
@@ -110,6 +110,7 @@ export default function SettingsSection() {
       label: entry?.label ?? '',
       url: entry?.url ?? '',
       scopes: (entry?.scopes ?? []).join(', '),
+      catchAll: entry?.catchAll === true,
       token: '',
     })
   }
@@ -123,7 +124,8 @@ export default function SettingsSection() {
       ...(form.id !== undefined ? { id: form.id } : {}),
       label: form.label.trim(),
       url: form.url.trim(),
-      scopes: form.scopes.split(/[,\s]+/).filter(Boolean),
+      scopes: form.catchAll ? [] : form.scopes.split(/[,\\s]+/).filter(Boolean),
+      ...(form.catchAll ? { catchAll: true } : {}),
       ...(form.token !== '' ? { token: form.token } : {}),
     })
     setRegistryBusy(false)
@@ -452,12 +454,14 @@ export default function SettingsSection() {
                         <div style={{ flex: 1, minWidth: 240 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                             <span style={{ fontWeight: 500 }}>{entry.label}</span>
-                            {(entry.scopes ?? []).length > 0
-                              ? (entry.scopes ?? []).map(scope => <Tag key={scope} color="blue">{scope}</Tag>)
-                              // An entry saved before a scope was required. It owns
-                              // nothing, so it does nothing - said here, because a
-                              // silent non-participating row is the worst outcome.
-                              : <Tag color="orange">{t('settings.registry.scopeMissing')}</Tag>}
+                            {entry.catchAll === true
+                              ? <Tag color="orange">{t('settings.registry.mirrorTag')}</Tag>
+                              : (entry.scopes ?? []).length > 0
+                                ? (entry.scopes ?? []).map(scope => <Tag key={scope} color="blue">{scope}</Tag>)
+                                // An entry saved before a scope was required. It
+                                // owns nothing, so it does nothing - said here,
+                                // because a silent row is the worst outcome.
+                                : <Tag color="orange">{t('settings.registry.scopeMissing')}</Tag>}
                             {entry.hasToken && (
                               <Tag color={entry.encryption === 'safe' ? 'green' : 'orange'}>
                                 {entry.encryption === 'safe'
@@ -505,9 +509,31 @@ export default function SettingsSection() {
                         />
                       </div>
                       <div>
+                        <Space align="center">
+                          <Switch
+                            checked={form.catchAll}
+                            onChange={checked => setForm({ ...form, catchAll: checked, scopes: checked ? '' : form.scopes })}
+                          />
+                          <span>{t('settings.registry.mirrorLabel')}</span>
+                        </Space>
+                        {form.catchAll && (
+                          // The hard warning. Mirror mode is the one setting whose
+                          // mistake breaks every public install, so it is stated
+                          // where the switch is, not in a tooltip.
+                          <Alert
+                            style={{ marginTop: 8 }}
+                            type="warning"
+                            showIcon
+                            title={t('settings.registry.mirrorWarning')}
+                            description={t('settings.registry.mirrorWarningDetail')}
+                          />
+                        )}
+                      </div>
+                      <div>
                         <div style={{ fontWeight: 500 }}>{t('settings.registry.scope.label')}</div>
                         <Input
                           value={form.scopes}
+                          disabled={form.catchAll}
                           onChange={e => setForm({ ...form, scopes: e.target.value })}
                           placeholder={t('settings.registry.scope.placeholder')}
                           autoComplete="off"
@@ -527,7 +553,7 @@ export default function SettingsSection() {
                         <div style={{ ...muted, marginTop: 4 }}>{t('settings.registry.token.hint')}</div>
                       </div>
                       <Space>
-                        <Button type="primary" loading={registryBusy} disabled={form.url.trim() === '' || form.scopes.trim() === ''} onClick={() => void submitRegistry()}>
+                        <Button type="primary" loading={registryBusy} disabled={form.url.trim() === '' || (!form.catchAll && form.scopes.trim() === '')} onClick={() => void submitRegistry()}>
                           {t('common.save')}
                         </Button>
                         <Button onClick={() => setForm(null)}>{t('common.cancel')}</Button>
