@@ -13,6 +13,8 @@ import {
   archivedPluginNames, initStore, latestStoreVersion, pluginVersionDir, readVersion, storeVersions,
   versionStagingDir, versionsRoot, type ProfileManifestShape,
 } from './layout.ts'
+import { bindingOf, devDirKey } from './binding.ts'
+import { listDevPlugins } from './dev.ts'
 import { recordPluginSource, sourceKindOf } from './sources.ts'
 import { registryEntryFor } from './registry.ts'
 import { installNameFor } from './git-source.ts'
@@ -423,8 +425,8 @@ function targetVersionedPkgDir(storeDir: string, pkg: string, opts: { version?: 
  */
 export async function installIntoProfile(
   profilesRoot: string, profile: string, pkg: string, storeDir: string,
-  opts: { version?: string } = {},
-): Promise<{ ok: boolean; text: string; activated: boolean }> {
+  opts: { version?: string; force?: boolean } = {},
+): Promise<{ ok: boolean; text: string; activated: boolean; needsConfirm?: 'replaces-dev-link' }> {
   if (storeDir === '') return { ok: false, text: '未配置插件保存位置 —— 请在「设置」中指定', activated: false }
   // A legacy store keeps its plugin at the flat node_modules root (no version dir
   // — its deps are hoisted there); link it straight, ignoring any version pick.
@@ -441,6 +443,23 @@ export async function installIntoProfile(
 
   const originalManifestText = readFileSync(manifestPath, 'utf8')
   const manifest = JSON.parse(originalManifestText) as ProfileManifestShape
+  // Switching a profile off a dev link is the one thing this function can do
+  // that the user did not ask for: the link disappears from the manifest and the
+  // working copy stops being loaded. Ask first - the dev registration survives
+  // either way, so a confirmation is all it takes to make this reversible in
+  // practice as well as in theory.
+  if (opts.force !== true) {
+    const devDirs = new Set(listDevPlugins().map(dev => devDirKey(dev.dir)))
+    const existing = (manifest.dependencies as Record<string, string> | undefined)?.[pkg]
+    if (bindingOf(existing, devDirs) === 'dev') {
+      return {
+        ok: false,
+        text: `${pkg} 在这个 profile 里是本地链接。安装库中版本会替换它（开发插件本身不会被删除）。`,
+        activated: false,
+        needsConfirm: 'replaces-dev-link',
+      }
+    }
+  }
   /** Put the manifest back exactly as it was.
    *
    * The profile's own state is written BEFORE the install that makes it true, and

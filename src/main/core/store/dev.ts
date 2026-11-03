@@ -589,7 +589,7 @@ export async function snapshotDevPlugin(dev: DevPlugin, ctx: DshContext, opts: S
   for (const target of opts.targets ?? []) {
     const linked = await installIntoProfile(
       profilesDir(target.ctx), target.profile, dev.name, opts.storeDir,
-      ...(version !== undefined ? [{ version }] : []),
+      { ...(version !== undefined ? { version } : {}), force: true },
     )
     if (linked.ok) installed.push({ profile: target.profile, text: linked.text })
     else return {
