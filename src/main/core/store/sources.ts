@@ -33,6 +33,11 @@ interface PluginSourceRecord {
   /** The configured registry that answered for this package, when one did. With
    * several registries "installed from npm" no longer says which one, and that is
    * the first question when an update starts failing. */
+  /** True when this version was archived from a LOCAL build (a dev snapshot)
+   * rather than downloaded from a registry. A snapshot under a released version
+   * number would replace the published copy with something that exists only on
+   * this machine, so the two have to be distinguishable. */
+  snapshot?: boolean
   registryId?: string
 }
 
@@ -60,6 +65,7 @@ function normalize(value: RawValue | undefined): PluginSourceRecord | undefined 
       kind: value.kind,
       ...(typeof value.spec === 'string' && value.spec !== '' ? { spec: value.spec } : {}),
       ...(typeof value.registryId === 'string' && value.registryId !== '' ? { registryId: value.registryId } : {}),
+      ...(value.snapshot === true ? { snapshot: true } : {}),
     }
   }
   return undefined
@@ -98,15 +104,24 @@ export function readPluginSourceRegistry(storeDir: string, name: string): string
   return undefined
 }
 
+/** True when `name@version` was archived from a local build. `undefined` for a
+ * version that is not recorded at all (a pre-tracking archive). */
+export function readPluginSourceSnapshot(storeDir: string, name: string, version: string): boolean | undefined {
+  const record = normalize(readRaw(storeDir)[`${name}@${version}`])
+  return record === undefined ? undefined : record.snapshot === true
+}
+
 /** Record the origin of one archived version. Idempotent per version. */
 export function recordPluginSource(
   storeDir: string, name: string, version: string, kind: PluginSource, spec?: string, registryId?: string,
+  snapshot?: boolean,
 ): void {
   const data = readRaw(storeDir)
   const record: PluginSourceRecord = {
     kind,
     ...(spec !== undefined && spec !== '' ? { spec } : {}),
     ...(registryId !== undefined && registryId !== '' ? { registryId } : {}),
+    ...(snapshot === true ? { snapshot: true } : {}),
   }
   data[`${name}@${version}`] = record
   writeFileSync(sourcesFile(storeDir), JSON.stringify(data, null, 2) + '\n')

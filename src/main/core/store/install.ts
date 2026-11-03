@@ -15,7 +15,7 @@ import {
 } from './layout.ts'
 import { bindingOf, devDirKey } from './binding.ts'
 import { listDevPlugins } from './dev.ts'
-import { recordPluginSource, sourceKindOf } from './sources.ts'
+import { readPluginSourceSnapshot, recordPluginSource, sourceKindOf } from './sources.ts'
 import { registryEntryFor } from './registry.ts'
 import { installNameFor } from './git-source.ts'
 import { diagnoseFailure, type AdviceKey, type FailureKind, type FailureReport } from './failure.ts'
@@ -138,7 +138,7 @@ function refusal(text: string, kind: FailureKind, advice: AdviceKey[], params?: 
  * moved on but its `version` did not, and keeping the older archive would report
  * success while storing the previous state. */
 export async function installSource(
-  storeDir: string, name: string, source: string, signal?: AbortSignal, opts?: { replace?: boolean },
+  storeDir: string, name: string, source: string, signal?: AbortSignal, opts?: { replace?: boolean; snapshot?: boolean; force?: boolean },
 ): Promise<InstallResult> {
   if (name.trim() === '') return refusal('未能确定插件包名', 'name-mismatch', ['checkPackageJson'])
   // The name becomes an `archive/<name>/` path segment; refuse anything that
@@ -241,6 +241,18 @@ export async function installSource(
     return { ok: true, text: `已在该版本（${name}@${version}）`, version }
   }
   if (existsSync(dest)) {
+    // A local snapshot under a released version number would replace the
+    // published copy with something that exists only on this machine - after
+    // which "I have 1.0.0 installed" no longer says which 1.0.0 it is. Refuse
+    // by default; a version bump is the honest way out, and `force` covers the
+    // developer who really does mean to overwrite their own archive.
+    if (opts?.snapshot === true && opts.force !== true && readPluginSourceSnapshot(storeDir, name, version) === false) {
+      rmSync(staging, { recursive: true, force: true })
+      return {
+        ok: false,
+        text: `${name}@${version} 已经是发布版本，本地快照会用本地构建顶替它。改一个版本号，或确认后强制覆盖。`,
+      }
+    }
     // A replaced version is only set aside once the new one is BUILT: the staging
     // project above is the replacement, so an archive is never absent because a
     // rebuild failed. Until this point the old version was still serving profiles.
@@ -267,7 +279,7 @@ export async function installSource(
     }
     rmSync(stash, { recursive: true, force: true })
     await relinkVersion(dest, join(dest, 'node_modules', name), storeDir)
-    recordPluginSource(storeDir, name, version, sourceKindOf(source), source, registryEntryFor(name)?.id)
+    recordPluginSource(storeDir, name, version, sourceKindOf(source), source, registryEntryFor(name)?.id, opts?.snapshot === true)
     logger.info(`plugin store replaced: ${name}@${version} (${source})`)
     return { ok: true, text: `已替换归档 ${name}@${version}`, version }
   }
@@ -280,7 +292,7 @@ export async function installSource(
   // Moving `.staging` → version dir dangles pnpm's absolute top-level links (they
   // name the now-gone `.staging`); let pnpm rewire them to this version's goods.
   await relinkVersion(dest, join(dest, 'node_modules', name), storeDir)
-  recordPluginSource(storeDir, name, version, sourceKindOf(source), source, registryEntryFor(name)?.id)
+  recordPluginSource(storeDir, name, version, sourceKindOf(source), source, registryEntryFor(name)?.id, opts?.snapshot === true)
   logger.info(`plugin store add: ${name}@${version} (${source})`)
   return { ok: true, text: `已下载 ${name}@${version}`, version }
 }
