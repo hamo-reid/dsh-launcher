@@ -122,6 +122,12 @@ export default function PluginCard(p: PluginCardProps): JSX.Element {
             {row.name}
           </span>
           <Space size={4} wrap style={{ flexShrink: 0, justifyContent: 'flex-end' }}>
+              {/* Which identity the profiles are bound to. A package can exist
+                  as a dev link and as an archived version at once; this is the only
+                  place that says which one is loaded. */}
+              {row.binding === 'dev' && <Tag color="blue">{t('plugin.binding.dev')}</Tag>}
+              {row.binding === 'mixed' && <Tag color="purple">{t('plugin.binding.mixed')}</Tag>}
+              {row.binding === 'external' && <Tag>{t('plugin.binding.external')}</Tag>}
             {p.stale && <Tag color="error">{t('plugin.stale')}</Tag>}
             {update?.updateAvailable === true && <Tag color="gold">{t('plugin.status.update')}</Tag>}
             {update?.manual === true && <Tag>{t('plugin.status.manual')}</Tag>}
