@@ -149,6 +149,13 @@ export default function MarketSection(): JSX.Element {
     void message.success(t('plugin.market.sourceSaved'))
   }
 
+  /** Switch catalog: a browsing choice, so it only refetches. */
+  const switchCatalog = async (id: string | null): Promise<void> => {
+    const r = await window.api.market.setActive(id)
+    if (!r.ok) { void message.error(apiErrorText(r)); return }
+    setPage(1)
+    setSrcState(r.value)
+  }
   const catLabel = (id: string): string => {
     const hit = categories.find(c => c.id === id)
     return hit?.label ?? id
@@ -239,47 +246,21 @@ export default function MarketSection(): JSX.Element {
                 { value: 'newest', label: t('plugin.market.sort.newest') },
               ]}
             />
-            {/* Loading-route picker (user-selectable pipeline), tucked into a popover. */}
-            <Popover
-              trigger="click"
-              placement="bottomRight"
-              content={(
-                <div style={{ width: 320, display: 'flex', flexDirection: 'column', gap: token.padding }}>
-                  <div>
-                    <FieldLabel>{t('plugin.market.sourceLabel')}</FieldLabel>
-                    <Select
-                      value={srcState.source}
-                      onChange={v => setSrcState(prev => ({ source: v as MarketSourceState['source'], url: prev?.url ?? '' }))}
-                      style={{ width: '100%' }}
-                      options={[
-                        { value: 'official', label: t('plugin.market.source.official') },
-                        { value: 'custom', label: t('plugin.market.source.custom') },
-                      ]}
-                    />
-                  </div>
-                  {srcState.source === 'custom' && (
-                    <>
-                      <Input allowClear value={customUrl} onChange={e => setCustomUrl(e.target.value)} placeholder={t('plugin.market.customUrlPlaceholder')} />
-                      <Input.Password
-                        style={{ marginTop: 8 }}
-                        value={customToken}
-                        onChange={e => setCustomToken(e.target.value)}
-                        autoComplete="new-password"
-                        placeholder={srcState?.hasToken === true
-                          ? t('plugin.market.tokenReplace')
-                          : t('plugin.market.tokenPlaceholder')}
-                      />
-                    </>
-                  )}
-                  <div style={{ color: token.colorTextTertiary, fontSize: token.fontSizeSM }}>{t('plugin.market.sourceHint')}</div>
-                  <Button type="primary" size="small" loading={savingSource} disabled={srcState.source === 'custom' && !customUrl.trim()} onClick={() => void applySource()}>
-                    {t('common.save')}
-                  </Button>
-                </div>
-              )}
-            >
-              <Button icon={<DatabaseOutlined />}>{t('plugin.market.sourceButton')}</Button>
-            </Popover>
+            {/* The catalogs are configured in Settings; this only says which one is
+                live, and switches between them - a browsing choice, not a setting. */}
+            <Select
+              size="small"
+              style={{ width: 220 }}
+              value={srcState.activeId ?? 'public'}
+              onChange={v => void switchCatalog(v === 'public' ? null : String(v))}
+              options={[
+                { value: 'public', label: t('plugin.market.source.official') },
+                ...(srcState.catalogs ?? []).map(c => ({
+                  value: c.id,
+                  label: c.isCnb ? c.name + ' · CNB' : c.name,
+                })),
+              ]}
+            />
           </Toolbar>
 
           <div style={{ padding: token.padding }}>

@@ -14,7 +14,7 @@ import { useThemeMode } from '../ThemeProvider.tsx'
 import { useAppLang } from '../i18n'
 import { apiErrorText, requestHealthRefresh } from '../lib/ipc.ts'
 import type { ThemeMode } from '../theme.ts'
-import type { DataRootState, GithubAuthState, GithubRateLimit, NodeEnvironment, RegistryEntryView, RegistryProbe } from '../../../shared/types.ts'
+import type { DataRootState, GithubAuthState, GithubRateLimit, NodeEnvironment, MarketCatalogView, RegistryEntryView, RegistryProbe } from '../../../shared/types.ts'
 
 /** The settings categories, in reading order: the things a person changes about
  * the app, then the things it talks to, then where its files live. */
@@ -46,6 +46,9 @@ export default function SettingsSection() {
   const [githubBusy, setGithubBusy] = useState(false)
   const [githubLimit, setGithubLimit] = useState<GithubRateLimit>()
   /** The configured registries, as the editor lists them. */
+  /** Market catalogs: the list plus which one is active. */
+  const [market, setMarket] = useState<{ activeId: string | null; catalogs: MarketCatalogView[] }>({ activeId: null, catalogs: [] })
+  const [catalogForm, setCatalogForm] = useState<{ id?: string; name: string; url: string; token: string } | null>(null)
   const [registries, setRegistries] = useState<RegistryEntryView[]>([])
   /** The entry being added or edited, or null while the list is shown. */
   const [form, setForm] = useState<{ id?: string; label: string; url: string; scopes: string; token: string; catchAll: boolean } | null>(null)
@@ -229,6 +232,40 @@ export default function SettingsSection() {
    * A registry's root answering 404 is normal, so a status code is never the
    * headline: the answer is about the ADDRESS and the CREDENTIAL, which need
    * different fixes. */
+  const reloadMarket = async (): Promise<void> => {
+    const r = await window.api.market.catalogs()
+    if (r.ok) setMarket({ activeId: r.value.activeId ?? null, catalogs: r.value.catalogs ?? [] })
+  }
+
+  const activateCatalog = async (id: string | null): Promise<void> => {
+    const r = await window.api.market.setActive(id)
+    if (!r.ok) { void message.error(apiErrorText(r)); return }
+    setMarket({ activeId: r.value.activeId ?? null, catalogs: r.value.catalogs ?? [] })
+  }
+
+  const submitCatalog = async (): Promise<void> => {
+    if (catalogForm === null) return
+    const r = await window.api.market.saveCatalog({
+      ...(catalogForm.id !== undefined ? { id: catalogForm.id } : {}),
+      name: catalogForm.name.trim(),
+      url: catalogForm.url.trim(),
+    })
+    if (!r.ok) { void message.error(apiErrorText(r)); return }
+    // The token is written after the row exists: a new catalog has no id yet.
+    if (catalogForm.id !== undefined && catalogForm.token !== '') {
+      const tk = await window.api.market.setCatalogToken(catalogForm.id, catalogForm.token)
+      if (!tk.ok) { void message.error(apiErrorText(tk)); return }
+    }
+    setCatalogForm(null)
+    await reloadMarket()
+  }
+
+  const removeCatalog = async (id: string): Promise<void> => {
+    const r = await window.api.market.removeCatalog(id)
+    if (!r.ok) { void message.error(apiErrorText(r)); return }
+    setMarket({ activeId: r.value.activeId ?? null, catalogs: r.value.catalogs ?? [] })
+  }
+
   const registryProbeAlert = (probe: RegistryProbe): { type: 'success' | 'info' | 'warning' | 'error'; text: string } => {
     if (!probe.reachable) {
       return { type: 'error', text: t('settings.registry.probeUnreachable', { detail: probe.detail ?? '' }) }
@@ -421,6 +458,48 @@ export default function SettingsSection() {
                 )}
                 <div style={{ ...muted, marginTop: token.paddingSM }}>
                   {t('settings.github.hint')}
+                </div>
+              </div>
+            </Panel>
+
+            <Panel title={t('settings.section.market')}>
+              <div style={{ maxWidth: 720 }}>
+                <div style={{ ...muted, margin: '4px 0 12px' }}>{t('settings.market.desc')}</div>
+                <Radio.Group value={market.activeId ?? 'public'} onChange={e => void activateCatalog(e.target.value === 'public' ? null : String(e.target.value))}>
+                  <Space orientation="vertical" size={6}>
+                    <Radio value="public">{t('plugin.market.source.official')}</Radio>
+                    {market.catalogs.map(c => (
+                      <Radio key={c.id} value={c.id}>
+                        {c.name}
+                        {c.isCnb && <Tag style={{ marginInlineStart: 6 }}>CNB</Tag>}
+                        {c.hasToken && <Tag color="green" style={{ marginInlineStart: 6 }}>{t('settings.registry.token.safe')}</Tag>}
+                      </Radio>
+                    ))}
+                  </Space>
+                </Radio.Group>
+                <div style={{ marginTop: token.padding }}>
+                  {market.catalogs.map(c => (
+                    <div key={c.id} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+                      <span style={{ ...muted, wordBreak: 'break-all', flex: 1 }}>{c.url}</span>
+                      <Button size="small" onClick={() => setCatalogForm({ id: c.id, name: c.name, url: c.url, token: '' })}>{t('common.edit')}</Button>
+                      <Button size="small" danger onClick={() => void removeCatalog(c.id)}>{t('common.delete')}</Button>
+                    </div>
+                  ))}
+                  {catalogForm === null
+                    ? <Button onClick={() => setCatalogForm({ name: '', url: '', token: '' })}>{t('settings.market.add')}</Button>
+                    : (
+                      <Space orientation="vertical" size={8} style={{ width: '100%' }}>
+                        <Input value={catalogForm.name} onChange={e => setCatalogForm({ ...catalogForm, name: e.target.value })} placeholder={t('settings.market.name')} />
+                        <Input value={catalogForm.url} onChange={e => setCatalogForm({ ...catalogForm, url: e.target.value })} placeholder={t('settings.market.url')} />
+                        {catalogForm.id !== undefined && (
+                          <Input.Password value={catalogForm.token} onChange={e => setCatalogForm({ ...catalogForm, token: e.target.value })} placeholder={t('plugin.market.tokenPlaceholder')} />
+                        )}
+                        <Space>
+                          <Button type="primary" disabled={catalogForm.url.trim() === '' || catalogForm.name.trim() === ''} onClick={() => void submitCatalog()}>{t('common.save')}</Button>
+                          <Button onClick={() => setCatalogForm(null)}>{t('common.cancel')}</Button>
+                        </Space>
+                      </Space>
+                    )}
                 </div>
               </div>
             </Panel>
