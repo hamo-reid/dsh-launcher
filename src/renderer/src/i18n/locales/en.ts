@@ -1084,6 +1084,8 @@ const en: typeof zh = {
     'plugin.market.desc': 'Curated dsh plugins from awesome-dsh-plugin — browse by category, stars and bilingual descriptions.',
     'plugin.market.searchPlaceholder': 'Search name / author / npm / description',
     'plugin.market.refresh': 'Refresh',
+    'plugin.market.openSource': 'Open source',
+    'plugin.market.sourceLine': 'Catalog: {{label}}',
     'plugin.market.categoryAll': 'All categories',
     'plugin.market.sort.stars': 'Top stars',
     'plugin.market.sort.downloads': 'Top downloads',
@@ -1113,6 +1115,7 @@ const en: typeof zh = {
     'plugin.market.field.category': 'Category',
     'plugin.market.field.source': 'Source',
     'plugin.market.added': 'Added {{date}}',
+    'errors.market.forbidden': 'The token is valid but cannot read this repository (HTTP {{detail}}).',
     'errors.market.unauthorized': 'This catalog requires a token (HTTP {{detail}}) - add the catalog token in the source settings.',
     'errors.market.entryNotFound': 'This plugin is no longer in the loaded catalog — refresh the market.',
 

@@ -11,7 +11,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Alert, Button, Input, List, message, Modal, Pagination, Popover, Select, Skeleton, Space, Tag, theme,
 } from 'antd'
-import { DatabaseOutlined, GithubOutlined, ReloadOutlined } from '@ant-design/icons'
+import { DatabaseOutlined, GithubOutlined, LinkOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
 import { fmtNum } from '../lib/format.ts'
@@ -24,7 +24,7 @@ import FieldLabel from '../components/FieldLabel.tsx'
 import { MODAL } from '../theme.ts'
 import { DownloadVersionModal, InstallToProfileModal } from './PluginsModals.tsx'
 import { toStoreMap } from '../lib/storeMap.ts'
-import type { MarketPlugin, MarketSort, MarketSourceState } from '../../../shared/types.ts'
+import type { MarketPlugin, MarketSort, MarketSourceState, RegistryEntryView } from '../../../shared/types.ts'
 
 export default function MarketSection(): JSX.Element {
   const { t, i18n } = useTranslation()
@@ -43,6 +43,8 @@ export default function MarketSection(): JSX.Element {
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
+  /** Configured registries, to tell a private package from a public one. */
+  const [registries, setRegistries] = useState<RegistryEntryView[]>([])
   const [categories, setCategories] = useState<{ id: string; label: string }[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -97,6 +99,11 @@ export default function MarketSection(): JSX.Element {
     })))
   }, [srcState, page, pageSize, q, category, sort, lang])
 
+  // Which registries exist decides whether an npmjs link is honest.
+  useEffect(() => {
+    void window.api.settings.listRegistries().then(r => { if (r.ok) setRegistries(r.value) })
+  }, [])
+
   // Read the persisted loading route back once, then let the query effect fire.
   useEffect(() => {
     void (async () => {
@@ -149,6 +156,18 @@ export default function MarketSection(): JSX.Element {
 
   const descOf = (p: MarketPlugin): string => p.description?.[lang] ?? p.description?.en ?? ''
   const hasNpm = (p: MarketPlugin): boolean => typeof p.npm === 'string' && p.npm !== ''
+  /** Only a github.com URL gets a GitHub label; anything else is just a link. */
+  const isGitHub = (url: string): boolean => {
+    try { return new URL(url).hostname === 'github.com' } catch { return false }
+  }
+  /** True when a configured registry owns this package's scope, so an npmjs
+   * link would be a 404: the package lives somewhere private. */
+  const privateScoped = (npm: string): boolean => {
+    if (!npm.startsWith('@')) return false
+    const scope = npm.slice(0, npm.indexOf('/')).toLowerCase()
+    return registries.some(r => r.scopes.some(s => s.toLowerCase() === scope))
+  }
+
 
   const downloadFromGitHub = async (p: MarketPlugin): Promise<void> => {
     setBusy(p.url)
@@ -365,10 +384,10 @@ export default function MarketSection(): JSX.Element {
             <div>
               <FieldLabel>{t('plugin.market.field.source')}</FieldLabel>
               <Space wrap>
-                <Button size="small" icon={<GithubOutlined />} onClick={() => void window.api.run.openExternal(detail.url)}>
-                  GitHub
+          <Button size="small" icon={isGitHub(detail.url) ? <GithubOutlined /> : <LinkOutlined />} onClick={() => void window.api.run.openExternal(detail.url)}>
+            {isGitHub(detail.url) ? 'GitHub' : t('plugin.market.openSource')}
                 </Button>
-                {hasNpm(detail) && <Button size="small" onClick={() => void window.api.run.openExternal(`https://www.npmjs.com/package/${detail.npm}`)}>npm</Button>}
+            {hasNpm(detail) && !privateScoped(String(detail.npm)) && <Button size="small" onClick={() => void window.api.run.openExternal('https://www.npmjs.com/package/' + String(detail.npm))}>npm</Button>}
                 {hasNpm(detail) && <Tag color="blue">npm: {detail.npm}</Tag>}
               </Space>
             </div>

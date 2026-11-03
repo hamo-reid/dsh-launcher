@@ -42,6 +42,10 @@ export const E = {
   dataRootBusy: 'dataRoot.busy',
   dataRootNested: 'dataRoot.nested',
   // market
+  /** The catalog answered 401: no token, or one that is no longer valid. */
+  marketUnauthorized: 'market.unauthorized',
+  /** The catalog answered 403: the token is valid but cannot see this repository. */
+  marketForbidden: 'market.forbidden',
   marketEntryNotFound: 'market.entryNotFound',
   // registry (the configured npm registry a lookup / install reads from)
   registryBadUrl: 'registry.badUrl',

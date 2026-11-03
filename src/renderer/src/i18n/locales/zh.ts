@@ -1082,6 +1082,8 @@ const zh = {
     'plugin.market.desc': '来自 awesome-dsh-plugin 的精选 dsh 插件——按分类、星星与双语描述浏览。',
     'plugin.market.searchPlaceholder': '搜索名称 / 作者 / npm / 描述',
     'plugin.market.refresh': '刷新',
+    'plugin.market.openSource': '打开来源',
+    'plugin.market.sourceLine': '当前目录：{{label}}',
     'plugin.market.categoryAll': '全部分类',
     'plugin.market.sort.stars': '按星星',
     'plugin.market.sort.downloads': '按下载',
@@ -1111,6 +1113,7 @@ const zh = {
     'plugin.market.field.category': '分类',
     'plugin.market.field.source': '来源',
     'plugin.market.added': '收录于 {{date}}',
+    'errors.market.forbidden': '令牌有效，但没有这个仓库的读取权限（HTTP {{detail}}）。',
     'errors.market.unauthorized': '这个目录需要令牌（HTTP {{detail}}）—— 在来源设置里填入目录令牌。',
     'errors.market.entryNotFound': '该插件已不在当前目录中——请刷新市场。',
 

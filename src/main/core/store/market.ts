@@ -202,7 +202,9 @@ export async function loadMarket(state = marketSourceState()): Promise<MarketCat
       if (res.status === 401 || res.status === 403) {
         // A private catalog that refuses us is a configuration answer, not a
         // transport failure: say which of the two fixes is missing.
-        throwE('market.unauthorized', { detail: `HTTP ${String(res.status)}` })
+        // 401 and 403 have different fixes: no token at all versus a token that
+        // cannot see this repository. Saying which one it is saves the guess.
+        throwE(res.status === 401 ? 'market.unauthorized' : 'market.forbidden', { detail: 'HTTP ' + String(res.status) })
       }
       if (!res.ok) throw new Error(`HTTP ${String(res.status)}`)
       const data = asCatalog(await res.json() as unknown)
