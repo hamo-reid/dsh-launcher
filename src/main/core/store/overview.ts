@@ -355,7 +355,10 @@ function collectDirInodes(dir: string, into: Map<string, number>): void {
     if (!entry.isFile()) continue
     try {
       const st = statSync(full)
-      into.set(`${st.dev}:${st.ino}`, st.size)
+      // The size is part of the key: hard links share it, so dedupe still works,
+      // but two distinct files that happen to report one inode number (seen on
+      // some Windows volumes) no longer collapse into one and silently lose bytes.
+      into.set(`${st.dev}:${st.ino}:${st.size}`, st.size)
     } catch { /* transient / locked */ }
   }
 }
