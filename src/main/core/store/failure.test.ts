@@ -61,6 +61,17 @@ describe('diagnoseFailure — registry', () => {
     expect(report.advice).toContain('useExactVersion')
   })
 
+  it('names the missing dependency when pnpm reports it while fetching it', () => {
+    const report = diagnoseFailure({
+      log: 'ERR_PNPM_NO_MATCHING_VERSION  No matching version found for @tanstack/virtual-core@3.19.11 while fetching it from https://registry.npmjs.org/',
+      source: '@drahamo/hamo-app@0.1.1',
+      name: '@drahamo/hamo-app',
+    })
+    expect(report.kind).toBe('version')
+    // The request was `@drahamo/hamo-app@0.1.1`; the missing version is a dependency.
+    expect(report.params?.['detail']).toBe('@tanstack/virtual-core@3.19.11')
+  })
+
   it('recognises an integrity failure as a transport problem, not a bad package', () => {
     const report = diagnoseFailure({ log: 'ERR_PNPM_TARBALL_INTEGRITY  integrity checksum failed for pkg' })
     expect(report.kind).toBe('network')

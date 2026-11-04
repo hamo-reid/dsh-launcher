@@ -153,7 +153,12 @@ export function diagnoseFailure(input: FailureInput): FailureReport {
   if (/ERR_PNPM_NO_MATCHING_VERSION/i.test(text)) {
     // The version comes straight from pnpm's sentence, so it is exactly what the
     // user asked for — stopping at the first space or dot would report `pkg@9`.
-    const want = /No matching version found for (\S+?)[.\s]*(?:$|\n|instead)/i.exec(text)?.[1] ?? input.source ?? ''
+    // pnpm appends " while fetching it from ..." when the missing version is a
+    // DEPENDENCY (a mirror lag, not the package the user picked), so take the
+    // first token and strip sentence punctuation rather than requiring an end of
+    // line — otherwise the caller falls back to the requested source and blames
+    // the wrong package.
+    const want = /No matching version found for ([^\s,;]+)/i.exec(text)?.[1]?.replace(/[.,;]+$/, '') ?? input.source ?? ''
     return {
       kind: 'version', headlineKey: 'download.cause.noVersion', headline: '没有这个版本',
       advice: advice('useExactVersion', 'checkName'),
