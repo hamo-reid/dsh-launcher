@@ -7,7 +7,7 @@ import { buildInstalledOverview } from '../../core/store/plugins.ts'
 import { linkDevToProfile, repairDevLink } from '../../core/profile/profile.ts'
 import {
   buildDevPlugin, cachedDiagnosis, defaultDevBuild, devScriptOptions, forgetDevDiagnosis, installDevDeps,
-  listDevPlugins, registerDevPlugin, removeDevPlugin, shimDevPeers, snapshotDevPlugin, unshimDevPeers,
+  listDevPlugins, syncDevVersions, registerDevPlugin, removeDevPlugin, shimDevPeers, snapshotDevPlugin, unshimDevPeers,
   type SnapshotTarget,
 } from '../../core/store/dev.ts'
 import {
@@ -50,7 +50,9 @@ export function registerDevIpc(): void {
    * so a link that drifted out of a profile shows as unused). */
   handle('plugins:devList', (): IpcResult<{ plugins: DevPlugin[]; usage: Record<string, PluginUsagePoint[]> }> => {
     try {
-      const plugins = listDevPlugins()
+      // Re-read the manifests: the recorded version is written once at registration
+      // and would otherwise keep showing a number the package no longer has.
+      const plugins = syncDevVersions()
       const names = new Set(plugins.map(p => p.name))
       const usage: Record<string, PluginUsagePoint[]> = {}
       if (names.size > 0) {

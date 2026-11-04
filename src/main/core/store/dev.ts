@@ -142,6 +142,42 @@ export function listDevPlugins(): DevPlugin[] {
   return loadSettings().devPlugins ?? []
 }
 
+/** Read a package's declared version, or `undefined` when it cannot be read. */
+function manifestVersion(dir: string): string | undefined {
+  try {
+    const m = readManifest(dir)
+    return typeof m.version === 'string' && m.version !== '' ? m.version : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Bring the recorded versions up to date before showing the list.
+ *
+ * `version` is written once at registration and is display-only, so a package
+ * bumped afterwards kept showing the old number - the one value in this view
+ * that goes stale while everything beside it (status, broken links) is computed
+ * live. Re-reading one small file per plugin removes the whole class of drift;
+ * an unreadable manifest keeps the recorded value rather than erasing it.
+ */
+export function syncDevVersions(): DevPlugin[] {
+  const list = listDevPlugins()
+  let changed = false
+  const next = list.map((dev) => {
+    const version = manifestVersion(dev.dir)
+    if (version === undefined || version === dev.version) return dev
+    changed = true
+    return { ...dev, version }
+  })
+  if (!changed) return list
+  updateSettings((draft) => {
+    const byName = new Map(next.map(dev => [dev.name, dev]))
+    draft.devPlugins = (draft.devPlugins ?? []).map(dev => byName.get(dev.name) ?? dev)
+  })
+  return next
+}
+
 /** Register a package dir as a dev plugin (idempotent per package name). */
 export function registerDevPlugin(dir: string): DevPlugin {
   const target = resolve(dir)
