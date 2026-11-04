@@ -85,17 +85,22 @@ export function registerMarketIpc(): void {
   })
 
   /** Add or rename a catalog; returns the new list. */
-  handle('market:saveCatalog', async (_event, input: { id?: string; name: string; url: string }): Promise<IpcResult<MarketSourceState>> => {
+  handle('market:saveCatalog', async (_event, input: { id?: string; name: string; url: string; token?: string }): Promise<IpcResult<MarketSourceState>> => {
     try {
       const saved = await saveMarketCatalog({
         ...(typeof input?.id === 'string' ? { id: input.id } : {}),
         name: typeof input?.name === 'string' ? input.name : '',
         url: typeof input?.url === 'string' ? input.url : '',
+        ...(typeof input?.token === 'string' ? { token: input.token } : {}),
       })
       if (!saved.ok) {
         if (saved.reason === 'badUrl') return fail(E.marketBadUrl)
         if (saved.reason === 'badName') return fail(E.marketBadName)
         if (saved.reason === 'duplicateName') return fail(E.marketDuplicateName)
+        // A private catalog that refuses the probe is a credential answer, not a
+        // transport failure: 401 asks for a token, 403 says the token is too weak.
+        if (saved.reason === 'unauthorized') return fail(E.marketUnauthorized, { detail: 'HTTP ' + String(saved.status) })
+        if (saved.reason === 'forbidden') return fail(E.marketForbidden, { detail: 'HTTP ' + String(saved.status) })
         // The status is what tells "wrong host" apart from "wrong token".
         return fail(E.marketUnreachable, { detail: saved.reason === 'unreachable' && saved.status !== null ? 'HTTP ' + String(saved.status) : '—' })
       }

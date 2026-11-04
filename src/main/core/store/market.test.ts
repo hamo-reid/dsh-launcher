@@ -2,8 +2,16 @@
  * catalog filtering/sorting. Following the project's pattern (see npm.test.ts),
  * the network couple (`loadMarket`) is exercised only through a stubbed fetch. */
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { forgetCatalog, installSpecFor, loadMarket, pageCatalog, queryCatalog, resolveMarket } from './market.ts'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import {
+  forgetCatalog, installSpecFor, loadMarket, marketCatalogs, marketToken, pageCatalog, queryCatalog,
+  resolveMarket, saveMarketCatalog, setMarketTokenCipher,
+} from './market.ts'
+import { openDatabase } from '../settings/settings.ts'
+import type { SecretCipher } from '../settings/secret-at-rest.ts'
 import type { MarketCatalog, MarketPlugin } from '../../../shared/types.ts'
 
 const mk = (over: Partial<MarketPlugin> = {}): MarketPlugin => ({
@@ -194,7 +202,66 @@ describe('loadMarket', () => {
   })
 })
 
-// ── resolveMarket (memo fast-path vs network) ────────────────────────────────
+// ── saveMarketCatalog (probe + credential) ──────────────────────────────────
+
+/** A cipher that is obviously reversible, so "the token was stored" is visible. */
+const cipher: SecretCipher = {
+  available: () => true,
+  encrypt: (plain) => `enc:${plain}`,
+  decrypt: (stored) => (stored.startsWith('enc:') ? stored.slice(4) : ''),
+}
+
+describe('saveMarketCatalog', () => {
+  const body = JSON.stringify({ plugins: [] })
+  const dirs: string[] = []
+
+  beforeEach(async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pm-market-'))
+    dirs.push(dir)
+    await openDatabase(join(dir, 'app.sqlite'))
+    setMarketTokenCipher(cipher)
+  })
+
+  afterAll(() => {
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('authenticates the save probe with the token typed into the form', async () => {
+    const headers: Record<string, string>[] = []
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
+      headers.push((init.headers ?? {}) as Record<string, string>)
+      return fakeRes(200, body)
+    }))
+    const result = await saveMarketCatalog({ name: 'CNB', url: 'https://api.cnb.cool/o/r/-/git/raw/main/plugins.json', token: 'tok-1' })
+    expect(result).toEqual({ ok: true })
+    expect(headers[0]?.authorization).toBe('Bearer tok-1')
+    // The token lands in settings with the catalog, so the next refresh uses it.
+    expect(marketToken()).toBe('tok-1')
+  })
+
+  it('reports a 401 as unauthorized instead of blaming the address', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => fakeRes(401)))
+    const result = await saveMarketCatalog({ name: 'CNB', url: 'https://api.cnb.cool/o/r/-/git/raw/main/plugins.json' })
+    expect(result).toEqual({ ok: false, reason: 'unauthorized', status: 401 })
+  })
+
+  it('reuses the stored token when an edit leaves the field empty', async () => {
+    const headers: Record<string, string>[] = []
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
+      const sent = (init.headers ?? {}) as Record<string, string>
+      headers.push(sent)
+      return sent.authorization === undefined ? fakeRes(401) : fakeRes(200, body)
+    }))
+    const first = await saveMarketCatalog({ name: 'CNB', url: 'https://api.cnb.cool/o/r/-/git/raw/main/plugins.json', token: 'tok-2' })
+    expect(first).toEqual({ ok: true })
+    const saved = marketCatalogs().find((entry) => entry.url.endsWith('/plugins.json'))
+    if (saved === undefined) throw new Error('the catalog was not saved')
+    const second = await saveMarketCatalog({ id: saved.id, name: 'CNB (renamed)', url: saved.url })
+    expect(second).toEqual({ ok: true })
+    expect(headers[1]?.authorization).toBe('Bearer tok-2')
+  })
+})
+
 
 describe('resolveMarket', () => {
   const body = JSON.stringify({ updated: '2026-01-01', count: 1, categories: {}, plugins: [mk()] })

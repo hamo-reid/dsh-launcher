@@ -247,25 +247,16 @@ export default function SettingsSection() {
     if (catalogBusy) return
     setCatalogBusy(true)
     if (catalogForm === null) return
-    const name = catalogForm.name.trim()
+    const token = catalogForm.token.trim()
+    // The token travels with the save: the probe that guards it has to
+    // authenticate, and a new catalog has no stored token to fall back to.
     const r = await window.api.market.saveCatalog({
       ...(catalogForm.id !== undefined ? { id: catalogForm.id } : {}),
-      name,
+      name: catalogForm.name.trim(),
       url: catalogForm.url.trim(),
+      ...(token !== '' ? { token } : {}),
     })
     if (!r.ok) { setCatalogBusy(false); void message.error(apiErrorText(r)); return }
-    // The token is written in the same pass: a new catalog takes its id from the
-    // list that just came back, so there is no half-configured window.
-    if (catalogForm.token !== '') {
-      const saved = (r.value.catalogs ?? []).find(c => c.id === catalogForm.id || c.name === name)
-      if (saved !== undefined) {
-        const tk = await window.api.market.setCatalogToken(saved.id, catalogForm.token)
-        if (!tk.ok) { setCatalogBusy(false); void message.error(apiErrorText(tk)); return }
-        setMarket({ activeId: tk.value.activeId ?? null, catalogs: tk.value.catalogs ?? [] })
-        setCatalogBusy(false); setCatalogForm(null)
-        return
-      }
-    }
     setMarket({ activeId: r.value.activeId ?? null, catalogs: r.value.catalogs ?? [] })
     setCatalogBusy(false); setCatalogForm(null)
   }

@@ -164,11 +164,13 @@ function hostOf(url: string): string {
 export type SaveCatalogResult =
   | { ok: true }
   | { ok: false; reason: 'badUrl' | 'badName' | 'duplicateName' }
+  /** The catalog answered 401 / 403: the address is right, the credential is not. */
+  | { ok: false; reason: 'unauthorized' | 'forbidden'; status: number }
   /** The address answered with something that is not a catalog; `status` is null
    * when the request never completed (offline, DNS, timeout). */
   | { ok: false; reason: 'unreachable'; status: number | null }
 
-export async function saveMarketCatalog(input: { id?: string; name: string; url: string }): Promise<SaveCatalogResult> {
+export async function saveMarketCatalog(input: { id?: string; name: string; url: string; token?: string }): Promise<SaveCatalogResult> {
   const url = input.url.trim()
   const name = input.name.trim()
   if (!isHttpUrl(url)) return { ok: false, reason: 'badUrl' }
@@ -180,12 +182,23 @@ export async function saveMarketCatalog(input: { id?: string; name: string; url:
   // Fetch it once before saving. A web page URL and a raw file URL look alike in
   // a text box and behave completely differently - CNB answers 400 for the page -
   // so the mistake has to be caught here, not at the first refresh.
+  //
+  // The token typed into the same form is used for this probe: a private catalog
+  // cannot answer before its credential exists, and the token can only be stored
+  // once the catalog has been saved. Without it the probe 401s and the form can
+  // never be completed.
+  const typedToken = input.token?.trim() ?? ''
+  const credential = typedToken !== '' ? typedToken : catalogToken(list.find(c => c.id === id))
   try {
-    const token = marketCatalogs().find(c => c.id === input.id)?.tokenEnc
     const probe = await fetch(url, {
-      headers: token !== undefined ? { authorization: 'Bearer ' + String(codec.decode(token)) } : {},
+      headers: credential !== undefined ? { authorization: 'Bearer ' + credential } : {},
       signal: AbortSignal.timeout(8000),
     })
+    if (probe.status === 401 || probe.status === 403) {
+      // The address is right and the credential is missing or insufficient; say
+      // which, so the form asks for the token instead of blaming the URL.
+      return { ok: false, reason: probe.status === 401 ? 'unauthorized' : 'forbidden', status: probe.status }
+    }
     if (!probe.ok) return { ok: false, reason: 'unreachable', status: probe.status }
     const body = await probe.json() as { plugins?: unknown }
     if (!Array.isArray(body.plugins)) return { ok: false, reason: 'unreachable', status: probe.status }
@@ -200,6 +213,10 @@ export async function saveMarketCatalog(input: { id?: string; name: string; url:
     draft.marketCatalogs = [...rest, entry]
     if (draft.marketActiveId === undefined || draft.marketActiveId === '') draft.marketActiveId = id
   })
+  // Persist the credential in the same write path: a saved catalog with a token
+  // that never reached settings is exactly the half-configured state this probe
+  // cannot see on the next refresh.
+  if (typedToken !== '') setMarketToken(id, typedToken)
   forgetCatalog()
   return { ok: true }
 }

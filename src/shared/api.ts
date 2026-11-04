@@ -398,8 +398,9 @@ eedsConfirm instead of doing it. */
     catalogs: () => Promise<IpcResult<MarketSourceState>>
     /** Switch to one catalog (`null` = the public one). */
     setActive: (id: string | null) => Promise<IpcResult<MarketSourceState>>
-    /** Add or rename a catalog. */
-    saveCatalog: (input: { id?: string; name: string; url: string }) => Promise<IpcResult<MarketSourceState>>
+    /** Add or rename a catalog. Pass `token` for a private catalog so the save
+     * probe can authenticate (a new catalog has no stored token yet). */
+    saveCatalog: (input: { id?: string; name: string; url: string; token?: string }) => Promise<IpcResult<MarketSourceState>>
     /** Drop one catalog (and its token). */
     removeCatalog: (id: string) => Promise<IpcResult<MarketSourceState>>
     /** Save (or clear) one catalog's token. */
