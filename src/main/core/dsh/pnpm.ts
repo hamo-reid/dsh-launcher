@@ -246,13 +246,24 @@ export function runPnpm(
     }
     let child: ReturnType<typeof spawn>
     try {
+      // `pnpm run` (the dev shell) exports npm_config_* into the launcher process,
+      // and an environment variable outranks every npmrc. An inherited
+      // `npm_config_registry` would therefore silently replace the registry the
+      // generated file names — a dev shell on a mirror would install public
+      // dependencies from that mirror even when the launcher configured npmjs.
+      // Strip the two the generated file owns, then re-apply our own values.
+      const childEnv: NodeJS.ProcessEnv = { ...spec.env, ...registryEnv }
+      for (const key of Object.keys(childEnv)) {
+        if (/^npm_config_(registry|userconfig)$/i.test(key)) delete childEnv[key]
+      }
+      for (const [key, value] of Object.entries(registryEnv)) childEnv[key] = value
       child = spawn(spec.exe, spec.argv, {
         cwd,
         // Absolute execPath + array args: no shell, so a spacey packaged exe name
         // or a spacey pnpm-entry path is passed correctly (no quoting hazards).
         shell: false,
         windowsHide: true,
-        env: { ...spec.env, ...registryEnv },
+        env: childEnv,
       })
     } catch (error) {
       plog.error('pnpm failed to start', error)

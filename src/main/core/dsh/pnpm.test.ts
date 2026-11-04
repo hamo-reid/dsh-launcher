@@ -10,7 +10,8 @@ import { existsSync, mkdirSync, mkdtempSync, statSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  configurePnpmStore, ensurePnpmStore, installSucceeded, pnpmStoreDir, resolveStoreBase, runPnpm,
+  configurePnpmRegistryEnv, configurePnpmStore, ensurePnpmStore, installSucceeded, pnpmStoreDir, resolveStoreBase,
+  runPnpm,
 } from './pnpm.ts'
 
 const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }))
@@ -60,6 +61,25 @@ describe('runPnpm (spawn mocked)', () => {
     child.stdout.emit('data', Buffer.from('Progress: resolved 5, added 5 done'))
     child.emit('close', 0)
     await expect(p).resolves.toMatchObject({ ok: true })
+  })
+
+  it('strips an inherited npm_config_registry so the generated npmrc wins', async () => {
+    vi.stubEnv('npm_config_registry', 'https://registry.npmmirror.com')
+    configurePnpmRegistryEnv(() => ({ NPM_CONFIG_USERCONFIG: 'C:/data/npmrc' }))
+    try {
+      const child = fakeChild()
+      spawnMock.mockReturnValue(child)
+      const p = runPnpm('/dir', ['install'])
+      child.emit('close', 0)
+      await p
+      const env = (spawnMock.mock.calls[0]?.[2] as { env?: Record<string, string> }).env ?? {}
+      expect(env.npm_config_registry).toBeUndefined()
+      expect(env.NPM_CONFIG_REGISTRY).toBeUndefined()
+      expect(env.NPM_CONFIG_USERCONFIG).toBe('C:/data/npmrc')
+    } finally {
+      configurePnpmRegistryEnv(() => ({}))
+      vi.unstubAllEnvs()
+    }
   })
 
   it('counts a non-zero exit as ok when output shows packages added', async () => {
