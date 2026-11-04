@@ -4,17 +4,22 @@
  * The cases pinned here are the ones that make the difference visible — a dev
  * link that is NOT a registered dev plugin, a version spec that pnpm resolved
  * from the store, and profiles that disagree with each other.
+ *
+ * Paths are built with `resolve` rather than written as literals: the unit tests
+ * run on Linux in CI and on Windows during development, and a hard-coded
+ * `C:\...` only means anything on one of them.
  */
 import { describe, expect, it } from 'vitest'
+import { resolve, sep } from 'node:path'
 import { aggregateBinding, bindingOf, devDirKey, specTarget } from './binding.ts'
 
-const DEV = 'C:\\dev\\hamo-app'
+const DEV = resolve('dev-root', 'hamo-app')
 const devDirs = new Set([devDirKey(DEV)])
 
 describe('specTarget', () => {
   it('reads the directory out of link: and file:, and nothing out of a version', () => {
-    expect(specTarget('link:C:/dev/x')).toBe('C:/dev/x')
-    expect(specTarget('file:C:/store/archive/x/1.0.0')).toBe('C:/store/archive/x/1.0.0')
+    expect(specTarget(`link:${DEV}`)).toBe(DEV)
+    expect(specTarget(`file:${DEV}`)).toBe(DEV)
     expect(specTarget('^1.0.0')).toBeUndefined()
     expect(specTarget(undefined)).toBeUndefined()
   })
@@ -25,22 +30,26 @@ describe('bindingOf', () => {
     expect(bindingOf(`link:${DEV}`, devDirs)).toBe('dev')
   })
 
-  it('ignores the spelling of the path, not just its text', () => {
-    // The same directory written with another case or a trailing separator is
-    // still the same directory; treating them as different would report `store`
-    // for a profile that is plainly running the working copy.
-    expect(bindingOf(`link:${DEV}\\`, devDirs)).toBe('dev')
+  it('does not care about a trailing separator', () => {
+    // The same directory written twice must not look like two directories.
+    expect(bindingOf(`link:${DEV}${sep}`, devDirs)).toBe('dev')
+  })
+
+  it.runIf(process.platform === 'win32')('compares paths case-insensitively on Windows', () => {
+    // Windows treats these as one directory. Reporting `external` for a profile
+    // that is plainly running the working copy would be worse than useless.
     expect(bindingOf(`link:${DEV.toLowerCase()}`, devDirs)).toBe('dev')
+    expect(bindingOf(`link:${DEV.toUpperCase()}`, devDirs)).toBe('dev')
   })
 
   it('treats a link that is not a registered dev plugin as external, not dev', () => {
     // A hand-made link to a build output is a real situation. Calling it a dev
     // plugin would make the UI claim management the launcher does not have.
-    expect(bindingOf('link:C:/somewhere/else', devDirs)).toBe('external')
+    expect(bindingOf(`link:${resolve('somewhere', 'else')}`, devDirs)).toBe('external')
   })
 
   it('treats an archive path and a version range as store bindings', () => {
-    expect(bindingOf('file:C:/store/archive/@me/x/1.0.0', devDirs)).toBe('store')
+    expect(bindingOf(`file:${resolve('store', 'archive', 'pkg', '1.0.0')}`, devDirs)).toBe('store')
     expect(bindingOf('^1.0.0', devDirs)).toBe('store')
     expect(bindingOf('1.0.0', devDirs)).toBe('store')
   })
