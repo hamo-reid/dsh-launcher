@@ -136,11 +136,25 @@ describe('applyOverviewFilters', () => {
   })
 
   it('hides dev plugins unless showDev, and still filters them when shown', () => {
-    const devNames = new Set(['a'])
-    expect(names(applyOverviewFilters(rows, filters(), ctx({ devNames })))).toEqual(['b', 'c', 'd'])
+    // `b` is a dev plugin with no archived copy — that one belongs to the dev
+    // section. A dev plugin that IS archived is covered by the next test.
+    const devNames = new Set(['b'])
+    expect(names(applyOverviewFilters(rows, filters(), ctx({ devNames })))).toEqual(['a', 'c', 'd'])
     expect(names(applyOverviewFilters(rows, filters(), ctx({ devNames, showDev: true })))).toEqual(['a', 'b', 'c', 'd'])
     const f = filters({ kind: { mode: 'exclude', values: ['template'] } })
     expect(names(applyOverviewFilters(rows, f, ctx({ devNames, showDev: true })))).toEqual(['a', 'c', 'd'])
+  })
+
+  it('keeps a dev plugin whose versions are also archived in the store', () => {
+    // Downloading the published build of a package you are developing is normal.
+    // The archived versions must stay manageable (versions, size, uninstall), and
+    // that row is where the binding badge says which identity is loaded.
+    const both = [
+      row({ name: 'both', inStore: true }),
+      row({ name: 'dev-only', inStore: false }),
+    ]
+    const devNames = new Set(['both', 'dev-only'])
+    expect(names(applyOverviewFilters(both, filters(), ctx({ devNames })))).toEqual(['both'])
   })
 
   it('applies the name query and the bucket', () => {

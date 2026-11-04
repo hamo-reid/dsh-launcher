@@ -144,8 +144,12 @@ export function applyOverviewFilters(
 ): InstalledOverviewRow[] {
   const query = ctx.query.trim().toLowerCase()
   return rows.filter((row) => {
-    // Dev plugins live in their own section; hidden here unless asked.
-    if (!ctx.showDev && ctx.devNames.has(row.name)) return false
+    // Dev plugins live in their own section; hidden here unless asked. A package
+    // that is ALSO archived in the store is not only a dev plugin, though: hiding
+    // it made its archived versions unmanageable (no versions, no size, no
+    // uninstall) and hid which identity the profiles are bound to. The dev
+    // section still lists the working copy either way.
+    if (!ctx.showDev && ctx.devNames.has(row.name) && row.inStore !== true) return false
     if (query !== '' && !row.name.toLowerCase().includes(query)) return false
     switch (filters.bucket) {
       case 'used': if (row.usage.length === 0) return false; break
