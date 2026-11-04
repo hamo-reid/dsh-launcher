@@ -4,7 +4,8 @@
  * `archive/<name>/<version>/`, and a profile's `link:` dependency then points at
  * that versioned copy (with bundle-layer reconcile for bundle-declaring plugins).
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import AdmZip from 'adm-zip'
 import { PNPM_WORKSPACE_YAML, runPnpm, type PnpmResult } from '../dsh/pnpm.ts'
@@ -53,6 +54,48 @@ function writeHoistedWorkspace(verDir: string): boolean {
  * real name from `node_modules` and reports a mismatch rather than trusting it. */
 export function packageNameFromSource(source: string): string {
   return installNameFor(source) ?? 'plugin'
+}
+
+/** A pnpm command that must see the registry, not a cached packument.
+ *
+ * A version can be republished under the same number (a hotfix), but pnpm's
+ * metadata cache keeps the old `dist.integrity`. A throwaway cache directory
+ * makes this one command resolve from the registry; the store is separate and
+ * content-addressed, so tarballs are still reused. Works for every scope — the
+ * caller supplies the package names, nothing is hard-coded here. The directory
+ * is removed once the child exits, including on cancel. */
+async function runWithFreshCache(
+  cwd: string, args: readonly string[], signal: AbortSignal | undefined, storeDir: string,
+): Promise<PnpmResult> {
+  const cacheDir = mkdtempSync(join(tmpdir(), 'dsh-pnpm-cache-'))
+  try {
+    return await runPnpm(cwd, [...args, `--config.cache-dir=${cacheDir}`], signal, { storeDir })
+  } finally {
+    try {
+      rmSync(cacheDir, { recursive: true, force: true })
+    } catch {
+      // Best-effort cleanup: a leftover temp cache must not fail an install.
+    }
+  }
+}
+
+/** The pnpm errors that mean a tarball no longer matches its lock/metadata. */
+const INTEGRITY_FAILURE = /ERR_PNPM_TARBALL_INTEGRITY|integrity checksum failed|EINTEGRITY/i
+
+/** Extract the package whose tarball failed the integrity check. pnpm prints the
+ * tarball URL; the package is the segment(s) before the LAST `/-/` (the CNB
+ * registry adds its own `/-/packages` prefix, so the first marker is not the
+ * package boundary). Returns undefined when the output has no usable URL. */
+export function packageFromIntegrityLog(text: string): string | undefined {
+  const url = /https?:\/\/\S+?\.tgz/.exec(text)?.[0]
+  if (url === undefined) return undefined
+  const marker = url.lastIndexOf('/-/')
+  if (marker < 0) return undefined
+  const segments = url.slice(0, marker).split('/').filter((segment) => segment !== '')
+  const last = segments[segments.length - 1]
+  if (last === undefined) return undefined
+  const previous = segments[segments.length - 2]
+  return previous?.startsWith('@') === true ? `${previous}/${last}` : last
 }
 
 /** Install one source (npm package or git spec) into the store. Downloads into a
@@ -170,7 +213,20 @@ export async function installSource(
   // Writing it here (rather than after the rename) means the archive is already
   // the right shape when it is first built; the post-rename hoist is gone.
   writeHoistedWorkspace(staging)
-  const result = await runPnpm(staging, ['add', source, '--fetch-retries=3', '--fetch-retry-maxtimeout=60000'], signal, { storeDir })
+  // A registry version can be hotfixed in place. Resolve this add with a
+  // throwaway metadata cache so EVERY package in the graph (including transitive
+  // deps of any scope) is read from the registry, not from a stale packument.
+  const isRegistry = sourceKindOf(source) === 'npm'
+  const addArgs = ['add', source, '--fetch-retries=3', '--fetch-retry-maxtimeout=60000']
+  let result = isRegistry
+    ? await runWithFreshCache(staging, addArgs, signal, storeDir)
+    : await runPnpm(staging, addArgs, signal, { storeDir })
+  if (!result.ok && result.aborted !== true && isRegistry && INTEGRITY_FAILURE.test(result.text)) {
+    // The metadata and tarball disagreed (registry changed mid-add, or a proxy
+    // served a stale packument). A second fresh cache is cheap; retry once.
+    logger.warn(`plugin store: integrity failure while adding ${name}; retrying with a fresh metadata cache`)
+    result = await runWithFreshCache(staging, addArgs, signal, storeDir)
+  }
   // A user cancel: drop the half-downloaded staging dir and surface it as a
   // cancel, not a failure — the download task manager treats it as cancelled.
   // The log is still carried: a cancelled session can be opened in the detail
@@ -426,6 +482,53 @@ function targetVersionedPkgDir(storeDir: string, pkg: string, opts: { version?: 
   return join(pluginVersionDir(storeDir, pkg, version), 'node_modules', pkg)
 }
 
+/** Specs that are not registry versions: their "update" is a local/git operation
+ * and naming them would make pnpm resolve a package that is not on the registry. */
+const NON_REGISTRY_SPEC = /^(?:file|link|workspace|portal|catalog|git\+|github|gitlab|gitea|gitee|https?):/i
+
+/** Refresh the lock entries for an archived plugin's direct registry deps.
+ *
+ * A registry version can be republished under the same number, but the profile's
+ * lock keeps the old integrity; `pnpm install` then replays the cached old bytes
+ * (or fails `ERR_PNPM_TARBALL_INTEGRITY`). The dependency NAMES come from the
+ * plugin's own manifest, so this works for any package and any scope — there is
+ * no hard-coded registry or scope here. `pnpm update --lockfile-only` re-resolves
+ * those names (an exact spec keeps its version; a range may move within it), and
+ * the throwaway metadata cache makes the update read the registry rather than a
+ * stale packument. */
+async function refreshPluginDependencies(dir: string, pkgDir: string, storeDir: string): Promise<boolean> {
+  let manifest: { dependencies?: Record<string, string> }
+  try {
+    manifest = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8')) as typeof manifest
+  } catch {
+    return false
+  }
+  const names = Object.entries(manifest.dependencies ?? {})
+    .filter(([, spec]) => !NON_REGISTRY_SPEC.test(spec.trim()) && !spec.trim().startsWith('npm:'))
+    .map(([name]) => name)
+  if (names.length === 0) return false
+  const update = await runWithFreshCache(dir, ['update', ...names, '--lockfile-only'], undefined, storeDir)
+  if (!update.ok) {
+    logger.warn(`plugin install: could not refresh the plugin's dependency lock entries: ${update.text}`)
+    return false
+  }
+  return true
+}
+
+/** Refresh one package's lock entry, whatever its scope. This is the general
+ * fallback for a hotfixed transitive dependency: `pnpm update` re-resolves the
+ * named package in place (the exact version is kept; only its resolution
+ * changes), and the throwaway metadata cache makes it read the registry rather
+ * than a stale packument. */
+async function refreshLockPackage(dir: string, name: string, storeDir: string): Promise<boolean> {
+  const update = await runWithFreshCache(dir, ['update', name, '--lockfile-only'], undefined, storeDir)
+  if (!update.ok) {
+    logger.warn(`plugin install: could not refresh the lock entry for ${name}: ${update.text}`)
+    return false
+  }
+  return true
+}
+
 /**
  * Point a profile at one archived version of a plugin via a `file:` dependency,
  * so pnpm real-installs it (plus any sub-bundles) into the profile node_modules,
@@ -513,7 +616,23 @@ export async function installIntoProfile(
   try {
     if (manifestChanged) writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
 
-    const install = await runPnpm(dir, ['install', '--config.confirmModulesPurge=false'], undefined, { storeDir })
+    // A hotfixed dependency changes dist.integrity under the same version; refresh
+    // this plugin's direct registry deps so the install does not replay the old
+    // lock resolution. The list comes from the plugin's manifest (any scope).
+    await refreshPluginDependencies(dir, pkgDir, storeDir)
+    let install = await runPnpm(dir, ['install', '--config.confirmModulesPurge=false'], undefined, { storeDir })
+    if (!install.ok && INTEGRITY_FAILURE.test(install.text)) {
+      // The pre-install refresh is limited to the plugin's direct deps. For a
+      // transitive package (or an unexpected failure), take the package named by
+      // the failing tarball URL and refresh just that entry.
+      const failed = packageFromIntegrityLog(install.text)
+      const refreshed = failed === undefined
+        ? await refreshPluginDependencies(dir, pkgDir, storeDir)
+        : await refreshLockPackage(dir, failed, storeDir)
+      if (refreshed) {
+        install = await runPnpm(dir, ['install', '--config.confirmModulesPurge=false'], undefined, { storeDir })
+      }
+    }
     if (!install.ok) {
       restoreManifest()
       logger.warn('plugin install into profile failed', { profile, pkg, text: install.text })

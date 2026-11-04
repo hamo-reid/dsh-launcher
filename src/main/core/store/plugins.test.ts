@@ -15,6 +15,7 @@ vi.mock('../dsh/pnpm.ts', async (importActual) => {
   return { ...actual, runPnpm: vi.fn() }
 })
 import { runPnpm } from '../dsh/pnpm.ts'
+import { packageFromIntegrityLog } from './install.ts'
 import {
   addLocalPlugin, addPlugin, buildInstalledOverview, findInstalledDir, initStore,
   installIntoProfile, installSource, installedStoreVersion, listPlugins, listProfileScopes,
@@ -59,6 +60,7 @@ function seedVersion(pkg: string, version: string, extra: Record<string, unknown
  * every package that way); non-`file:` sources fall back to `fresh`. */
 function mockSourceInstall(): void {
   vi.mocked(runPnpm).mockImplementation(async (dir, args) => {
+    if (args[0] !== 'add') return { ok: true, text: '' }
     const source = args[1] ?? ''
     let name = 'fresh'
     let version = '0.9.0'
@@ -72,6 +74,24 @@ function mockSourceInstall(): void {
     return { ok: true, text: 'added' }
   })
 }
+
+describe('packageFromIntegrityLog', () => {
+  it('parses the package from a CNB tarball URL (the last /-/ wins)', () => {
+    expect(packageFromIntegrityLog(
+      'ERR_PNPM_TARBALL_INTEGRITY  GET https://npm.cnb.cool/hamo-studio/hamo-dsh/-/packages/@drahamo/hamo-base-ui/-/@drahamo/hamo-base-ui-0.1.1.tgz: Integrity checksum failed',
+    )).toBe('@drahamo/hamo-base-ui')
+  })
+
+  it('parses an unscoped package', () => {
+    expect(packageFromIntegrityLog(
+      'ERR_PNPM_TARBALL_INTEGRITY GET https://registry.npmjs.org/foo/-/foo-1.0.0.tgz: Integrity checksum failed',
+    )).toBe('foo')
+  })
+
+  it('returns undefined without a tarball URL', () => {
+    expect(packageFromIntegrityLog('ERR_PNPM_TARBALL_INTEGRITY something went wrong')).toBeUndefined()
+  })
+})
 
 describe('store basics', () => {
   it('initStore writes an empty private manifest', () => {
@@ -113,10 +133,51 @@ describe('store basics', () => {
     })
     await addPlugin(store(), 'foo@^1')
     const staging = join(store(), 'archive', 'foo', '.staging')
-    expect(runPnpm).toHaveBeenCalledWith(staging, ['add', 'foo@^1', '--fetch-retries=3', '--fetch-retry-maxtimeout=60000'], undefined, { storeDir: store() })
+    expect(runPnpm).toHaveBeenCalledWith(
+      staging,
+      expect.arrayContaining(['add', 'foo@^1', '--fetch-retries=3', '--fetch-retry-maxtimeout=60000']),
+      undefined,
+      { storeDir: store() },
+    )
     expect(listPlugins(store())).toContainEqual({ name: 'foo', version: '1.2.3' })
     await removePlugin(store(), 'foo')
     expect(existsSync(join(store(), 'archive', 'foo'))).toBe(false)
+  })
+
+  it('resolves a registry download with a fresh metadata cache', async () => {
+    vi.mocked(runPnpm).mockImplementation(async (dir, args) => {
+      if (args[0] !== 'add') return { ok: true, text: '' }
+      mkPkg(join(dir, 'node_modules', '@drahamo/hamo-base-ui'), '0.1.1')
+      return { ok: true, text: 'added' }
+    })
+    await addPlugin(store(), '@drahamo/hamo-base-ui@0.1.1')
+    const addCall = vi.mocked(runPnpm).mock.calls.find(([, args]) => args[0] === 'add')
+    expect(addCall?.[1]).toEqual(expect.arrayContaining(['add', '@drahamo/hamo-base-ui@0.1.1']))
+    expect(addCall?.[1].some((arg) => String(arg).startsWith('--config.cache-dir='))).toBe(true)
+    // No global cache is touched by this path.
+    expect(vi.mocked(runPnpm).mock.calls.some(([, args]) => args[0] === 'cache')).toBe(false)
+  })
+
+  it('retries with a fresh cache when a download hits an integrity failure', async () => {
+    let addCount = 0
+    vi.mocked(runPnpm).mockImplementation(async (dir, args) => {
+      if (args[0] !== 'add') return { ok: true, text: '' }
+      addCount += 1
+      if (addCount === 1) {
+        return { ok: false, text: 'ERR_PNPM_TARBALL_INTEGRITY GET https://registry.npmjs.org/pkg/-/pkg-1.0.0.tgz: bad' }
+      }
+      mkPkg(join(dir, 'node_modules', 'pkg'), '1.0.0')
+      return { ok: true, text: 'added' }
+    })
+    const r = await installSource(store(), 'pkg', 'pkg@1.0.0')
+    expect(r.ok).toBe(true)
+    expect(addCount).toBe(2)
+    const addCalls = vi.mocked(runPnpm).mock.calls.filter(([, args]) => args[0] === 'add')
+    expect(addCalls).toHaveLength(2)
+    for (const [, args] of addCalls) {
+      expect(args.some((arg) => String(arg).startsWith('--config.cache-dir='))).toBe(true)
+    }
+    expect(vi.mocked(runPnpm).mock.calls.some(([, args]) => args[0] === 'cache')).toBe(false)
   })
 
   it('removePlugin drops a single archived version and keeps the others', async () => {
@@ -144,7 +205,13 @@ describe('local installs', () => {
     const r = await addLocalPlugin(store(), src)
     expect(r.ok).toBe(true)
     const staging = join(store(), 'archive', 'src-plugin', '.staging')
-    expect(runPnpm).toHaveBeenCalledWith(staging, ['add', `file:${src}`, '--fetch-retries=3', '--fetch-retry-maxtimeout=60000'], undefined, { storeDir: store() })
+    expect(runPnpm).not.toHaveBeenCalledWith(staging, ['cache', 'delete', 'src-plugin'], undefined, { skipStoreDir: true })
+    expect(runPnpm).toHaveBeenCalledWith(
+      staging,
+      expect.arrayContaining(['add', `file:${src}`, '--fetch-retries=3', '--fetch-retry-maxtimeout=60000']),
+      undefined,
+      { storeDir: store() },
+    )
     expect(listPlugins(store())).toContainEqual({ name: 'src-plugin', version: '1.0.0' })
   })
 
@@ -622,7 +689,11 @@ describe('removePluginFromProfiles', () => {
 describe('installSource (cancellation)', () => {
   it('cleans its staging dir and surfaces aborted when cancelled', async () => {
     const name = 'abortedPkg'
-    vi.mocked(runPnpm).mockResolvedValueOnce({ ok: false, aborted: true, text: 'cancelled' })
+    vi.mocked(runPnpm).mockImplementation(async (_dir, args) =>
+      args[0] === 'add'
+        ? { ok: false, aborted: true, text: 'cancelled' }
+        : { ok: true, text: '' },
+    )
     const staging = join(join(store(), 'archive'), name, '.staging')
     const res = await installSource(store(), name, `${name}@1.0.0`, new AbortController().signal)
     expect(res.ok).toBe(false)
@@ -686,6 +757,88 @@ describe('installIntoProfile', () => {
     expect(r.ok).toBe(true)
     const m = JSON.parse(readFileSync(join(base, 'prof', 'package.json'), 'utf8')) as { dependencies: Record<string, string> }
     expect(m.dependencies['pkg-a']).toBe(`file:${join(store(), 'archive', 'pkg-a', '1.0.0', 'node_modules', 'pkg-a')}`)
+  })
+
+  it('refreshes the plugin\'s own registry dependencies before installing', async () => {
+    const base = join(root, 'profs-deps')
+    seedVersion('pkg-a', '1.0.0', {
+      dependencies: {
+        'dep-x': '1.0.0',
+        'local-dep': 'file:/tmp/local',
+        'linked-dep': 'link:/tmp/linked',
+        'git-dep': 'github:owner/repo',
+      },
+    })
+    mkProfile(base, 'prof', {})
+    const r = await installIntoProfile(base, 'prof', 'pkg-a', store())
+    expect(r.ok).toBe(true)
+    const dir = join(base, 'prof')
+    // The name list is generic (it comes from the plugin manifest, not a scope),
+    // and the update resolves through a throwaway metadata cache.
+    expect(runPnpm).toHaveBeenCalledWith(
+      dir,
+      expect.arrayContaining(['update', 'dep-x', '--lockfile-only']),
+      undefined,
+      { storeDir: store() },
+    )
+    const updateCall = vi.mocked(runPnpm).mock.calls.find(([, args]) => args[0] === 'update')
+    expect(updateCall?.[1]).not.toContain('local-dep')
+    expect(updateCall?.[1]).not.toContain('linked-dep')
+    expect(updateCall?.[1]).not.toContain('git-dep')
+    expect(updateCall?.[1].some((arg) => String(arg).startsWith('--config.cache-dir='))).toBe(true)
+  })
+
+  it('does not refresh the lock for a plugin without registry deps', async () => {
+    const base = join(root, 'profs-nodeps')
+    seedVersion('pkg-a', '1.0.0')
+    mkProfile(base, 'prof', {})
+    await installIntoProfile(base, 'prof', 'pkg-a', store())
+    expect(vi.mocked(runPnpm).mock.calls.some(([, args]) => args[0] === 'update')).toBe(false)
+  })
+
+  it('retries once after an integrity failure, then keeps the install', async () => {
+    const base = join(root, 'profs-retry')
+    seedVersion('pkg-a', '1.0.0', { dependencies: { 'dep-x': '1.0.0' } })
+    mkProfile(base, 'prof', {})
+    let installs = 0
+    vi.mocked(runPnpm).mockImplementation(async (_dir, args) => {
+      if (args[0] === 'install') {
+        installs += 1
+        return installs === 1
+          ? { ok: false, text: 'ERR_PNPM_TARBALL_INTEGRITY  Got unexpected checksum' }
+          : { ok: true, text: 'installed' }
+      }
+      return { ok: true, text: '' }
+    })
+    const r = await installIntoProfile(base, 'prof', 'pkg-a', store())
+    expect(r.ok).toBe(true)
+    expect(installs).toBe(2)
+  })
+
+  it('repairs a third-party package lock entry after an integrity failure', async () => {
+    const base = join(root, 'profs-third')
+    seedVersion('pkg-a', '1.0.0')
+    mkProfile(base, 'prof', {})
+    let installs = 0
+    vi.mocked(runPnpm).mockImplementation(async (_dir, args) => {
+      if (args[0] === 'install') {
+        installs += 1
+        return installs === 1
+          ? { ok: false, text: 'ERR_PNPM_TARBALL_INTEGRITY GET https://registry.npmjs.org/foo/-/foo-1.0.0.tgz: bad' }
+          : { ok: true, text: 'installed' }
+      }
+      return { ok: true, text: '' }
+    })
+    const dir = join(base, 'prof')
+    const r = await installIntoProfile(base, 'prof', 'pkg-a', store())
+    expect(r.ok).toBe(true)
+    expect(installs).toBe(2)
+    expect(runPnpm).toHaveBeenCalledWith(
+      dir,
+      expect.arrayContaining(['update', 'foo', '--lockfile-only']),
+      undefined,
+      { storeDir: store() },
+    )
   })
 
   it('reports link-only install when the store package stays absent', async () => {
