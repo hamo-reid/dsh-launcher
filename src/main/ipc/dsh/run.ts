@@ -21,6 +21,7 @@ import {
   profileId, readLaunchOptions, readRunMode, writeLaunchOptions, writeRunMode,
 } from '../../core/profile/launch-config.ts'
 import { fail, failFromError, E } from '../../core/shared/errors.ts'
+import { dialogFilter, dialogTitle } from '../../core/shared/dialog-text.ts'
 import { child, logger } from '../../core/shared/logger.ts'
 import { effectiveArgs, sanitizeLaunchOptions } from '../../core/profile/launch-options.ts'
 import { hasRun, nextRunId } from '../../core/shared/run-registry.ts'
@@ -405,9 +406,14 @@ export function registerRunIpc(): void {
   // Pick a cordis patch overlay file for the launch parameters. `''` = cancelled.
   handle('run:pickPatch', async (): Promise<IpcResult<string>> => {
     const win = BrowserWindow.getFocusedWindow()
+    const options = {
+      title: dialogTitle('patchFile'),
+      properties: ['openFile' as const],
+      filters: [dialogFilter('patchFile', ['yml', 'yaml'])],
+    }
     const result = win === null
-      ? await dialog.showOpenDialog({ title: '选择 patch 文件', properties: ['openFile'], filters: [{ name: 'Cordis patch', extensions: ['yml', 'yaml'] }] })
-      : await dialog.showOpenDialog(win, { title: '选择 patch 文件', properties: ['openFile'], filters: [{ name: 'Cordis patch', extensions: ['yml', 'yaml'] }] })
+      ? await dialog.showOpenDialog(options)
+      : await dialog.showOpenDialog(win, options)
     if (result.canceled || result.filePaths.length === 0) return { ok: true, value: '' }
     return { ok: true, value: result.filePaths[0] }
   })

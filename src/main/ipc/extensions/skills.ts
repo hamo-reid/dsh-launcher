@@ -16,6 +16,7 @@ import { ctxOf } from '../ctxOf.ts'
 import { handle } from '../handle.ts'
 import { profileRefused, profileTarget } from '../validate.ts'
 import { logger } from '../../core/shared/logger.ts'
+import { dialogFilter, dialogTitle } from '../../core/shared/dialog-text.ts'
 import {
   deleteSkill, folderImportProblem, importSkillFolder, importSkillZip, installFolderSkills,
   installedEntry, installZipSkills, listSkills, parseSkillText, requireWritableSkillRoot,
@@ -84,7 +85,7 @@ function libExists(): (name: string) => boolean {
 async function pickFolder(folderPath?: string): Promise<string | null> {
   if (typeof folderPath === 'string' && folderPath !== '') return folderPath
   const dialoged = await dialog.showOpenDialog({
-    title: '选择 skill 文件夹',
+    title: dialogTitle('skillFolder'),
     properties: ['openDirectory'],
   })
   if (dialoged.canceled || dialoged.filePaths.length === 0) return null
@@ -185,9 +186,9 @@ export function registerSkillsExtIpc(): void {
       picked = zipPath
     } else {
       const dialoged = await dialog.showOpenDialog({
-        title: '选择要导入的 skill 压缩包',
+        title: dialogTitle('skillZip'),
         properties: ['openFile'],
-        filters: [{ name: 'Skill 压缩包', extensions: ['zip'] }],
+        filters: [dialogFilter('skillZip', ['zip'])],
       })
       if (dialoged.canceled || dialoged.filePaths.length === 0) return { ok: true, value: null }
       picked = dialoged.filePaths[0]
@@ -302,9 +303,9 @@ export function registerSkillsExtIpc(): void {
       picked = zipPath
     } else {
       const dialoged = await dialog.showOpenDialog({
-        title: '选择要导入的 skill 压缩包',
+        title: dialogTitle('skillZip'),
         properties: ['openFile'],
-        filters: [{ name: 'Skill 压缩包', extensions: ['zip'] }],
+        filters: [dialogFilter('skillZip', ['zip'])],
       })
       if (dialoged.canceled || dialoged.filePaths.length === 0) return { ok: true, value: null }
       picked = dialoged.filePaths[0]

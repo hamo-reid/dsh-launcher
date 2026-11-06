@@ -11,6 +11,7 @@ import {
   dataRoot, dshVersionDir, pluginDir, readDshState, shouldRunOnboarding, skillLibraryDir,
 } from '../../core/profile/appState.ts'
 import { fail, failFromError, E } from '../../core/shared/errors.ts'
+import { dialogFilter, dialogTitle } from '../../core/shared/dialog-text.ts'
 import { handle } from '../handle.ts'
 import { checkHealth } from '../../core/dsh/health.ts'
 import { checkAppUpdate } from '../../core/github/updates.ts'
@@ -321,9 +322,9 @@ export function registerSettingsIpc(): void {
   handle('settings:export', async (): Promise<IpcResult<string>> => {
     try {
       const picked = await dialog.showSaveDialog({
-        title: '导出设置',
+        title: dialogTitle('exportSettings'),
         defaultPath: 'dsh-launcher-settings.json',
-        filters: [{ name: 'JSON', extensions: ['json'] }],
+        filters: [dialogFilter('exportSettings', ['json'])],
       })
       if (picked.canceled || picked.filePath === '') return { ok: true, value: '' }
       writeFileSync(picked.filePath, exportSettings())
@@ -337,9 +338,9 @@ export function registerSettingsIpc(): void {
   handle('settings:import', async (): Promise<IpcResult<boolean>> => {
     try {
       const picked = await dialog.showOpenDialog({
-        title: '导入设置',
+        title: dialogTitle('importSettings'),
         properties: ['openFile'],
-        filters: [{ name: 'JSON', extensions: ['json'] }],
+        filters: [dialogFilter('importSettings', ['json'])],
       })
       if (picked.canceled || picked.filePaths.length === 0) return { ok: true, value: false }
       importSettings(readFileSync(picked.filePaths[0], 'utf8'))

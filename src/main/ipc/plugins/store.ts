@@ -15,6 +15,7 @@ import { fetchPackageVersions, npmSearch } from '../../core/store/npm.ts'
 import { attachBindings, attachPluginSizes, attachRegistryLabels, versionSizes } from '../../core/store/overview.ts'
 import { storeVersions } from '../../core/store/layout.ts'
 import { fail, failFromError, E } from '../../core/shared/errors.ts'
+import { dialogFilter, dialogTitle } from '../../core/shared/dialog-text.ts'
 import { pathIdentifierInvalid, versionInvalid } from '../validate.ts'
 import { ctxOf } from '../ctxOf.ts'
 import { handle } from '../handle.ts'
@@ -96,9 +97,9 @@ export function registerStoreIpc(): void {
       const store = pluginDir()
       if (store === '') return fail(E.storeNotConfigured)
       const picked = await dialog.showOpenDialog({
-        title: '选择插件 .zip 包',
+        title: dialogTitle('pluginZip'),
         properties: ['openFile'],
-        filters: [{ name: '插件包', extensions: ['zip'] }],
+        filters: [dialogFilter('pluginZip', ['zip'])],
       })
       if (picked.canceled || picked.filePaths.length === 0) return fail(E.commonCancelled)
       const result = await addLocalPlugin(store, picked.filePaths[0])

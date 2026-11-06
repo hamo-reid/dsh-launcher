@@ -8,6 +8,7 @@ import AdmZip from 'adm-zip'
 import { contextForEntry, dshEntryById, type DshContext } from '../../core/profile/appState.ts'
 import { exportDshData, importDshData, mirrorDshData } from '../../core/profile/home-data.ts'
 import { fail, failFromError, E } from '../../core/shared/errors.ts'
+import { dialogFilter, dialogTitle } from '../../core/shared/dialog-text.ts'
 import type { DshDataImportResult, DshDataManifest, DshEntry, IpcResult } from '../../../shared/types.ts'
 
 /** The archive the last `data:inspectImport` dialog actually returned. `data:import`
@@ -30,9 +31,9 @@ export function registerHomeDataIpc(): void {
       const s = entryFor(id)
       if (s === undefined) return fail(E.dshNotFound)
       const picked = await dialog.showSaveDialog({
-        title: '导出 DSH 数据',
+        title: dialogTitle('exportDshData'),
         defaultPath: `dsh-data-${s.entry.name}.zip`,
-        filters: [{ name: 'DSH 数据', extensions: ['zip'] }],
+        filters: [dialogFilter('exportDshData', ['zip'])],
       })
       if (picked.canceled || picked.filePath === '') return { ok: true, value: '' }
       exportDshData(s.ctx, picked.filePath)
@@ -47,9 +48,9 @@ export function registerHomeDataIpc(): void {
   handle('data:inspectImport', async (): Promise<IpcResult<{ file: string; manifest: DshDataManifest | null }>> => {
     try {
       const picked = await dialog.showOpenDialog({
-        title: '选择要导入的 DSH 数据包',
+        title: dialogTitle('importDshData'),
         properties: ['openFile'],
-        filters: [{ name: 'DSH 数据', extensions: ['zip'] }],
+        filters: [dialogFilter('importDshData', ['zip'])],
       })
       if (picked.canceled || picked.filePaths.length === 0) {
         inspectedImportFile = null

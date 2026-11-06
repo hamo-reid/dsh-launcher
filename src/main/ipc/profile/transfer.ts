@@ -1,5 +1,5 @@
 /** Moving a profile in and out of the launcher: portable export, the zip round-trip, and the cross-dsh mirror. */
-
+
 
 import { app, dialog } from 'electron'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -9,6 +9,7 @@ import { exportProfile, importProfile, listLocalBundles, mirrorProfile } from '.
 import { contextForEntry, dshEntryById, pluginDir } from '../../core/profile/appState.ts'
 import { addDirToZip } from '../../core/shared/app-util.ts'
 import { fail, E } from '../../core/shared/errors.ts'
+import { dialogFilter, dialogTitle } from '../../core/shared/dialog-text.ts'
 import { ctxOf } from '../ctxOf.ts'
 import { handle } from '../handle.ts'
 import { importTmpRoot, invalidName } from './helpers.ts'
@@ -38,9 +39,11 @@ export function registerProfileTransferIpc(): void {
     const json = exportProfile(ctx, name)
     const zip = opts?.zip === true
     const picked = await dialog.showSaveDialog({
-      title: `导出 ${name}`,
+      title: dialogTitle('profileExportZip', { name }),
       defaultPath: zip ? `${name}.zip` : `${name}.json`,
-      filters: zip ? [{ name: '存档', extensions: ['zip'] }] : [{ name: 'JSON', extensions: ['json'] }],
+      filters: zip
+        ? [dialogFilter('profileExportZip', ['zip'])]
+        : [dialogFilter('profileExportJson', ['json'])],
     })
     if (picked.canceled || picked.filePath === '') return { ok: true, value: '' } // 用户取消，不报错
     if (zip) {
@@ -59,9 +62,9 @@ export function registerProfileTransferIpc(): void {
   // where those live, `''` for a plain json. dshVersion lets the UI gate early.
   handle('profile:importFromFile', async (): Promise<IpcResult<{ json: string; name: string; dshVersion: string; unpackDir: string }>> => {
     const picked = await dialog.showOpenDialog({
-      title: '选择要导入的 profile 导出文件',
+      title: dialogTitle('importProfile'),
       properties: ['openFile'],
-      filters: [{ name: 'Profile 导出', extensions: ['json', 'zip'] }],
+      filters: [dialogFilter('importProfile', ['json', 'zip'])],
     })
     if (picked.canceled || picked.filePaths.length === 0) return { ok: true, value: { json: '', name: '', dshVersion: '', unpackDir: '' } }
     const file = picked.filePaths[0]

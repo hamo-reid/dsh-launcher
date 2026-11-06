@@ -15,6 +15,7 @@ import {
 } from '../../core/profile/appState.ts'
 import { isProfileRunning } from '../dsh/run.ts'
 import { fail, failFromError, E } from '../../core/shared/errors.ts'
+import { dialogTitle } from '../../core/shared/dialog-text.ts'
 import { pathIdentifierInvalid, profileRefused, profileTarget } from '../validate.ts'
 import { ctxOf } from '../ctxOf.ts'
 import { handle } from '../handle.ts'
@@ -69,7 +70,7 @@ export function registerDevIpc(): void {
   // Register a source dir as a dev plugin. No copy: the registry only records it.
   handle('plugins:devAdd', async (): Promise<IpcResult<DevPlugin>> => {
     try {
-      const picked = await dialog.showOpenDialog({ title: '选择开发插件包目录', properties: ['openDirectory'] })
+      const picked = await dialog.showOpenDialog({ title: dialogTitle('devPluginDir'), properties: ['openDirectory'] })
       if (picked.canceled || picked.filePaths.length === 0) return fail(E.commonCancelled)
       return { ok: true, value: registerDevPlugin(picked.filePaths[0]) }
     } catch (error) {
