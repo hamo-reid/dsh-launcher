@@ -17,8 +17,9 @@ import { handle } from '../handle.ts'
 import { profileRefused, profileTarget } from '../validate.ts'
 import { logger } from '../../core/shared/logger.ts'
 import {
-  deleteSkill, importSkillZip, installedEntry, installZipSkills, listSkills, parseSkillText,
-  requireWritableSkillRoot, scaffoldSkill, skillLocationOf, writeSkill, zipImportProblem,
+  deleteSkill, folderImportProblem, importSkillFolder, importSkillZip, installFolderSkills,
+  installedEntry, installZipSkills, listSkills, parseSkillText, requireWritableSkillRoot,
+  scaffoldSkill, skillLocationOf, writeSkill, zipImportProblem,
 } from '../../core/skills/skills.ts'
 import {
   deleteSkillLib, findSkillLibEntry, installSkillToDsh, listSkillLibrary, scanSkillInstalls,
@@ -26,6 +27,7 @@ import {
 } from '../../core/skills/library.ts'
 import { SKILL_NAME_RE } from '../../../shared/skill.ts'
 import { fail, failFromError, E } from '../../core/shared/errors.ts'
+import type { ParsedSkill } from '../../core/skills/frontmatter.ts'
 import type { IpcResult, SkillEntry, SkillLibEntry, SkillLibOverviewRow, SkillListing } from '../../../shared/types.ts'
 
 
@@ -49,6 +51,44 @@ async function revealDir(dir: string): Promise<IpcResult<boolean>> {
 async function openInEditor(target: string): Promise<IpcResult<boolean>> {
   await shell.openExternal(`vscode://file/${target.replace(/\\/g, '/')}`)
   return { ok: true, value: true }
+}
+
+/** Map what an import landed onto the LIBRARY's entry shape: a bundle's `path` is
+ * its SKILL.md and its `dir` the folder that holds it (the same convention
+ * `listSkillLibrary` uses). Both import sources share this, so the two handlers
+ * cannot disagree about what they returned. */
+function libEntriesOf(installed: ReadonlyArray<{ skill: ParsedSkill; dir: string }>): SkillLibEntry[] {
+  return installed.map(({ skill, dir }) => ({
+    name: skill.name,
+    description: skill.description,
+    ...(skill.whenToUse !== undefined ? { whenToUse: skill.whenToUse } : {}),
+    modelInvocable: skill.modelInvocable,
+    userInvocable: skill.userInvocable,
+    path: join(dir, 'SKILL.md'),
+    dir,
+  }))
+}
+
+/** The library's own "this name is taken" probe: a bundle directory OR a flat
+ * `<name>.md` — both are skills the library lists, so an import must refuse
+ * either. Resolved per call, because the library directory derives from the
+ * data root and can change between calls. */
+function libExists(): (name: string) => boolean {
+  const libDir = skillLibraryDir()
+  return name => existsSync(join(libDir, name)) || existsSync(join(libDir, `${name}.md`))
+}
+
+/** Pick one folder, or answer `null` when the dialog was dismissed. The path a
+ * drag & drop (or a caller) passes is used as-is: the dialog is only the way to
+ * NAME one. */
+async function pickFolder(folderPath?: string): Promise<string | null> {
+  if (typeof folderPath === 'string' && folderPath !== '') return folderPath
+  const dialoged = await dialog.showOpenDialog({
+    title: '选择 skill 文件夹',
+    properties: ['openDirectory'],
+  })
+  if (dialoged.canceled || dialoged.filePaths.length === 0) return null
+  return dialoged.filePaths[0]
 }
 
 export function registerSkillsExtIpc(): void {
@@ -163,6 +203,26 @@ export function registerSkillsExtIpc(): void {
     }
   })
 
+  // Install a folder's skills into this dsh's writable root (all-or-nothing).
+  // The folder is COPIED, never linked: what lands is a snapshot like a zip's, and
+  // "make dsh scan that directory" stays `customSkillDirs`, a different feature.
+  // Cancel returns `null` (not an error), like the archive entry above.
+  handle('ext:skillImportFolder', async (_event, dshId: string, folderPath?: string): Promise<IpcResult<SkillEntry[] | null>> => {
+    const ctx = ctxOf(dshId)
+    if (ctx === null) return fail(E.dshNotFound)
+    const picked = await pickFolder(folderPath)
+    if (picked === null) return { ok: true, value: null }
+    const problem = folderImportProblem(picked)
+    if (problem !== null) return fail(problem.code, { detail: problem.detail })
+    try {
+      const installed = importSkillFolder(ctx, picked)
+      logger.info(`skills: imported ${installed.length} skill(s) into ${dshId} from folder ${picked}`)
+      return { ok: true, value: installed }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
   // The library catalog plus every file that would not load, with the reason.
   handle('ext:libSkillList', (): IpcResult<{ skills: SkillLibEntry[]; issues: { path: string; reason: string }[] }> => {
     try {
@@ -253,24 +313,26 @@ export function registerSkillsExtIpc(): void {
     if (problem !== null) return fail(problem.code, { detail: problem.detail })
     try {
       const libDir = skillLibraryDir()
-      const installed = installZipSkills(
-        libDir,
-        picked,
-        name => existsSync(join(libDir, name)) || existsSync(join(libDir, `${name}.md`)),
-      )
+      const installed = installZipSkills(libDir, picked, libExists())
       logger.info(`skill library: imported ${installed.length} skill(s) from ${picked}`)
-      return {
-        ok: true,
-        value: installed.map(({ skill, dir }) => ({
-          name: skill.name,
-          description: skill.description,
-          ...(skill.whenToUse !== undefined ? { whenToUse: skill.whenToUse } : {}),
-          modelInvocable: skill.modelInvocable,
-          userInvocable: skill.userInvocable,
-          path: join(dir, 'SKILL.md'),
-          dir,
-        })),
-      }
+      return { ok: true, value: libEntriesOf(installed) }
+    } catch (error) {
+      return failFromError(error)
+    }
+  })
+
+  // Install a folder's skills into the LIBRARY (all-or-nothing): same rules as the
+  // dsh side, and the entry lands beside the ones the library already holds.
+  handle('ext:libSkillImportFolder', async (_event, folderPath?: string): Promise<IpcResult<SkillLibEntry[] | null>> => {
+    const picked = await pickFolder(folderPath)
+    if (picked === null) return { ok: true, value: null }
+    const problem = folderImportProblem(picked)
+    if (problem !== null) return fail(problem.code, { detail: problem.detail })
+    try {
+      const libDir = skillLibraryDir()
+      const installed = installFolderSkills(libDir, picked, libExists())
+      logger.info(`skill library: imported ${installed.length} skill(s) from folder ${picked}`)
+      return { ok: true, value: libEntriesOf(installed) }
     } catch (error) {
       return failFromError(error)
     }

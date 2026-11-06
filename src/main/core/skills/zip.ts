@@ -1,6 +1,11 @@
 /**
- * Installing skills from a zip: the zip-slip guard, the pre-flight check for a
+ * Installing skills from a ZIP: the zip-slip guard, the pre-flight check for a
  * dropped file, and the two-pass all-or-nothing install.
+ *
+ * The two passes are shared with `folder.ts` — a zip and a folder differ only in
+ * where the candidates come from, so the collision rules and the rollback live
+ * here once (`parseSkillDirs` + `installCandidates`) instead of drifting apart in
+ * two copies.
  *
  * Takes the target root and an `exists` probe rather than a context, so it does not
  * depend on the module that resolves those.
@@ -40,6 +45,14 @@ export function zipImportProblem(zipPath: string): { code: string; detail: strin
   return null
 }
 
+/** One skill a source carries, before anything is written: its parsed frontmatter
+ * and the directory that holds it (its `SKILL.md` and its own resource files). */
+export interface SkillCandidate {
+  skill: ParsedSkill
+  /** Absolute directory to copy, with the skill's own files in it. */
+  from: string
+}
+
 /**
  * The directory each zip-carried skill lives in, relative to the zip root.
  *
@@ -61,6 +74,67 @@ function skillZipRoots(names: string[]): string[] {
   return dirs
     .filter(dir => !dirs.some(other => other !== dir && dir.startsWith(`${other}/`)))
     .sort((a, b) => a.localeCompare(b))
+}
+
+/**
+ * Parse one batch of candidate directories. Nothing is written: this is the half
+ * of the install that can fail on the SOURCE's account (a `SKILL.md` that is not
+ * a skill, an unreadable file), so a bad archive or folder leaves the target
+ * untouched.
+ * @param entries - each candidate's directory and the label its source gives it
+ * (`SKILL.md` at a root, `a/SKILL.md` nested), used in the error.
+ * @returns the parsed candidates, in the order the source listed them.
+ */
+export function parseSkillDirs(entries: ReadonlyArray<{ dir: string; label: string }>): SkillCandidate[] {
+  return entries.map(({ dir, label }) => {
+    const parsed = parseSkillText(readFileSync(join(dir, 'SKILL.md'), 'utf8'))
+    if (!parsed.ok) throwE(E.extBadSkill, { detail: label }, `${label}: ${parsed.reason}`)
+    return { skill: parsed.skill, from: dir }
+  })
+}
+
+/**
+ * Copy parsed candidates into `targetRoot`, all-or-nothing.
+ *
+ * A name the target already holds — or a name the batch repeats — refuses the
+ * whole batch before anything is copied. The copy then re-checks the same name
+ * immediately before writing, because the probe is only the caller's own query:
+ * a name that appeared between the two passes would otherwise be silently
+ * overwritten, and `errorOnExist` (with `force: false`) is what makes the
+ * filesystem itself refuse rather than trust the gap. A failure rolls back
+ * whatever landed, so a partial batch never survives.
+ * @param targetRoot - the root the skills land in (a dsh's writable root, the library).
+ * @param candidates - parsed entries, as `parseSkillDirs` returned them.
+ * @param exists - the caller's probe for "this root already holds that name"
+ * (it answers for BOTH shapes: a bundle directory and a flat `<name>.md`).
+ * @returns what landed, with the directory each skill occupies.
+ */
+export function installCandidates(
+  targetRoot: string,
+  candidates: ReadonlyArray<SkillCandidate>,
+  exists: (name: string) => boolean,
+): Array<{ skill: ParsedSkill; dir: string }> {
+  const seen = new Set<string>()
+  for (const { skill } of candidates) {
+    if (seen.has(skill.name) || exists(skill.name)) throwE(E.extSkillExists, { detail: skill.name })
+    seen.add(skill.name)
+  }
+  mkdirSync(targetRoot, { recursive: true })
+  const landed: string[] = []
+  try {
+    return candidates.map(({ skill, from }) => {
+      const dir = join(targetRoot, skill.name)
+      // The check that HOLDS: re-asked against the filesystem, right before the
+      // bytes move (see the doc comment above).
+      if (exists(skill.name)) throwE(E.extSkillExists, { detail: skill.name })
+      cpSync(from, dir, { recursive: true, errorOnExist: true, force: false })
+      landed.push(dir)
+      return { skill, dir }
+    })
+  } catch (error) {
+    for (const dir of landed) rmSync(dir, { recursive: true, force: true })
+    throw error
+  }
 }
 
 /**
@@ -93,43 +167,16 @@ export function installZipSkills(
   const staging = mkdtempSync(join(tmpdir(), 'pm-skill-import-'))
   try {
     arc.extractAllTo(staging, true)
-    // Pass 1 — validate everything: frontmatter, per-zip duplicates, collisions.
-    const installs: Array<{ skill: ParsedSkill; from: string }> = []
-    const seen = new Set<string>()
-    for (const dir of dirs) {
-      const label = dir === '' ? 'SKILL.md' : `${dir}/SKILL.md`
-      const parsed = parseSkillText(readFileSync(join(staging, dir, 'SKILL.md'), 'utf8'))
-      if (!parsed.ok) throwE(E.extBadSkill, { detail: label }, `${label}: ${parsed.reason}`)
-      const name = parsed.skill.name
-      if (seen.has(name) || exists(name)) {
-        throwE(E.extSkillExists, { detail: name })
-      }
-      seen.add(name)
-      installs.push({ skill: parsed.skill, from: join(staging, dir) })
-    }
-    // Pass 2 — install (copy out of staging → target root; a copy, not a
-    // rename, because staging may sit on another drive than the target, where
-    // a rename would throw EXDEV).
-    mkdirSync(targetRoot, { recursive: true })
-    const landed: string[] = []
-    try {
-      return installs.map(({ skill, from }) => {
-        const dir = join(targetRoot, skill.name)
-        // Pass 1's probe is a courtesy to the caller (it can answer without the
-        // filesystem); THIS is the check that holds. A name that appeared between
-        // the two passes would otherwise be silently overwritten, and
-        // `errorOnExist` is what makes the filesystem itself refuse rather than
-        // trust the gap. It only takes effect with `force: false`.
-        if (exists(skill.name)) throwE(E.extSkillExists, { detail: skill.name })
-        cpSync(from, dir, { recursive: true, errorOnExist: true, force: false })
-        landed.push(dir)
-        return { skill, dir }
-      })
-    } catch (error) {
-      // Roll back whatever landed so the import stays all-or-nothing.
-      for (const dir of landed) rmSync(dir, { recursive: true, force: true })
-      throw error
-    }
+    // A copy out of staging, not a rename: staging may sit on another drive than
+    // the target, where a rename would throw EXDEV.
+    return installCandidates(
+      targetRoot,
+      parseSkillDirs(dirs.map(dir => ({
+        dir: join(staging, dir),
+        label: dir === '' ? 'SKILL.md' : `${dir}/SKILL.md`,
+      }))),
+      exists,
+    )
   } finally {
     rmSync(staging, { recursive: true, force: true })
   }

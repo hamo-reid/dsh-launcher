@@ -214,6 +214,10 @@ export interface WindowApi {
      * no `zipPath` a file dialog picks the archive; a drag & drop passes its
      * resolved path. `null` when the dialog was cancelled. */
     skillImportZip: (dshId: string, zipPath?: string) => Promise<IpcResult<SkillEntry[] | null>>
+    /** Install a folder's skills into this dsh's writable root (all-or-nothing).
+     * The folder is COPIED, never linked: with no `folderPath` a directory dialog
+     * picks it. `null` when the dialog was cancelled. */
+    skillImportFolder: (dshId: string, folderPath?: string) => Promise<IpcResult<SkillEntry[] | null>>
     // ── MCP library (launcher-global definitions; applied rows are copies) ──
     /** Every library entry with where it is applied and drift counts. */
     libMcpOverview: () => Promise<IpcResult<McpLibOverviewRow[]>>
@@ -249,6 +253,9 @@ export interface WindowApi {
      * `zipPath` a file dialog picks the archive; a drag & drop passes its
      * resolved path. `null` when the dialog was cancelled. */
     libSkillImportZip: (zipPath?: string) => Promise<IpcResult<SkillLibEntry[] | null>>
+    /** Install a folder's skills into the library (all-or-nothing), on the same
+     * rules as the dsh side. `null` when the dialog was cancelled. */
+    libSkillImportFolder: (folderPath?: string) => Promise<IpcResult<SkillLibEntry[] | null>>
     /** Copy a library skill into a dsh's writable root (`overwrite` = reinstall). */
     libSkillInstall: (name: string, dshId: string, overwrite: boolean) => Promise<IpcResult<SkillEntry>>
     /** Resolve a dropped file to its absolute path. The renderer cannot read

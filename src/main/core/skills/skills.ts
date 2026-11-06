@@ -27,6 +27,7 @@ import { logger } from '../shared/logger.ts'
 import { E, throwE } from '../shared/errors.ts'
 import { presetSkillRoots } from './preset-roots.ts'
 import { installZipSkills } from './zip.ts'
+import { installFolderSkills } from './folder.ts'
 import { parseSkillText } from './frontmatter.ts'
 import type { ParsedSkill } from './frontmatter.ts'
 import { presetSkillRootLabel } from '../../../shared/skill.ts'
@@ -38,6 +39,7 @@ import type { SkillEntry, SkillIssue, SkillListing, SkillRootInfo, SkillSource }
 export { parseSkillText, renderSkillFile, scaffoldSkill } from './frontmatter.ts'
 export type { ParsedSkill } from './frontmatter.ts'
 export { installZipSkills, zipEntryUnsafe, zipImportProblem } from './zip.ts'
+export { folderImportProblem, installFolderSkills, skillFolderDirs } from './folder.ts'
 
 /** The package every skill-filesystem config row mounts. */
 const SKILL_PACKAGE = '@deepseek-ai/dsh-skill-filesystem'
@@ -454,6 +456,14 @@ export async function deleteSkill(ctx: DshContext, name: string): Promise<void> 
 export function importSkillZip(ctx: DshContext, zipPath: string): SkillEntry[] {
   const rootDir = requireWritableSkillRoot(ctx)
   return installZipSkills(rootDir, zipPath, name => findEditableSkill(ctx, name) !== undefined)
+    .map(({ skill }) => installedEntry(skill, rootDir))
+}
+
+/** Install every skill a FOLDER carries into the dsh's writable root. The folder
+ * is read, never linked: what lands is a copy, like a zip's. */
+export function importSkillFolder(ctx: DshContext, folderPath: string): SkillEntry[] {
+  const rootDir = requireWritableSkillRoot(ctx)
+  return installFolderSkills(rootDir, folderPath, name => findEditableSkill(ctx, name) !== undefined)
     .map(({ skill }) => installedEntry(skill, rootDir))
 }
 

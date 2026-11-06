@@ -46,7 +46,10 @@ describe('the dsh skills panel', () => {
   it('carries the authoring actions', () => {
     const html = render()
     expect(html).toContain('New skill')
-    expect(html).toContain('Import ZIP')
+    // One import action with two sources (ZIP / folder). The menu's items render
+    // through a portal, so only the trigger is in the markup — the two channels are
+    // pinned at the IPC layer instead (docs/specs/extensions.md §5).
+    expect(html).toContain('Import')
     expect(html).toContain('Install from library')
   })
 

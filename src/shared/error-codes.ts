@@ -90,6 +90,9 @@ export const E = {
   extSkillZipNotZip: 'ext.skillZipNotZip',
   extSkillZipMissing: 'ext.skillZipMissing',
   extSkillZipBad: 'ext.skillZipBad',
+  extSkillFolderNoSkill: 'ext.skillFolderNoSkill',
+  extSkillFolderMissing: 'ext.skillFolderMissing',
+  extSkillFolderNested: 'ext.skillFolderNested',
   // extensions (MCP library)
   extMcpExists: 'ext.mcpExists',
   extMcpNotInLib: 'ext.mcpNotInLib',

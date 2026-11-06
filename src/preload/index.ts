@@ -211,6 +211,8 @@ const api = {
       ipcRenderer.invoke('ext:skillOpenEditor', dshId, name, profile),
     skillImportZip: (dshId: string, zipPath?: string): Promise<IpcResult<SkillEntry[] | null>> =>
       ipcRenderer.invoke('ext:skillImportZip', dshId, zipPath),
+    skillImportFolder: (dshId: string, folderPath?: string): Promise<IpcResult<SkillEntry[] | null>> =>
+      ipcRenderer.invoke('ext:skillImportFolder', dshId, folderPath),
     libMcpOverview: (): Promise<IpcResult<McpLibOverviewRow[]>> =>
       ipcRenderer.invoke('ext:libMcpOverview'),
     libMcpSave: (previousServerName: string | null, input: McpServerInput): Promise<IpcResult<boolean>> =>
@@ -237,6 +239,8 @@ const api = {
       ipcRenderer.invoke('ext:libSkillDelete', name),
     libSkillImportZip: (zipPath?: string): Promise<IpcResult<SkillLibEntry[] | null>> =>
       ipcRenderer.invoke('ext:libSkillImportZip', zipPath),
+    libSkillImportFolder: (folderPath?: string): Promise<IpcResult<SkillLibEntry[] | null>> =>
+      ipcRenderer.invoke('ext:libSkillImportFolder', folderPath),
     libSkillInstall: (name: string, dshId: string, overwrite: boolean): Promise<IpcResult<SkillEntry>> =>
       ipcRenderer.invoke('ext:libSkillInstall', name, dshId, overwrite),
     filePath: (file: File): string => {

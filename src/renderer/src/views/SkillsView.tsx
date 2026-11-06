@@ -17,7 +17,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Pagination, Segmented, Skeleton, Space, Typography, theme, message } from 'antd'
-import { PlusOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
 import { DropOverlay, useFileDrop } from '../components/DropZone.tsx'
@@ -27,6 +27,7 @@ import SearchInput from '../components/SearchInput.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
 import Toolbar from '../components/Toolbar.tsx'
 import SkillCard from './SkillCard.tsx'
+import SkillImportMenu, { type SkillImportSource } from './SkillImportMenu.tsx'
 import { SkillNameModal } from './ExtensionsModals.tsx'
 import { InstallSkillModal, type DshScope } from './LibraryModals.tsx'
 import type { SkillLibEntry, SkillLibIssue, SkillLibOverviewRow } from '../../../shared/types.ts'
@@ -100,9 +101,14 @@ export default function SkillsView(): JSX.Element {
     await load()
   }
 
-  const importZip = async (zipPath?: string): Promise<void> => {
+  /** Import from one of the two sources. They differ only in the channel: the
+   * rules (frontmatter name, all-or-nothing, an existing name is refused) live in
+   * core and are shared, so the page has one path rather than two. */
+  const importFrom = async (source: SkillImportSource, path?: string): Promise<void> => {
     setBusy('import')
-    const r = await window.api.ext.libSkillImportZip(zipPath)
+    const r = source === 'zip'
+      ? await window.api.ext.libSkillImportZip(path)
+      : await window.api.ext.libSkillImportFolder(path)
     setBusy('')
     if (!r.ok) { void message.error(apiErrorText(r)); return }
     if (r.value === null) return // dialog cancelled — not an error
@@ -120,7 +126,7 @@ export default function SkillsView(): JSX.Element {
     // only reliable inside the drop event's context.
     const path = window.api.ext.filePath(file)
     if (path === '') { void message.error(t('ext.skills.dropNoPath')); return }
-    void importZip(path)
+    void importFrom('zip', path)
   }
 
   // The whole card area accepts drops: the surface a user aims at IS the target, so
@@ -186,14 +192,7 @@ export default function SkillsView(): JSX.Element {
         )}
         extra={(
           <Space size={8} wrap>
-            <Button
-              size="small"
-              icon={<UploadOutlined />}
-              loading={busy === 'import'}
-              onClick={() => void importZip()}
-            >
-              {t('ext.skills.import')}
-            </Button>
+            <SkillImportMenu busy={busy === 'import'} onPick={source => void importFrom(source)} />
             <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={() => void load()}>
               {t('common.refresh')}
             </Button>
@@ -261,9 +260,7 @@ export default function SkillsView(): JSX.Element {
                   <Button type="primary" icon={<PlusOutlined />} onClick={() => setNameModal(true)}>
                     {t('ext.skills.add')}
                   </Button>
-                  <Button icon={<UploadOutlined />} onClick={() => void importZip()}>
-                    {t('ext.skills.import')}
-                  </Button>
+                  <SkillImportMenu size="middle" busy={busy === 'import'} onPick={source => void importFrom(source)} />
                 </Space>
               ) : undefined}
             />

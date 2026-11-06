@@ -27,7 +27,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Alert, Button, Select, Skeleton, Space, Tag, Tooltip, Typography, theme, message } from 'antd'
-import { PlusOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons'
+import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
 import {
@@ -38,6 +38,7 @@ import EmptyState from '../components/EmptyState.tsx'
 import Panel from '../components/Panel.tsx'
 import { DropOverlay, useFileDrop } from '../components/DropZone.tsx'
 import DshSkillCard from './DshSkillCard.tsx'
+import SkillImportMenu, { type SkillImportSource } from './SkillImportMenu.tsx'
 import { SkillNameModal } from './ExtensionsModals.tsx'
 import { PickLibSkillModal } from './LibraryModals.tsx'
 import type {
@@ -197,9 +198,14 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
     if (!r.ok) void message.error(apiErrorText(r))
   }
 
-  const importZip = async (zipPath?: string): Promise<void> => {
+  /** Import from one of the two sources; both land in THIS dsh's writable root and
+   * go through the same core rules (frontmatter name, all-or-nothing, no
+   * overwrite), so the panel has one path rather than two. */
+  const importFrom = async (source: SkillImportSource, path?: string): Promise<void> => {
     setBusy('import')
-    const r = await window.api.ext.skillImportZip(p.dshId, zipPath)
+    const r = source === 'zip'
+      ? await window.api.ext.skillImportZip(p.dshId, path)
+      : await window.api.ext.skillImportFolder(p.dshId, path)
     setBusy('')
     if (!r.ok) { void message.error(apiErrorText(r)); return }
     if (r.value === null) return // dialog cancelled — not an error
@@ -217,7 +223,7 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
     // reliable inside the drop event's context.
     const path = window.api.ext.filePath(file)
     if (path === '') { void message.error(t('ext.skills.dropNoPath')); return }
-    void importZip(path)
+    void importFrom('zip', path)
   }
 
   // The whole panel is the drop target: the gesture needs no block of its own, so
@@ -255,9 +261,7 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
       <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => setNameOpen(true)}>
         {t('ext.skills.add')}
       </Button>
-      <Button size="small" icon={<UploadOutlined />} loading={busy === 'import'} onClick={() => void importZip()}>
-        {t('ext.skills.import')}
-      </Button>
+      <SkillImportMenu busy={busy === 'import'} onPick={source => void importFrom(source)} />
       <Button size="small" onClick={() => setInstallOpen(true)}>
         {t('ext.skills.installFromLib')}
       </Button>

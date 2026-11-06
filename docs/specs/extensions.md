@@ -19,6 +19,7 @@
 | profile 作用域（两个页面共用） | 名字与「它读自哪台 dsh」绑成一个值（`renderer/src/lib/profileScope.ts`）；页面**只问本 dsh 名单确认过的名字**，切 dsh 时旧名字整体作废 |
 | 技能列表的呈现 | dsh 面板 = **卡片栅格**（一张卡一个 skill，自带操作），扫描的根在它上方作为一块安静的信息块；dsh 面板与技能库都以**面板自身**为 zip 落点（覆盖层只在手势期间存在，`components/DropZone.tsx`），不再有常驻的拖放方块；来源文案/颜色只有一份（`renderer/src/lib/skillSource.ts`） |
 | skill 的「编辑」 | **Launcher 没有 skill 文本编辑器**：skill 是目录（SKILL.md 之外还有脚本、引用、素材），文本框只能装下其中一部分。每张卡片给的是**打开下拉**（在文件管理器中显示 / 用 VS Code 打开，`views/SkillOpenMenu.tsx`），与 preset 行的「插件列表交给外部编辑器」是同一条规矩；「新建」只写脚手架，见 §3.3 |
+| skill 的两个来源 | **一个「导入」按钮 + 下拉两项**（从 ZIP 导入 / 从文件夹导入，`views/SkillImportMenu.tsx`），与「打开」同为「一个动作、两个去处」的形态；两者的落盘规则完全相同（§3.3），只是源不同 |
 
 ## 2. MCP
 
@@ -81,12 +82,12 @@ config 行（`- id: … / name: '@deepseek-ai/dsh-skill-filesystem'`）从 **hom
 
 **可写根只有一个判据**（`writableSkillRoot` / `requireWritableSkillRoot`）：
 `<config.dshHome ?? DSH_HOME>/skills`，且**仅当 `includeDefaultRoots !== false`** —— dsh 只在
-`includeDefaultRoots` 之内推 `user-dsh` 根，关掉它就没有可写根，此时新建 / 导入 / 库安装一律
-`ext.skillNoWritableRoot`，绝不再往 `<DSH_HOME>/skills` 写。**清单与写入必须共用这一处**：曾经清单按
-`dshHome` 算、写入按 `DSH_HOME` 算，不一致时页面报出一个没人写入的可写根 —— 新建成功、刷新后消失，
-库总览永远「未安装」。`DSH_HOME` / `DSH_AGENTS_HOME` / `DSH_BUNDLED_SKILL_DIR` 同时列在启动面板的
-保留环境变量名单里（`core/profile/launch-options.ts`）：后两个若能在启动面板设置，子进程的根会动而
-Launcher 读的是自己的进程 env，那就是两套答案；要移根请改 config 行，两边都读它。
+`includeDefaultRoots` 之内推 `user-dsh` 根，关掉它就没有可写根，此时新建 / ZIP 导入 / 文件夹导入 /
+库安装一律 `ext.skillNoWritableRoot`，绝不再往 `<DSH_HOME>/skills` 写。**清单与写入必须共用这一处**：
+曾经清单按 `dshHome` 算、写入按 `DSH_HOME` 算，不一致时页面报出一个没人写入的可写根 —— 新建成功、
+刷新后消失，库总览永远「未安装」。`DSH_HOME` / `DSH_AGENTS_HOME` / `DSH_BUNDLED_SKILL_DIR` 同时列在
+启动面板的保留环境变量名单里（`core/profile/launch-options.ts`）：后两个若能在启动面板设置，子进程的根
+会动而 Launcher 读的是自己的进程 env，那就是两套答案；要移根请改 config 行，两边都读它。
 
 **preset 贡献的根**（`source: 'preset'`，rank 同 custom = 300，只读）：按 preset 的**随包布局约定**
 枚举 —— 目录模型取各 preset 目录的 `skills/`，声明模型取 `@deepseek-ai/dsh-agent-preset` 包自己的
@@ -167,6 +168,19 @@ Launcher 读的是自己的进程 env，那就是两套答案；要移根请改 
     查询 —— 判据必须落在真正落盘的那一步，否则探针与复制之间新出现的同名条目会被静默覆盖。
   - 入口名先过 **zip-slip 守卫**（绝对路径 / 盘符 / `..` 段，含反斜杠归一化）—— adm-zip
     在写入侧会归一化恶意名，第三方包的读取路径仍需自己的守卫，故守卫单独导出做单测。
+- **文件夹导入**（`importSkillFolder` / `ext:skillImportFolder`，库侧 `ext:libSkillImportFolder`）：
+  选一个目录 → **与 ZIP 同一套两趟安装**（`core/skills/zip.ts` 的 `parseSkillDirs` + `installCandidates`，
+  文件夹侧只在 `core/skills/folder.ts` 里决定"候选是谁"）。
+  - 识别规则：目录**自己**带 `SKILL.md` → 整个目录是**一个** bundle（其余文件是它的资源）；
+    否则看**直接子目录**里带 `SKILL.md` 的，每个是一个 skill。**只下探一层** —— zip 需要任意深度是因为
+    GitHub 会把仓库套进 `repo-main/`，文件夹没有这层包装，而任意深度会把 `node_modules/` 里别人的
+    `SKILL.md` 一起扫进来；该选哪一层，用户打开文件夹就能自己决定。
+  - **只接受 bundle 形态**：扁平 `<name>.md` 不从文件夹导入（那是单个文件的活，走 ZIP）。
+  - 落盘是**复制**，与 zip 一致：源目录保持自己的生命，不建立任何链接。"让 dsh 扫这个目录"是
+    `customSkillDirs` —— rank 300、优先于可写根、Launcher 只读，是另一件事，不在这个入口里。
+  - 目录名取 frontmatter `name`（与 zip / 编辑器同一权威），**不是**源文件夹名。
+  - **只有文件夹才有的边界**：目标位置若落在源目录**之内**（比如把库根自己导回库），`cpSync` 会自我
+    嵌套到路径超长，所以落盘前先拒（`ext.skillFolderNested`）。zip 不受影响 —— 它的 staging 在 tmpdir。
 
 ### 3.4 库总览的降级
 
@@ -207,6 +221,10 @@ Launcher 读的是自己的进程 env，那就是两套答案；要移根请改 
   无 `SKILL.md`、zip-slip 守卫、重名冲突、all-or-nothing、**探针与复制之间出现同名条目**、
   **探针恒说"空闲"时由文件系统拒绝覆盖**）、**可写根跟随 config 行**（`dshHome` 移动后清单与写入同一路径、
   `includeDefaultRoots: false` 时没有可写根且写入以 `ext.skillNoWritableRoot` 拒绝）。
+- `core/skills/folder.test.ts`：文件夹导入 —— 形态（目录自带 `SKILL.md` 即整个目录一个 bundle、只看直接
+  子目录、**不下探第二层**、扁平 `.md` 不算）、按 frontmatter 名落盘并带走资源、整批解析失败不落盘、
+  撞名（目标根 / 同批）、**探针恒说"空闲"时由文件系统拒绝**、**中途失败回滚已落的部分**、
+  **目标落在源目录之内被拒（`ext.skillFolderNested`）**、预检（不是目录 / 不存在 → `ext.skillFolderMissing`）。
 - `core/skills/skill-library.test.ts`：库 CRUD（新建即 bundle、按 frontmatter 改名、非法文本与撞名拒绝、
   扁平 → bundle 升级）、**`findSkillLibEntry`（按名字取一条，没了就是 `undefined` —— 库侧「打开」的判据）**、
   安装到 dsh（扁平 ↔ bundle 两种形态、重装覆盖）、`scanSkillInstalls` 的漂移判定。
@@ -214,7 +232,9 @@ Launcher 读的是自己的进程 env，那就是两套答案；要移根请改 
   （`ext:skillCreate` 落的是可解析的脚手架、同名再建即 `ext.skillExists` 且原文件不变，`ext:skillReveal` /
   `ext:skillOpenEditor` 分别打到 `shell.openPath`（目录）与 `shell.openExternal`（`vscode://file/…`），
   **只读根里的副本照样能打开**，坏名字 / 不存在的名字 / 不存在的 profile 各自的拒绝码，
-  zip 导入落进可写根、非 zip 路径的拒绝码；库侧同两个动词一对，外加条目消失时的 `ext.skillNotFound`）。
+  zip 导入落进可写根、非 zip 路径的拒绝码；**文件夹导入复制整个 bundle**、无 `SKILL.md` /
+  不是目录各自的拒绝码、**无可写根时 `ext:skillCreate` 报 `ext.skillNoWritableRoot`**；库侧同两个动词一对，
+  外加条目消失时的 `ext.skillNotFound` 与库侧的文件夹导入）。
 - `renderer/src/lib/profileScope.test.ts`：页面作用域的 profile 选择规则（记住仍在的、否则首个、
   没有 profile 时是 `undefined` 这个**有意义**的答案）。作用域**带 dsh 标签**：标签对不上的作用域
   一律答 `undefined` / 空名单 —— 页面在切 dsh 时组件不重挂载，无标签的名字会活过切换、被拿去问

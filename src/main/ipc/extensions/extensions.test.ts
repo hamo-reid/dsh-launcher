@@ -241,6 +241,36 @@ describe('the dsh-side skill channels', () => {
       .toMatchObject({ ok: false, code: 'ext.skillZipNotZip' })
   })
 
+  it('imports a folder as a COPY of the whole bundle, not a link to it', async () => {
+    const source = join(root, 'external', 'hand-made')
+    mkdirSync(join(source, 'scripts'), { recursive: true })
+    writeFileSync(join(source, 'SKILL.md'), skillText('from-folder'))
+    writeFileSync(join(source, 'scripts', 'run.ps1'), 'Write-Output hi')
+
+    expect((await call<SkillEntry[]>('ext:skillImportFolder', 'a', source)).ok).toBe(true)
+    expect(readFileSync(skillFile('from-folder'), 'utf8')).toContain('name: from-folder')
+    // The whole bundle travelled: a skill is not only its SKILL.md.
+    expect(existsSync(join(skillsRoot(), 'from-folder', 'scripts', 'run.ps1'))).toBe(true)
+    // A copy, never a link: the source keeps its own life.
+    expect(existsSync(join(source, 'SKILL.md'))).toBe(true)
+    // And the name guard is the same one the archive path uses.
+    expect(await call('ext:skillImportFolder', 'a', source))
+      .toMatchObject({ ok: false, code: 'ext.skillExists' })
+  })
+
+  it('refuses a folder holding no SKILL.md, and a path that is not a folder', async () => {
+    const empty = join(root, 'not-a-skill')
+    mkdirSync(empty, { recursive: true })
+    writeFileSync(join(empty, 'readme.txt'), 'nothing here')
+    expect(await call('ext:skillImportFolder', 'a', empty))
+      .toMatchObject({ ok: false, code: 'ext.skillFolderNoSkill' })
+
+    const file = join(root, 'plain.txt')
+    writeFileSync(file, 'x')
+    expect(await call('ext:skillImportFolder', 'a', file))
+      .toMatchObject({ ok: false, code: 'ext.skillFolderMissing' })
+  })
+
   it('refuses to create when the config dropped the writable root', async () => {
     // `includeDefaultRoots: false` removes `user-dsh`, so a create has nowhere to
     // land. Answering so beats writing into a directory dsh does not scan — which
@@ -290,5 +320,17 @@ describe('the library channels', () => {
     )
     // Gone between the render and the click is a business answer here too.
     expect(await call('ext:libSkillReveal', 'never-here')).toMatchObject({ ok: false, code: 'ext.skillNotFound' })
+  })
+
+  it('imports a folder into the library, and refuses a name it already holds', async () => {
+    const source = join(root, 'lib-source', 'bundle')
+    mkdirSync(source, { recursive: true })
+    writeFileSync(join(source, 'SKILL.md'), '---\nname: lib-folder\ndescription: A library folder skill.\n---\n\nBody.\n')
+
+    expect((await call<SkillLibEntry[]>('ext:libSkillImportFolder', source)).ok).toBe(true)
+    expect(existsSync(join(skillLibraryDir(), 'lib-folder', 'SKILL.md'))).toBe(true)
+    // The library is a root like any other: the same name collision rule applies.
+    expect(await call('ext:libSkillImportFolder', source))
+      .toMatchObject({ ok: false, code: 'ext.skillExists' })
   })
 })
