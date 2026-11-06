@@ -720,3 +720,115 @@ describe('the writable root follows the config row', () => {
     expect(existsSync(join(USER_DSH(), 'nowhere'))).toBe(false)
   })
 })
+
+describe('every provider row is read, not just the first', () => {
+  /** A patch document in the host's own shape: `- insert:` with one child per row.
+   * Each `config` is written verbatim, indented under its row. */
+  function insertRows(rows: Array<{ id: string; config?: string[] }>): string {
+    const lines: string[] = ['- insert:']
+    for (const { id, config } of rows) {
+      lines.push(`    - id: ${id}`, `      name: '@deepseek-ai/dsh-skill-filesystem'`)
+      if (config !== undefined && config.length > 0) {
+        lines.push('      config:')
+        for (const line of config) lines.push(`        ${line}`)
+      }
+    }
+    lines.push('')
+    return lines.join('\n')
+  }
+
+  it('adds up the roots several home rows declare', () => {
+    // dsh registers one PROVIDER per row, so their roots add up. Reading only the
+    // first row made every other row's directories invisible, with nothing on the
+    // page saying a root was missing.
+    const second = join(root, 'second-skills')
+    writeFileSync(join(home, 'cordis.patch.yml'), insertRows([
+      { id: 'skills', config: ['customSkillDirs:', `  - ${custom}`] },
+      { id: 'skills-2', config: ['customSkillDirs:', `  - ${second}`] },
+    ]))
+    const roots = skillRoots(ctx())
+    expect(roots.filter(candidate => candidate.source === 'custom').map(candidate => candidate.path))
+      .toEqual([custom, second])
+    // Labels are React keys on the page, so they stay unique per root.
+    expect(new Set(roots.map(candidate => candidate.root)).size).toBe(roots.length)
+    // Only the root the launcher WRITES to is marked writable.
+    expect(roots.filter(candidate => candidate.writable).map(candidate => candidate.path)).toEqual([USER_DSH()])
+  })
+
+  it('lists one root when two rows name the same directory', () => {
+    // Two providers over one directory still load one skill from it, so the page
+    // shows one root — and three rows that keep the defaults on are one `user-dsh`.
+    writeFileSync(join(home, 'cordis.patch.yml'), insertRows([
+      { id: 'skills', config: ['customSkillDirs:', `  - ${custom}`] },
+      { id: 'skills-2', config: ['customSkillDirs:', `  - ${custom}`] },
+      { id: 'skills-3' },
+    ]))
+    const roots = skillRoots(ctx())
+    expect(roots.filter(candidate => candidate.path === custom)).toHaveLength(1)
+    expect(roots.filter(candidate => candidate.source === 'user-dsh')).toHaveLength(1)
+  })
+
+  it('reads a profile row only while that profile is the scope', () => {
+    // A row that lives in a profile's own patch is live for that profile only, so
+    // it joins the listing when the page asks for it — never in the machine-level
+    // answer, which is what the page shows with no profile selected.
+    const owned = join(root, 'profile-skills')
+    writeFileSync(join(home, 'cordis.patch.yml'), insertRows([{ id: 'skills' }]))
+    // One profile, and a dsh install the preset-root walk can resolve: composing a
+    // profile reads its manifest and its layer texts, so both have to exist.
+    const install = join(root, 'install')
+    mkdirSync(join(install, 'node_modules', '.bin'), { recursive: true })
+    writeFileSync(join(install, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: '1.0.0' }))
+    const dsh: DshContext = { execPath: install, home, version: '' }
+    const profileDir = join(home, 'profiles', 'web')
+    mkdirSync(profileDir, { recursive: true })
+    writeFileSync(join(profileDir, 'package.json'), JSON.stringify({
+      name: 'web', dependencies: {}, dsh: { profile: { bundles: [] } },
+    }))
+    writeFileSync(join(profileDir, 'cordis.patch.yml'), insertRows([
+      { id: 'skills-profile', config: ['customSkillDirs:', `  - ${owned}`] },
+    ]))
+    try {
+      expect(skillRoots(dsh).some(candidate => candidate.path === owned)).toBe(false)
+      expect(skillRoots(dsh, { profile: 'web' }).find(candidate => candidate.path === owned))
+        .toMatchObject({ source: 'custom', writable: false })
+      // A profile-scoped row adds ROOTS; it cannot move where a write lands, because
+      // no writer knows which profile the user is looking at.
+      expect(requireWritableSkillRoot(dsh)).toBe(USER_DSH())
+    } finally {
+      rmSync(join(home, 'profiles'), { recursive: true, force: true })
+      rmSync(install, { recursive: true, force: true })
+    }
+  })
+
+  it('takes the first row that keeps the defaults on as the writable root', () => {
+    // A second row can still hand dsh a `user-dsh` root; the first one that does not
+    // opt out decides where the launcher writes, and that is the root marked
+    // writable — never two.
+    writeFileSync(join(home, 'cordis.patch.yml'), insertRows([
+      { id: 'skills', config: ['includeDefaultRoots: false'] },
+      { id: 'skills-2' },
+    ]))
+    expect(writableSkillRoot(ctx())).toBe(USER_DSH())
+    expect(skillRoots(ctx()).filter(candidate => candidate.writable).map(candidate => candidate.path))
+      .toEqual([USER_DSH()])
+  })
+
+  it('reads the bundled environment only for a row that keeps the defaults on', () => {
+    const bundled = join(root, 'bundled-skills')
+    mkdirSync(bundled, { recursive: true })
+    const saved = process.env.DSH_BUNDLED_SKILL_DIR
+    process.env.DSH_BUNDLED_SKILL_DIR = bundled
+    try {
+      writeFileSync(join(home, 'cordis.patch.yml'), insertRows([{ id: 'skills' }]))
+      expect(skillRoots(ctx()).find(candidate => candidate.root === 'bundled')?.path).toBe(bundled)
+      // The host reads that variable INSIDE `includeDefaultRoots`, so a row that
+      // turned the defaults off must not smuggle a bundled root in.
+      writeFileSync(join(home, 'cordis.patch.yml'), insertRows([{ id: 'skills', config: ['includeDefaultRoots: false'] }]))
+      expect(skillRoots(ctx()).some(candidate => candidate.root === 'bundled')).toBe(false)
+    } finally {
+      if (saved === undefined) delete process.env.DSH_BUNDLED_SKILL_DIR
+      else process.env.DSH_BUNDLED_SKILL_DIR = saved
+    }
+  })
+})

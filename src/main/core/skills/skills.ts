@@ -20,7 +20,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { readHomePatch } from '../profile/home.ts'
+import { profilePatchPath, readHomePatch } from '../profile/home.ts'
 import { extractKeyValue, parseNamedRows } from '../patch/patch.ts'
 import { loadYaml, isJsExpr, jsExprText } from '../patch/yaml.ts'
 import { logger } from '../shared/logger.ts'
@@ -88,25 +88,33 @@ function pathOverride(value: unknown): string | undefined {
   return value
 }
 
-/** Read the `@deepseek-ai/dsh-skill-filesystem` row's config from the home
- * layer. An absent row, or an unparsable one, means dsh's defaults apply.
- *
- * Every path field it reads goes through {@link pathOverride}: a `!!js` value is
- * dsh's to evaluate, never the launcher's to resolve. */
-function readSkillFsConfig(ctx: DshContext): SkillFsConfig {
-  const { text } = readHomePatch(ctx)
-  const row = parseNamedRows(text).find(candidate => candidate.name === SKILL_PACKAGE)
-  if (row === undefined) return {}
-  const raw = extractKeyValue(text, row.id, 'config')
-  if (raw === undefined) return {}
-  let parsed: unknown
-  try {
-    parsed = loadYaml(raw)
-  } catch {
-    return {}
+/** One patch document's `skill-filesystem` rows, normalized, in file order. A row
+ * with no `config` (or an unparsable one) still counts: the host runs it with its
+ * defaults, so it contributes the default roots like any other row. */
+function skillFsConfigsIn(text: string): SkillFsConfig[] {
+  const out: SkillFsConfig[] = []
+  for (const row of parseNamedRows(text)) {
+    if (row.name !== SKILL_PACKAGE) continue
+    const raw = extractKeyValue(text, row.id, 'config')
+    let parsed: unknown
+    try {
+      parsed = raw === undefined ? undefined : loadYaml(raw)
+    } catch {
+      parsed = undefined
+    }
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      out.push({})
+      continue
+    }
+    out.push(normalizeSkillFsConfig(parsed as Record<string, unknown>))
   }
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
-  const config = parsed as Record<string, unknown>
+  return out
+}
+
+/** Normalize one row's `config`. Every path field goes through
+ * {@link pathOverride}: a `!!js` value is dsh's to evaluate, never the launcher's
+ * to resolve. */
+function normalizeSkillFsConfig(config: Record<string, unknown>): SkillFsConfig {
   const out: SkillFsConfig = {}
   if (typeof config.includeDefaultRoots === 'boolean') out.includeDefaultRoots = config.includeDefaultRoots
   const dshHome = pathOverride(config.dshHome)
@@ -136,6 +144,38 @@ function readSkillFsConfig(ctx: DshContext): SkillFsConfig {
 }
 
 /**
+ * Every `skill-filesystem` row this read covers, in layer order: the home layer's
+ * rows always, plus the selected profile's own rows.
+ *
+ * The host registers ONE PROVIDER PER ROW, so N rows are N providers and their
+ * roots add up — reading only the first one dropped every root the rest declared,
+ * with nothing on the page saying a root was missing. The profile's rows join only
+ * when a profile is named, the same rule the preset roots follow: without one, the
+ * page shows the machine-level answer.
+ *
+ * Bundle layers are not read: that means resolving every bundle's patch files, and
+ * a bundle that ships such a row usually fills it with `!!js` values the launcher
+ * cannot evaluate anyway.
+ * @param ctx - the dsh whose home layer is read.
+ * @param profile - the profile whose own patch is read too, when given.
+ * @returns the configs in order; empty when no row exists at all.
+ */
+function readSkillFsConfigs(ctx: DshContext, profile?: string): SkillFsConfig[] {
+  const configs = skillFsConfigsIn(readHomePatch(ctx).text)
+  if (profile === undefined || profile === '') return configs
+  const path = profilePatchPath(ctx, profile)
+  if (!existsSync(path)) return configs
+  return [...configs, ...skillFsConfigsIn(readFileSync(path, 'utf8'))]
+}
+
+/** The configs to resolve roots from. No row at all means the host's defaults
+ * apply, so the answer is never "this dsh scans nothing". */
+function effectiveConfigs(ctx: DshContext, profile?: string): SkillFsConfig[] {
+  const found = readSkillFsConfigs(ctx, profile)
+  return found.length === 0 ? [{}] : found
+}
+
+/**
  * The `user-dsh` root the config row decides: `<dshHome>/skills`.
  *
  * Two facts live here and nowhere else, because the LISTING and every WRITER
@@ -150,19 +190,27 @@ function readSkillFsConfig(ctx: DshContext): SkillFsConfig {
  * Keeping the predicate in one place is the whole point: when the reader and the
  * writer disagreed, a configured `dshHome` made the page show a writable root
  * this module never wrote to.
- * @param config - the already-read `skill-filesystem` config.
- * @param ctx - the dsh, for `DSH_HOME` when the row names no home.
- * @returns the absolute root, or `null` when the row removed the default roots.
+ *
+ * The FIRST row that keeps the default roots on decides, because the launcher
+ * writes without a profile: a row that exists only in some profile's patch can add
+ * roots to that profile's scan, but it cannot move the directory a create writes
+ * to (see {@link readSkillFsConfigs}).
+ * @param configs - the already-read configs, in layer order.
+ * @param ctx - the dsh, for `DSH_HOME` when no row names a home.
+ * @returns the absolute root, or `null` when every row removed the default roots.
  */
-function userDshRootOf(config: SkillFsConfig, ctx: DshContext): string | null {
-  if (config.includeDefaultRoots === false) return null
-  return join(config.dshHome !== undefined ? resolve(config.dshHome) : ctx.home, 'skills')
+function userDshRootOf(configs: readonly SkillFsConfig[], ctx: DshContext): string | null {
+  for (const config of configs) {
+    if (config.includeDefaultRoots === false) continue
+    return join(config.dshHome !== undefined ? resolve(config.dshHome) : ctx.home, 'skills')
+  }
+  return null
 }
 
 /** The root dsh scans for user skills and the launcher may write, or `null` when
  * this dsh's config removed it. Writers use {@link requireWritableSkillRoot}. */
 export function writableSkillRoot(ctx: DshContext): string | null {
-  return userDshRootOf(readSkillFsConfig(ctx), ctx)
+  return userDshRootOf(effectiveConfigs(ctx), ctx)
 }
 
 /**
@@ -186,19 +234,38 @@ export interface SkillRootOptions {
   profile?: string
 }
 
-/** Resolve every root dsh would scan for this dsh, sorted by rank. */
+/** Resolve every root dsh would scan for this dsh, sorted by rank.
+ *
+ * One row per provider, so the rows' roots ADD UP. Two entries that name the same
+ * directory are one root (the host ends up loading one skill from it either way),
+ * and so are two rows that leave the defaults on: their `user-dsh` is the same
+ * path. Only the root the launcher actually writes to is marked writable.
+ */
 export function skillRoots(ctx: DshContext, opts: SkillRootOptions = {}): SkillRootInfo[] {
-  const config = readSkillFsConfig(ctx)
-  const includeDefault = config.includeDefaultRoots !== false
+  const configs = effectiveConfigs(ctx, opts.profile)
   const roots: SkillRootInfo[] = []
+  const seenPaths = new Set<string>()
+  const seenLabels = new Set<string>()
+  /** One label per root: a repeated `root` value is also a repeated React key. */
+  const uniqueLabel = (base: string): string => {
+    let label = base
+    for (let n = 2; seenLabels.has(label); n += 1) label = `${base}#${n}`
+    seenLabels.add(label)
+    return label
+  }
   const push = (
     root: string, source: SkillSource, rank: number, path: string, writable: boolean, runtime?: true,
   ): void => {
-    // A runtime root's `path` is JavaScript source, not a filesystem path, so it
-    // is never probed — the two facts are forced together rather than derived.
+    // A runtime root's `path` is JavaScript source, not a filesystem path, so it is
+    // never probed — the two facts are forced together rather than derived — and
+    // two rows declaring the same expression are the same root.
+    const key = runtime === true ? `expr:${path}` : `path:${path}`
+    if (seenPaths.has(key)) return
+    seenPaths.add(key)
+    const label = uniqueLabel(root)
     roots.push(runtime === true
-      ? { root, source, rank, path, exists: false, writable, runtime: true }
-      : { root, source, rank, path, exists: existsSync(path), writable })
+      ? { root: label, source, rank, path, exists: false, writable, runtime: true }
+      : { root: label, source, rank, path, exists: existsSync(path), writable })
   }
   // Preset-contributed roots are `customSkillDirs` to the host too, so they sit
   // at custom rank. Their real order is whatever the selected preset's own row
@@ -209,31 +276,38 @@ export function skillRoots(ctx: DshContext, opts: SkillRootOptions = {}): SkillR
       push(presetSkillRootLabel(root.owner), 'preset', CUSTOM_RANK, root.path, false)
     }
   }
-  ;(config.customSkillDirs ?? []).forEach((dir, i) => {
-    push(`custom:${i}`, 'custom', CUSTOM_RANK, resolve(dir), false)
-  })
-  // Reported, never resolved: dsh evaluates these when it loads the row, so the
-  // launcher knows a root EXISTS without knowing where. `exists: false` plus the
-  // `runtime` flag keeps every scanner off them.
-  ;(config.runtimeDirs ?? []).forEach((expression, i) => {
-    push(`runtime:${i}`, 'custom', CUSTOM_RANK, expression, false, true)
-  })
   // `user-dsh` is resolved through the helper the WRITERS use, so the page can
   // never name a writable root that a create would not land in.
-  const userDsh = userDshRootOf(config, ctx)
-  if (userDsh !== null) push('user-dsh', 'user-dsh', USER_DSH_RANK, userDsh, true)
-  if (includeDefault) {
-    // agentsHome: config override, then the launcher process env (the child
-    // inherits it), then the dsh default `~/.agents`. `??` alone would accept an
-    // EMPTY variable as configured — and `resolve('')` is this process's own
-    // working directory, which exists, so the scan would walk the launcher's cwd.
-    const agentsHome = config.agentsHome !== undefined
-      ? resolve(config.agentsHome)
-      : resolve(pathOverride(process.env.DSH_AGENTS_HOME) ?? join(homedir(), '.agents'))
-    push('user-agents', 'user-agents', USER_AGENTS_RANK, join(agentsHome, 'skills'), false)
+  const writeTarget = userDshRootOf(configs, ctx)
+  for (const config of configs) {
+    ;(config.customSkillDirs ?? []).forEach((dir, i) => {
+      push(`custom:${i}`, 'custom', CUSTOM_RANK, resolve(dir), false)
+    })
+    // Reported, never resolved: dsh evaluates these when it loads the row, so the
+    // launcher knows a root EXISTS without knowing where. `exists: false` plus the
+    // `runtime` flag keeps every scanner off them.
+    ;(config.runtimeDirs ?? []).forEach((expression, i) => {
+      push(`runtime:${i}`, 'custom', CUSTOM_RANK, expression, false, true)
+    })
+    if (config.includeDefaultRoots !== false) {
+      const dshHome = join(config.dshHome !== undefined ? resolve(config.dshHome) : ctx.home, 'skills')
+      push('user-dsh', 'user-dsh', USER_DSH_RANK, dshHome, dshHome === writeTarget)
+      // agentsHome: config override, then the launcher process env (the child
+      // inherits it), then the dsh default `~/.agents`. `??` alone would accept an
+      // EMPTY variable as configured — and `resolve('')` is this process's own
+      // working directory, which exists, so the scan would walk the launcher's cwd.
+      const agentsHome = config.agentsHome !== undefined
+        ? resolve(config.agentsHome)
+        : resolve(pathOverride(process.env.DSH_AGENTS_HOME) ?? join(homedir(), '.agents'))
+      push('user-agents', 'user-agents', USER_AGENTS_RANK, join(agentsHome, 'skills'), false)
+    }
+    // The host reads the environment override only while this row keeps the
+    // default roots on, so a row that turned them off cannot smuggle a bundled
+    // root in through the environment.
+    const bundled = config.bundledSkillDir
+      ?? (config.includeDefaultRoots !== false ? pathOverride(process.env.DSH_BUNDLED_SKILL_DIR) : undefined)
+    if (bundled !== undefined) push('bundled', 'bundled', BUNDLED_SKILL_RANK, resolve(bundled), false)
   }
-  const bundled = config.bundledSkillDir ?? pathOverride(process.env.DSH_BUNDLED_SKILL_DIR)
-  if (bundled !== undefined) push('bundled', 'bundled', BUNDLED_SKILL_RANK, resolve(bundled), false)
   return roots.sort((a, b) => a.rank - b.rank)
 }
 

@@ -77,17 +77,28 @@ dump 回 js-yaml。**
 | 500 | user-agents | `$DSH_AGENTS_HOME` 或 `~/.agents/skills` | 只读 |
 | 600 | bundled | config `bundledSkillDir` / `$DSH_BUNDLED_SKILL_DIR` | 只读 |
 
-config 行（`- id: … / name: '@deepseek-ai/dsh-skill-filesystem'`）从 **home 层**读取；
-`includeDefaultRoots` / `dshHome` / `agentsHome` 覆盖均被尊重。
+**config 行：一行一个 provider，全部要读**（`readSkillFsConfigs`）。home 层的**每一行**
+`@deepseek-ai/dsh-skill-filesystem` 都要读，加上**选中 profile 自己 patch 里的行** —— 宿主是
+**per-row 注册 provider** 的，N 行就是 N 个 provider，它们的根**相加**。旧实现只取第一行，其余行声明的
+目录整体消失，页面上没有任何"少读了一个根"的线索。`includeDefaultRoots` / `dshHome` / `agentsHome` /
+`bundledSkillDir` 逐行尊重；没有 profile 时不读 profile 行（与 preset 根同一条规矩：那是机器级视图）。
+**bundle 层不读** —— 那要解析每个 bundle 的 patch 文件，且这类行通常写 `!!js`，Launcher 求不了。
 
-**可写根只有一个判据**（`writableSkillRoot` / `requireWritableSkillRoot`）：
-`<config.dshHome ?? DSH_HOME>/skills`，且**仅当 `includeDefaultRoots !== false`** —— dsh 只在
-`includeDefaultRoots` 之内推 `user-dsh` 根，关掉它就没有可写根，此时新建 / ZIP 导入 / 文件夹导入 /
+同一个目录被两行同时声明时**只列一次**（宿主最终也只从那一个目录取到同一个 skill）；`root` 标签按根
+去重（页面的 React key 就是它）。**可写根由"第一个没关掉 defaults 的行"决定**（`userDshRootOf`）：
+写入不带 profile，所以 profile 作用域的行只能**增加根**，不能把写入目标挪走 —— 这一条是取舍，写在这里
+而不是让每次写入去猜用户在看哪个 profile。
+
+**可写根的唯一判据**（`writableSkillRoot` / `requireWritableSkillRoot`）：
+`<dshHome ?? DSH_HOME>/skills`，且那个行没关 `includeDefaultRoots` —— dsh 只在
+`includeDefaultRoots` 之内推 `user-dsh` 根，全关掉就没有可写根，此时新建 / ZIP 导入 / 文件夹导入 /
 库安装一律 `ext.skillNoWritableRoot`，绝不再往 `<DSH_HOME>/skills` 写。**清单与写入必须共用这一处**：
 曾经清单按 `dshHome` 算、写入按 `DSH_HOME` 算，不一致时页面报出一个没人写入的可写根 —— 新建成功、
 刷新后消失，库总览永远「未安装」。`DSH_HOME` / `DSH_AGENTS_HOME` / `DSH_BUNDLED_SKILL_DIR` 同时列在
 启动面板的保留环境变量名单里（`core/profile/launch-options.ts`）：后两个若能在启动面板设置，子进程的根
 会动而 Launcher 读的是自己的进程 env，那就是两套答案；要移根请改 config 行，两边都读它。
+`DSH_BUNDLED_SKILL_DIR` 还只在**该行没关 defaults** 时生效（宿主就是这样读的），否则一行关掉默认根的
+配置能借环境变量塞进一个 dsh 根本不扫的 `bundled` 根。
 
 **preset 贡献的根**（`source: 'preset'`，rank 同 custom = 300，只读）：按 preset 的**随包布局约定**
 枚举 —— 目录模型取各 preset 目录的 `skills/`，声明模型取 `@deepseek-ai/dsh-agent-preset` 包自己的
@@ -184,9 +195,11 @@ config 行（`- id: … / name: '@deepseek-ai/dsh-skill-filesystem'`）从 **hom
 
 ### 3.4 库总览的降级
 
-`scanSkillInstalls` 把技能库映射到**每一个 dsh**，逐 dsh、逐条目保护地读，任何一条读不出都
-**绝不失败整张总览** —— 一个坏路径不该让其它 dsh 上的所有技能一起从页面上消失。三种"读不出"
-各有归属，别混为一谈：
+`scanLibraryInstalls` 把**整张库**映射到**每一个 dsh**：每台 dsh 的 `listSkills` 只跑**一次**
+（先建 `name → 副本` 的索引，再逐条目比对），所以一页的成本是「库条目数 + dsh 数」而不是两者的乘积 ——
+旧形状是「每条目 × 每 dsh 一次全量扫描」，库和 dsh 一多就是纯浪费。扫描之外每个读取仍逐 dsh、逐条目
+保护，任何一条读不出都**绝不失败整张总览** —— 一个坏路径不该让其它 dsh 上的所有技能一起从页面上消失。
+三种"读不出"各有归属，别混为一谈：
 
 | 读不出的东西 | 归属 | 为什么 |
 |---|---|---|
@@ -220,14 +233,17 @@ config 行（`- id: … / name: '@deepseek-ai/dsh-skill-filesystem'`）从 **hom
   找不到是 `ext.skillNotFound`）**、回收站删除（仅可写根）、ZIP 导入（单包 / 根包 / 多包 / 包装层、
   无 `SKILL.md`、zip-slip 守卫、重名冲突、all-or-nothing、**探针与复制之间出现同名条目**、
   **探针恒说"空闲"时由文件系统拒绝覆盖**）、**可写根跟随 config 行**（`dshHome` 移动后清单与写入同一路径、
-  `includeDefaultRoots: false` 时没有可写根且写入以 `ext.skillNoWritableRoot` 拒绝）。
+  `includeDefaultRoots: false` 时没有可写根且写入以 `ext.skillNoWritableRoot` 拒绝）、**多行 provider**
+  （根相加、同一目录只列一次、profile 行只在带 profile 时读且不改变写入目标、第一个没关 defaults 的行决定
+  可写根、`DSH_BUNDLED_SKILL_DIR` 只在该行 defaults on 时生效）。
 - `core/skills/folder.test.ts`：文件夹导入 —— 形态（目录自带 `SKILL.md` 即整个目录一个 bundle、只看直接
   子目录、**不下探第二层**、扁平 `.md` 不算）、按 frontmatter 名落盘并带走资源、整批解析失败不落盘、
   撞名（目标根 / 同批）、**探针恒说"空闲"时由文件系统拒绝**、**中途失败回滚已落的部分**、
   **目标落在源目录之内被拒（`ext.skillFolderNested`）**、预检（不是目录 / 不存在 → `ext.skillFolderMissing`）。
 - `core/skills/skill-library.test.ts`：库 CRUD（新建即 bundle、按 frontmatter 改名、非法文本与撞名拒绝、
   扁平 → bundle 升级）、**`findSkillLibEntry`（按名字取一条，没了就是 `undefined` —— 库侧「打开」的判据）**、
-  安装到 dsh（扁平 ↔ bundle 两种形态、重装覆盖）、`scanSkillInstalls` 的漂移判定。
+  安装到 dsh（扁平 ↔ bundle 两种形态、重装覆盖）、`scanSkillInstalls` 的漂移判定、
+  **`scanLibraryInstalls` 与单条形式同判据**（每台 dsh 只扫一次，同名两条按条目身份分开、互不覆盖）。
 - `ipc/extensions/extensions.test.ts`：`ext:mcpSave` 的 id 守卫；`ext:skill*` 的端到端契约
   （`ext:skillCreate` 落的是可解析的脚手架、同名再建即 `ext.skillExists` 且原文件不变，`ext:skillReveal` /
   `ext:skillOpenEditor` 分别打到 `shell.openPath`（目录）与 `shell.openExternal`（`vscode://file/…`），
