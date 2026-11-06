@@ -95,6 +95,8 @@ describe('a skill card on the dsh panel', () => {
     const html = card(entry(), cell({ stale: true }))
     expect(html).toContain('Library has updates')
     expect(html).toContain('Reinstall')
+    // A drift IS an update, so the plain label is the right one here.
+    expect(html).not.toContain('Reinstall anyway')
   })
 
   it('reads an unreadable copy as unreadable, never as out of date', () => {
@@ -102,5 +104,8 @@ describe('a skill card on the dsh panel', () => {
     expect(html).toContain('Unreadable (1)')
     expect(html).not.toContain('Library has updates')
     expect(html).not.toContain('Up to date')
+    // The action follows the state: "reinstall" would diagnose an unreadable copy
+    // as one that is merely behind, which is the one thing that cannot be known.
+    expect(html).toContain('Reinstall anyway')
   })
 })

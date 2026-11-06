@@ -7,7 +7,9 @@
  * ever writes to the dsh's writable root, so only a copy there may be deleted, and
  * "reinstall" appears only when there IS a verdict from the library saying the copy
  * drifted — an unreadable copy gets that tag with its reason, because reinstalling
- * cannot fix an unreadable file.
+ * cannot fix an unreadable file. Its action says so too ("reinstall anyway"): a
+ * plain reinstall would read as "the library has a newer version", which is the
+ * one thing the cell just said cannot be known.
  *
  * Opening is NOT gated that way: reading a skill is not writing one, and the copies
  * worth looking at (a preset's, a package's) are exactly the ones the launcher may
@@ -135,7 +137,12 @@ export default function DshSkillCard(p: DshSkillCardProps): JSX.Element {
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
           <SkillOpenMenu name={entry.name} busy={p.busy === 'open'} onSelect={p.onOpen} />
           {(stale || problem) && (
-            <Button size="small" type="primary" onClick={p.onReinstall}>{t('ext.skills.reinstall')}</Button>
+            // The label follows the STATE, not the action: an unreadable copy is
+            // not "out of date", so offering a plain reinstall would name the
+            // wrong problem (the same distinction the install dialog makes).
+            <Button size="small" type="primary" onClick={p.onReinstall}>
+              {t(problem ? 'ext.skills.reinstallAnyway' : 'ext.skills.reinstall')}
+            </Button>
           )}
         </span>
         {actions.length > 0 && (
