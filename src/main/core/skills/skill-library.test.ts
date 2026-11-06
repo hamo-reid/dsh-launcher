@@ -10,7 +10,7 @@ import AdmZip from 'adm-zip'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { renderSkillFile, installedEntry, installZipSkills, parseSkillText, writableSkillRoot } from './skills.ts'
+import { renderSkillFile, installedEntry, installZipSkills, parseSkillText, requireWritableSkillRoot } from './skills.ts'
 import {
   deleteSkillLib, findSkillLibEntry, installSkillToDsh, listSkillLibrary, scanSkillInstalls,
   setSkillLibraryTrash, skillLibraryDir, skillLibShape, skillLibTextOf, writeSkillLib,
@@ -116,7 +116,7 @@ describe('skill library CRUD', () => {
     mkdirSync(lib, { recursive: true })
     writeFileSync(join(lib, 'notes.md'), makeSkill('notes'))
     const flat = listSkillLibrary().skills[0]
-    const target = writableSkillRoot(contextForEntry(ENTRY()))
+    const target = requireWritableSkillRoot(contextForEntry(ENTRY()))
     const dest = installSkillToDsh(target, flat, false)
     expect(dest).toBe(join(target, 'notes.md'))
     // dsh discovers the flat copy, and the launcher reports it as fresh.
@@ -133,7 +133,7 @@ describe('skill library CRUD', () => {
 
   it('a flat install replaces a bundle copy of the same name (and vice versa)', () => {
     const bundle = writeSkillLib(null, makeSkill('greeter'))
-    const target = writableSkillRoot(contextForEntry(ENTRY()))
+    const target = requireWritableSkillRoot(contextForEntry(ENTRY()))
     installSkillToDsh(target, bundle, false)
     expect(existsSync(join(target, 'greeter', 'SKILL.md'))).toBe(true)
     // The same name now exists in the library as a flat entry: installing it must
@@ -196,17 +196,17 @@ describe('zip import into the library', () => {
 describe('install to dsh (copy semantics)', () => {
   it('copies the bundle into the dsh writable root and dsh discovers it', () => {
     const libEntry = writeSkillLib(null, makeSkill('greeter'))
-    const dest = installSkillToDsh(writableSkillRoot(contextForEntry(ENTRY())), libEntry, false)
+    const dest = installSkillToDsh(requireWritableSkillRoot(contextForEntry(ENTRY())), libEntry, false)
     expect(dest).toBe(join(home, 'skills', 'greeter'))
     expect(readFileSync(join(dest, 'SKILL.md'), 'utf8')).toBe(makeSkill('greeter'))
     const installed = parseSkillText(skillLibTextOf(libEntry))
     if (!installed.ok) throw new Error('library text should parse')
-    expect(installedEntry(installed.skill, writableSkillRoot(contextForEntry(ENTRY()))).name).toBe('greeter')
+    expect(installedEntry(installed.skill, requireWritableSkillRoot(contextForEntry(ENTRY()))).name).toBe('greeter')
   })
 
   it('fails on an existing copy unless overwrite is requested', () => {
     const libEntry = writeSkillLib(null, makeSkill('greeter'))
-    const target = writableSkillRoot(contextForEntry(ENTRY()))
+    const target = requireWritableSkillRoot(contextForEntry(ENTRY()))
     installSkillToDsh(target, libEntry, false)
     expect(() => installSkillToDsh(target, libEntry, false)).toThrow(AppError)
     installSkillToDsh(target, libEntry, true) // reinstall
@@ -215,7 +215,7 @@ describe('install to dsh (copy semantics)', () => {
 
   it('overwrite replaces a stale copy whole (removed files do not survive)', () => {
     const libEntry = writeSkillLib(null, makeSkill('greeter'))
-    const target = writableSkillRoot(contextForEntry(ENTRY()))
+    const target = requireWritableSkillRoot(contextForEntry(ENTRY()))
     installSkillToDsh(target, libEntry, false)
     writeFileSync(join(target, 'greeter', 'stale-extra.txt'), 'old resource')
     // The library now no longer carries that resource.
@@ -233,7 +233,7 @@ describe('drift detection (scanSkillInstalls)', () => {
     expect(scanSkillInstalls(libEntry)).toEqual([
       { dshId: 'd1', dshName: 'd1', installed: false, stale: false },
     ])
-    const target = writableSkillRoot(contextForEntry(ENTRY()))
+    const target = requireWritableSkillRoot(contextForEntry(ENTRY()))
     installSkillToDsh(target, libEntry, false)
     expect(scanSkillInstalls(libEntry)[0]).toMatchObject({ installed: true, stale: false })
     // The library moves ahead; the installed copy is now stale.
@@ -284,7 +284,7 @@ describe('drift detection (scanSkillInstalls)', () => {
     ].join('\n'))
     try {
       const libEntry = writeSkillLib(null, makeSkill('greeter', 'LIBRARY COPY'))
-      const target = writableSkillRoot(contextForEntry(ENTRY()))
+      const target = requireWritableSkillRoot(contextForEntry(ENTRY()))
       installSkillToDsh(target, libEntry, false)
       // The custom root outranks user-dsh, but the launcher can only manage the
       // writable copy — so the fresh install must NOT read as stale.
@@ -305,7 +305,7 @@ describe('drift detection (scanSkillInstalls)', () => {
     // while its neighbours still get real verdicts on the same pass.
     const greeter = writeSkillLib(null, makeSkill('greeter'))
     const broken = writeSkillLib(null, makeSkill('broken'))
-    const target = writableSkillRoot(contextForEntry(ENTRY()))
+    const target = requireWritableSkillRoot(contextForEntry(ENTRY()))
     installSkillToDsh(target, greeter, false)
     installSkillToDsh(target, broken, false)
     // A directory where the entry claims a file: the scan sees it, the read does not.
@@ -353,7 +353,7 @@ describe('drift detection (scanSkillInstalls)', () => {
     // answer is "there is a copy, and we cannot tell whether it is current" —
     // never "not installed" for a dsh that visibly has the skill.
     const entry = writeSkillLib(null, makeSkill('notes'))
-    const target = writableSkillRoot(contextForEntry(ENTRY()))
+    const target = requireWritableSkillRoot(contextForEntry(ENTRY()))
     installSkillToDsh(target, entry, false)
     rmSync(join(lib, 'notes', 'SKILL.md'))
     mkdirSync(join(lib, 'notes', 'SKILL.md'), { recursive: true })

@@ -133,10 +133,48 @@ function readSkillFsConfig(ctx: DshContext): SkillFsConfig {
   return out
 }
 
-/** The launcher's writable skill root: dsh resolves `dshHome` from its own
- * `DSH_HOME`, which the run path sets to `ctx.home`. */
-export function writableSkillRoot(ctx: DshContext): string {
-  return join(ctx.home, 'skills')
+/**
+ * The `user-dsh` root the config row decides: `<dshHome>/skills`.
+ *
+ * Two facts live here and nowhere else, because the LISTING and every WRITER
+ * must agree on them:
+ *
+ * - `dshHome` REPLACES the value dsh would otherwise resolve from its own
+ *   `DSH_HOME` (which the run path sets to `ctx.home`), so the scanned root moves
+ *   with it;
+ * - `includeDefaultRoots: false` drops the `user-dsh` root entirely — the
+ *   provider only pushes the default pair inside that flag.
+ *
+ * Keeping the predicate in one place is the whole point: when the reader and the
+ * writer disagreed, a configured `dshHome` made the page show a writable root
+ * this module never wrote to.
+ * @param config - the already-read `skill-filesystem` config.
+ * @param ctx - the dsh, for `DSH_HOME` when the row names no home.
+ * @returns the absolute root, or `null` when the row removed the default roots.
+ */
+function userDshRootOf(config: SkillFsConfig, ctx: DshContext): string | null {
+  if (config.includeDefaultRoots === false) return null
+  return join(config.dshHome !== undefined ? resolve(config.dshHome) : ctx.home, 'skills')
+}
+
+/** The root dsh scans for user skills and the launcher may write, or `null` when
+ * this dsh's config removed it. Writers use {@link requireWritableSkillRoot}. */
+export function writableSkillRoot(ctx: DshContext): string | null {
+  return userDshRootOf(readSkillFsConfig(ctx), ctx)
+}
+
+/**
+ * {@link writableSkillRoot}, refusing when the config removed the root.
+ *
+ * Every writer goes through this (create / zip import / library install), so
+ * "this dsh has no writable root" is a business answer instead of a write into a
+ * directory dsh no longer scans — which is exactly what used to happen, and it
+ * reported success while the skill never appeared anywhere.
+ */
+export function requireWritableSkillRoot(ctx: DshContext): string {
+  const root = writableSkillRoot(ctx)
+  if (root === null) throwE(E.extSkillNoWritableRoot)
+  return root
 }
 
 /** Which profile's composed layers to read preset-contributed roots from. Absent
@@ -178,9 +216,11 @@ export function skillRoots(ctx: DshContext, opts: SkillRootOptions = {}): SkillR
   ;(config.runtimeDirs ?? []).forEach((expression, i) => {
     push(`runtime:${i}`, 'custom', CUSTOM_RANK, expression, false, true)
   })
+  // `user-dsh` is resolved through the helper the WRITERS use, so the page can
+  // never name a writable root that a create would not land in.
+  const userDsh = userDshRootOf(config, ctx)
+  if (userDsh !== null) push('user-dsh', 'user-dsh', USER_DSH_RANK, userDsh, true)
   if (includeDefault) {
-    // dshHome: config override wins, else the launcher-set DSH_HOME (= ctx.home).
-    const dshHome = config.dshHome !== undefined ? resolve(config.dshHome) : ctx.home
     // agentsHome: config override, then the launcher process env (the child
     // inherits it), then the dsh default `~/.agents`. `??` alone would accept an
     // EMPTY variable as configured — and `resolve('')` is this process's own
@@ -188,7 +228,6 @@ export function skillRoots(ctx: DshContext, opts: SkillRootOptions = {}): SkillR
     const agentsHome = config.agentsHome !== undefined
       ? resolve(config.agentsHome)
       : resolve(pathOverride(process.env.DSH_AGENTS_HOME) ?? join(homedir(), '.agents'))
-    push('user-dsh', 'user-dsh', USER_DSH_RANK, join(dshHome, 'skills'), true)
     push('user-agents', 'user-agents', USER_AGENTS_RANK, join(agentsHome, 'skills'), false)
   }
   const bundled = config.bundledSkillDir ?? pathOverride(process.env.DSH_BUNDLED_SKILL_DIR)
@@ -335,9 +374,10 @@ export function findEditableSkill(ctx: DshContext, name: string): WritableSkill 
   return undefined
 }
 
-/** The bundle dir + file a skill named `name` occupies in the writable root. */
-function targetPaths(ctx: DshContext, name: string): { dir: string; file: string } {
-  const dir = join(writableSkillRoot(ctx), name)
+/** The bundle dir + file a skill named `name` occupies in `root` — the writable
+ * root, resolved ONCE by the caller so a write cannot straddle two answers. */
+function targetPaths(root: string, name: string): { dir: string; file: string } {
+  const dir = join(root, name)
   return { dir, file: join(dir, 'SKILL.md') }
 }
 
@@ -354,7 +394,10 @@ export function writeSkill(ctx: DshContext, previousName: string | null, text: s
   const parsed = parseSkillText(text)
   if (!parsed.ok) throw new Error(parsed.reason)
   const name = parsed.skill.name
-  const { dir, file } = targetPaths(ctx, name)
+  // One resolution for the whole write: the collision check, the rename target,
+  // the flat-file clean-up and the returned entry all have to name the same root.
+  const root = requireWritableSkillRoot(ctx)
+  const { dir, file } = targetPaths(root, name)
   const previous = previousName !== null ? findEditableSkill(ctx, previousName) : undefined
   if (previousName !== null && previous === undefined) {
     throwE(E.extSkillReadOnly, { detail: previousName })
@@ -371,7 +414,6 @@ export function writeSkill(ctx: DshContext, previousName: string | null, text: s
   // whichever it scans first. An in-place edit (the entry that IS there) and a
   // rename (refused above) are the only ways past this.
   if (previousName === null) {
-    const root = writableSkillRoot(ctx)
     if (existsSync(join(root, name)) || existsSync(join(root, `${name}.md`))) {
       throwE(E.extSkillExists, { detail: name })
     }
@@ -392,9 +434,9 @@ export function writeSkill(ctx: DshContext, previousName: string | null, text: s
   if (readFileSync(file, 'utf8') !== text) throw new Error('write verify failed')
   // An in-place edit of a flat `<name>.md` entry just became a bundle — drop
   // the flat file so the root does not keep two same-named skills.
-  if (previousName === name) rmSync(join(writableSkillRoot(ctx), `${name}.md`), { force: true })
+  if (previousName === name) rmSync(join(root, `${name}.md`), { force: true })
   logger.info(`skills: wrote ${file}`)
-  return installedEntry(parsed.skill, writableSkillRoot(ctx))
+  return installedEntry(parsed.skill, root)
 }
 
 /** Move an editable skill to the OS recycle bin. Resolves the entry itself so
@@ -410,7 +452,7 @@ export async function deleteSkill(ctx: DshContext, name: string): Promise<void> 
 
 /** Install every skill a zip carries into the dsh's writable root. */
 export function importSkillZip(ctx: DshContext, zipPath: string): SkillEntry[] {
-  const rootDir = writableSkillRoot(ctx)
+  const rootDir = requireWritableSkillRoot(ctx)
   return installZipSkills(rootDir, zipPath, name => findEditableSkill(ctx, name) !== undefined)
     .map(({ skill }) => installedEntry(skill, rootDir))
 }

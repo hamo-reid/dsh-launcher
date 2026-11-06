@@ -79,6 +79,15 @@ dump 回 js-yaml。**
 config 行（`- id: … / name: '@deepseek-ai/dsh-skill-filesystem'`）从 **home 层**读取；
 `includeDefaultRoots` / `dshHome` / `agentsHome` 覆盖均被尊重。
 
+**可写根只有一个判据**（`writableSkillRoot` / `requireWritableSkillRoot`）：
+`<config.dshHome ?? DSH_HOME>/skills`，且**仅当 `includeDefaultRoots !== false`** —— dsh 只在
+`includeDefaultRoots` 之内推 `user-dsh` 根，关掉它就没有可写根，此时新建 / 导入 / 库安装一律
+`ext.skillNoWritableRoot`，绝不再往 `<DSH_HOME>/skills` 写。**清单与写入必须共用这一处**：曾经清单按
+`dshHome` 算、写入按 `DSH_HOME` 算，不一致时页面报出一个没人写入的可写根 —— 新建成功、刷新后消失，
+库总览永远「未安装」。`DSH_HOME` / `DSH_AGENTS_HOME` / `DSH_BUNDLED_SKILL_DIR` 同时列在启动面板的
+保留环境变量名单里（`core/profile/launch-options.ts`）：后两个若能在启动面板设置，子进程的根会动而
+Launcher 读的是自己的进程 env，那就是两套答案；要移根请改 config 行，两边都读它。
+
 **preset 贡献的根**（`source: 'preset'`，rank 同 custom = 300，只读）：按 preset 的**随包布局约定**
 枚举 —— 目录模型取各 preset 目录的 `skills/`，声明模型取 `@deepseek-ai/dsh-agent-preset` 包自己的
 `skills/`（`core/skills/preset-roots.ts`）—— **不读 preset 自己行里 `customSkillDirs` 的字面量项**。
@@ -196,7 +205,8 @@ config 行（`- id: … / name: '@deepseek-ai/dsh-skill-filesystem'`）从 **hom
   以 `ext.skillReadOnly` 拒绝、**`skillLocationOf` 按名字定位（bundle 目录、扁平文件所在的根、只读根同样能定位、
   找不到是 `ext.skillNotFound`）**、回收站删除（仅可写根）、ZIP 导入（单包 / 根包 / 多包 / 包装层、
   无 `SKILL.md`、zip-slip 守卫、重名冲突、all-or-nothing、**探针与复制之间出现同名条目**、
-  **探针恒说"空闲"时由文件系统拒绝覆盖**）。
+  **探针恒说"空闲"时由文件系统拒绝覆盖**）、**可写根跟随 config 行**（`dshHome` 移动后清单与写入同一路径、
+  `includeDefaultRoots: false` 时没有可写根且写入以 `ext.skillNoWritableRoot` 拒绝）。
 - `core/skills/skill-library.test.ts`：库 CRUD（新建即 bundle、按 frontmatter 改名、非法文本与撞名拒绝、
   扁平 → bundle 升级）、**`findSkillLibEntry`（按名字取一条，没了就是 `undefined` —— 库侧「打开」的判据）**、
   安装到 dsh（扁平 ↔ bundle 两种形态、重装覆盖）、`scanSkillInstalls` 的漂移判定。

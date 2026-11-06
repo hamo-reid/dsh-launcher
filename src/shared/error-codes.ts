@@ -83,6 +83,8 @@ export const E = {
   extSkillReadOnly: 'ext.skillReadOnly',
   extSkillExists: 'ext.skillExists',
   extBadSkill: 'ext.badSkill',
+  /** The dsh's skill-filesystem config removed the writable root. */
+  extSkillNoWritableRoot: 'ext.skillNoWritableRoot',
   extSkillZipNoSkill: 'ext.skillZipNoSkill',
   extSkillZipUnsafe: 'ext.skillZipUnsafe',
   extSkillZipNotZip: 'ext.skillZipNotZip',

@@ -11,8 +11,9 @@ import { join } from 'node:path'
 import { contextForEntry } from '../profile/appState.ts'
 import { AppError } from '../shared/errors.ts'
 import {
-  deleteSkill, findEditableSkill, importSkillZip, installZipSkills, listSkills, parseSkillText, renderSkillFile,
-  scaffoldSkill, setSkillTrash, skillLocationOf, skillRoots, writeSkill, zipEntryUnsafe, zipImportProblem,
+  deleteSkill, findEditableSkill, importSkillZip, installZipSkills, listSkills, parseSkillText,
+  renderSkillFile, requireWritableSkillRoot, scaffoldSkill, setSkillTrash, skillLocationOf, skillRoots,
+  writableSkillRoot, writeSkill, zipEntryUnsafe, zipImportProblem,
 } from './skills.ts'
 import type { DshContext } from '../profile/appState.ts'
 
@@ -667,5 +668,55 @@ describe('zip import pre-flight (explicit paths, e.g. drag & drop)', () => {
       code = error instanceof AppError ? error.code : `unexpected: ${String(error)}`
     }
     expect(code).toBe('ext.skillZipBad')
+  })
+})
+
+describe('the writable root follows the config row', () => {
+  /** The home-layer row that decides it, written the way the host writes it. */
+  function writeConfigRow(configLines: string[]): void {
+    writeFileSync(join(home, 'cordis.patch.yml'), [
+      '- id: skills',
+      `  name: '@deepseek-ai/dsh-skill-filesystem'`,
+      '  config:',
+      ...configLines.map(line => `    ${line}`),
+      '',
+    ].join('\n'))
+  }
+
+  /** The code a write throws, or a marker when it threw something else. */
+  function codeOfWrite(name: string): string {
+    try {
+      writeSkill(ctx(), null, makeSkill(name))
+      return '(no throw)'
+    } catch (error) {
+      return error instanceof AppError ? error.code : `not-app:${String(error)}`
+    }
+  }
+
+  it('moves with a configured dshHome — the listing and the write agree', () => {
+    // `dshHome` REPLACES the value dsh resolves from DSH_HOME, so the root dsh
+    // scans moves. The defect this pins: the listing moved and the writer did not,
+    // so a create landed in a directory dsh no longer scanned and reported success.
+    const moved = join(root, 'moved-home')
+    writeConfigRow([`dshHome: ${moved}`])
+    const userDsh = skillRoots(ctx()).find(candidate => candidate.root === 'user-dsh')
+    expect(userDsh).toMatchObject({ path: join(moved, 'skills'), writable: true })
+    expect(writableSkillRoot(ctx())).toBe(join(moved, 'skills'))
+    expect(requireWritableSkillRoot(ctx())).toBe(join(moved, 'skills'))
+    const wrote = writeSkill(ctx(), null, makeSkill('moved-skill'))
+    expect(wrote.path).toBe(join(moved, 'skills', 'moved-skill', 'SKILL.md'))
+    // ...and it is discoverable, because it landed in a root the scan knows.
+    expect(listSkills(ctx()).skills.some(skill => skill.name === 'moved-skill')).toBe(true)
+  })
+
+  it('has NO writable root when the row drops the default roots, and refuses to write', () => {
+    // dsh only pushes `user-dsh` inside `includeDefaultRoots`, so turning it off
+    // removes the root — there is nowhere for a create/import/install to land, and
+    // saying so beats writing a skill nothing will ever load.
+    writeConfigRow(['includeDefaultRoots: false'])
+    expect(skillRoots(ctx()).some(candidate => candidate.writable)).toBe(false)
+    expect(writableSkillRoot(ctx())).toBeNull()
+    expect(codeOfWrite('nowhere')).toBe('ext.skillNoWritableRoot')
+    expect(existsSync(join(USER_DSH(), 'nowhere'))).toBe(false)
   })
 })

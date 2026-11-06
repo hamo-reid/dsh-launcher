@@ -18,7 +18,7 @@ import { profileRefused, profileTarget } from '../validate.ts'
 import { logger } from '../../core/shared/logger.ts'
 import {
   deleteSkill, importSkillZip, installedEntry, installZipSkills, listSkills, parseSkillText,
-  scaffoldSkill, skillLocationOf, writableSkillRoot, writeSkill, zipImportProblem,
+  requireWritableSkillRoot, scaffoldSkill, skillLocationOf, writeSkill, zipImportProblem,
 } from '../../core/skills/skills.ts'
 import {
   deleteSkillLib, findSkillLibEntry, installSkillToDsh, listSkillLibrary, scanSkillInstalls,
@@ -284,7 +284,7 @@ export function registerSkillsExtIpc(): void {
     try {
       const lib = findSkillLibEntry(name)
       if (lib === undefined) return fail(E.extSkillNotFound, { detail: name })
-      const root = writableSkillRoot(ctx)
+      const root = requireWritableSkillRoot(ctx)
       installSkillToDsh(root, lib, overwrite === true)
       const parsed = parseSkillText(skillLibTextOf(lib))
       if (!parsed.ok) return fail(E.extBadSkill, { detail: name })

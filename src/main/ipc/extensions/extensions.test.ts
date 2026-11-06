@@ -240,6 +240,22 @@ describe('the dsh-side skill channels', () => {
     expect(await call('ext:skillImportZip', 'a', notes))
       .toMatchObject({ ok: false, code: 'ext.skillZipNotZip' })
   })
+
+  it('refuses to create when the config dropped the writable root', async () => {
+    // `includeDefaultRoots: false` removes `user-dsh`, so a create has nowhere to
+    // land. Answering so beats writing into a directory dsh does not scan — which
+    // used to report success and then never show up.
+    writeFileSync(join(home(), 'cordis.patch.yml'), [
+      '- id: skills',
+      "  name: '@deepseek-ai/dsh-skill-filesystem'",
+      '  config:',
+      '    includeDefaultRoots: false',
+      '',
+    ].join('\n'))
+    expect(await call('ext:skillCreate', 'a', 'nowhere'))
+      .toMatchObject({ ok: false, code: 'ext.skillNoWritableRoot' })
+    expect(existsSync(skillFile('nowhere'))).toBe(false)
+  })
 })
 
 describe('the library channels', () => {
