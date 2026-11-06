@@ -12,8 +12,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { renderSkillFile, installedEntry, installZipSkills, parseSkillText, requireWritableSkillRoot } from './skills.ts'
 import {
-  deleteSkillLib, findSkillLibEntry, installSkillToDsh, listSkillLibrary, scanSkillInstalls,
-  setSkillLibraryTrash, skillLibraryDir, skillLibShape, skillLibTextOf, writeSkillLib,
+  deleteSkillLib, findSkillLibEntry, installSkillToDsh, listSkillLibrary, scanLibraryInstalls,
+  scanSkillInstalls, setSkillLibraryTrash, skillLibraryDir, skillLibShape, skillLibTextOf, writeSkillLib,
 } from './library.ts'
 import { configureAppState, contextForEntry, updateDshState } from '../profile/appState.ts'
 import { AppError } from '../shared/errors.ts'
@@ -362,5 +362,41 @@ describe('drift detection (scanSkillInstalls)', () => {
     expect(rows[0]).toMatchObject({ installed: true, stale: true })
     expect(rows[0].entry?.name).toBe('notes')
     expect(rows[0].problem).toContain('library entry cannot be read')
+  })
+})
+
+describe('the batch install scan', () => {
+  it('answers every entry from one scan of each dsh, with the same verdicts', () => {
+    // The page used to ask the single-entry scan once per entry, and each of those
+    // walked every dsh's filesystem: the cost of one overview was the product of
+    // the two counts. The batch shape must not change what any cell SAYS.
+    const greeter = writeSkillLib(null, makeSkill('greeter'))
+    const notes = writeSkillLib(null, makeSkill('notes'))
+    installSkillToDsh(requireWritableSkillRoot(contextForEntry(ENTRY())), greeter, false)
+
+    const cells = scanLibraryInstalls([greeter, notes])
+    expect(cells).toHaveLength(2)
+    expect(cells[0]).toEqual(scanSkillInstalls(greeter))
+    expect(cells[1]).toEqual(scanSkillInstalls(notes))
+    expect(cells[0][0]).toMatchObject({ installed: true, stale: false })
+    expect(cells[1][0]).toMatchObject({ installed: false, stale: false })
+  })
+
+  it('keeps two entries apart when they share a frontmatter name', () => {
+    // Two hand-made directories can carry one name (the writer refuses to create
+    // that, the scanner still has to survive it). The entry's INDEX is its
+    // identity here: keying the result by name would let one row overwrite the
+    // other and show one entry twice.
+    writeLib('first', makeSkill('same'))
+    writeLib('second', makeSkill('same'))
+    const entries = listSkillLibrary().skills
+    expect(entries).toHaveLength(2)
+    const cells = scanLibraryInstalls(entries)
+    expect(cells).toHaveLength(2)
+    expect(cells[0]).toEqual(cells[1])
+  })
+
+  it('scans nothing when the library is empty', () => {
+    expect(scanLibraryInstalls([])).toEqual([])
   })
 })

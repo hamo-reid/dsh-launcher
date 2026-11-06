@@ -22,7 +22,7 @@ import {
   scaffoldSkill, skillLocationOf, writeSkill, zipImportProblem,
 } from '../../core/skills/skills.ts'
 import {
-  deleteSkillLib, findSkillLibEntry, installSkillToDsh, listSkillLibrary, scanSkillInstalls,
+  deleteSkillLib, findSkillLibEntry, installSkillToDsh, listSkillLibrary, scanLibraryInstalls,
   skillLibraryDir, skillLibShape, skillLibTextOf, writeSkillLib,
 } from '../../core/skills/library.ts'
 import { SKILL_NAME_RE } from '../../../shared/skill.ts'
@@ -232,13 +232,13 @@ export function registerSkillsExtIpc(): void {
     }
   })
 
-  // Entries with their per-dsh install states (installed / stale) in one scan.
+  // Entries with their per-dsh install states (installed / stale) in one scan:
+  // every dsh is read ONCE for the whole page, not once per entry.
   handle('ext:libSkillOverview', (): IpcResult<SkillLibOverviewRow[]> => {
     try {
-      return {
-        ok: true,
-        value: listSkillLibrary().skills.map(entry => ({ entry, installs: scanSkillInstalls(entry) })),
-      }
+      const entries = listSkillLibrary().skills
+      const cells = scanLibraryInstalls(entries)
+      return { ok: true, value: entries.map((entry, i) => ({ entry, installs: cells[i] ?? [] })) }
     } catch (error) {
       return failFromError(error)
     }

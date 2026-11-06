@@ -21,7 +21,7 @@ import { logger } from '../shared/logger.ts'
 import { E, throwE } from '../shared/errors.ts'
 import { listSkills, parseSkillText, type ParsedSkill } from './skills.ts'
 import { contextForEntry, readDshState, skillLibraryDir } from '../profile/appState.ts'
-import type { SkillLibEntry, SkillLibInstall, SkillLibIssue } from '../../../shared/types.ts'
+import type { DshEntry, SkillEntry, SkillLibEntry, SkillLibInstall, SkillLibIssue } from '../../../shared/types.ts'
 
 /** The injected OS-recycle-bin move; main wires `shell.trashItem`, tests a fake. */
 let trash: ((target: string) => Promise<void>) | null = null
@@ -224,21 +224,35 @@ export function skillLibTextOf(lib: SkillLibEntry): string {
   return readFileSync(lib.path, 'utf8').replaceAll('\r\n', '\n')
 }
 
-/** Every dsh where the library skill is (or could be) installed, with drift
- * flags. The launcher installs into (and can only update) the writable
- * user-dsh root, so an editable copy there IS the installed copy — preferred
- * over a same-named entry in a higher-precedence root, which a reinstall could
- * never refresh. With no editable copy, any same-named entry counts (even one
- * that did not originally come from the library).
+/** What one dsh holds, grouped by skill name. Built ONCE per dsh per overview:
+ * `listSkills` walks that dsh's whole filesystem, so asking it again for each
+ * library entry made one page cost the product of the two counts (library entries
+ * × dshes) instead of their sum. */
+interface DshSkillIndex {
+  dsh: DshEntry
+  /** Every copy this dsh holds, by frontmatter name — one name can live in
+   * several roots (and the same root twice, as a bundle and a flat file). */
+  byName: Map<string, SkillEntry[]>
+}
+
+function indexDshSkills(dsh: DshEntry): DshSkillIndex {
+  const byName = new Map<string, SkillEntry[]>()
+  for (const skill of listSkills(contextForEntry(dsh)).skills) {
+    const bucket = byName.get(skill.name)
+    if (bucket === undefined) byName.set(skill.name, [skill])
+    else bucket.push(skill)
+  }
+  return { dsh, byName }
+}
+
+/** One library entry's cell on every scanned dsh.
  *
- * Every read is per-dsh and per-skill guarded, including the entry's own file:
- * this maps the WHOLE library across EVERY dsh, so one unreadable file — a
- * half-removed copy, a permission change, a root that vanished between the scan
- * and the read — would otherwise fail the entire overview and hide every other
- * skill on every other dsh. An unreadable copy is reported as stale WITH its
- * reason, because "we cannot tell" and "it is current" are different answers and
- * only one of them justifies a reinstall. */
-export function scanSkillInstalls(lib: SkillLibEntry): SkillLibInstall[] {
+ * The launcher installs into (and can only update) the writable user-dsh root, so
+ * an editable copy there IS the installed copy — preferred over a same-named entry
+ * in a higher-precedence root, which a reinstall could never refresh. With no
+ * editable copy, any same-named entry counts (even one that did not originally
+ * come from the library). */
+function cellsOf(lib: SkillLibEntry, index: readonly DshSkillIndex[]): SkillLibInstall[] {
   const libRead = readSkillText(lib.path)
   const libText = libRead.ok ? libRead.text : undefined
   // The entry's own file can become unreadable between the scan that produced
@@ -249,9 +263,8 @@ export function scanSkillInstalls(lib: SkillLibEntry): SkillLibInstall[] {
   // (`listSkillLibrary`), which is where the user sees it named; here it only has
   // to keep the cells honest.
   const libProblem = libRead.ok ? undefined : `the library entry cannot be read: ${lib.path} (${libRead.reason})`
-  return readDshState().dshes.map((dsh) => {
-    const ctx = contextForEntry(dsh)
-    const named = listSkills(ctx).skills.filter(skill => skill.name === lib.name)
+  return index.map(({ dsh, byName }) => {
+    const named = byName.get(lib.name) ?? []
     const found = named.find(skill => skill.editable) ?? named[0]
     if (found === undefined) {
       return {
@@ -282,6 +295,34 @@ export function scanSkillInstalls(lib: SkillLibEntry): SkillLibInstall[] {
       ...(libProblem !== undefined ? { problem: libProblem } : {}),
     }
   })
+}
+
+/**
+ * The cells of EVERY library entry, scanning each dsh once.
+ *
+ * Every read stays per-dsh and per-skill guarded, including each entry's own file:
+ * this maps the WHOLE library across EVERY dsh, so one unreadable file — a
+ * half-removed copy, a permission change, a root that vanished between the scan and
+ * the read — would otherwise fail the entire overview and hide every other skill on
+ * every other dsh. An unreadable copy is reported as stale WITH its reason, because
+ * "we cannot tell" and "it is current" are different answers and only one of them
+ * justifies a reinstall.
+ * @param entries - the library catalog, in the order the page renders it.
+ * @returns one cell array per entry, aligned with `entries` by index (a name can be
+ * shared by two hand-made entries, so the index is the identity here, not the name).
+ */
+export function scanLibraryInstalls(entries: readonly SkillLibEntry[]): SkillLibInstall[][] {
+  if (entries.length === 0) return []
+  const index = readDshState().dshes.map(indexDshSkills)
+  return entries.map(lib => cellsOf(lib, index))
+}
+
+/** Every dsh where one library skill is (or could be) installed, with drift flags.
+ * The single-entry form of {@link scanLibraryInstalls}: it scans every dsh, which is
+ * the right shape for one skill and the wrong one for a page, so the overview uses
+ * the batch. */
+export function scanSkillInstalls(lib: SkillLibEntry): SkillLibInstall[] {
+  return scanLibraryInstalls([lib])[0] ?? []
 }
 
 /** One file's text with CRLF normalized, or the reason it cannot be read. */
