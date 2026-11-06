@@ -35,13 +35,14 @@ const cell = (over: Partial<SkillLibInstall> = {}): SkillLibInstall => ({
   dshId: 'a', dshName: 'dsh@a', installed: true, stale: false, ...over,
 })
 
-const card = (skill: SkillEntry, install: SkillLibInstall | undefined): string =>
+const card = (skill: SkillEntry, install: SkillLibInstall | undefined, canWrite = true): string =>
   renderToStaticMarkup(
     <I18nextProvider i18n={i18next}>
       <DshSkillCard
         entry={skill}
         cell={install}
         busy={null}
+        canWrite={canWrite}
         onOpen={() => undefined}
         onReinstall={() => undefined}
         onDelete={() => undefined}
@@ -107,5 +108,13 @@ describe('a skill card on the dsh panel', () => {
     // The action follows the state: "reinstall" would diagnose an unreadable copy
     // as one that is merely behind, which is the one thing that cannot be known.
     expect(html).toContain('Reinstall anyway')
+  })
+
+  it('offers no reinstall where there is nowhere to write', () => {
+    // A dsh whose config dropped the default roots cannot take a copy. The verdict
+    // still shows (the copy IS behind), but the action that would fail is gone.
+    const html = card(entry(), cell({ stale: true }), false)
+    expect(html).toContain('Library has updates')
+    expect(html).not.toContain('Reinstall')
   })
 })

@@ -245,6 +245,13 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
   const skills = listing?.skills ?? []
   const issues = listing?.issues ?? []
   const roots = listing?.roots ?? []
+  // A dsh whose config dropped the default roots has NOWHERE to write, so the
+  // authoring entrances would only report a refusal on every click. The listing is
+  // the one place that answers this — it comes from the same predicate the writers
+  // use — and an unanswered listing (first read in flight, or one that failed)
+  // counts as "cannot write": nothing is knowable yet, and the row it would show is
+  // the panel's own error.
+  const canWrite = listing !== null && listing.roots.some(root => root.writable)
   const actionRow = (
     <Space size={8} wrap>
       <Select
@@ -258,11 +265,11 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
         options={names.map(name => ({ value: name, label: name }))}
         onChange={(value?: string) => setScope(prev => (prev === null ? null : { ...prev, chosen: value }))}
       />
-      <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => setNameOpen(true)}>
+      <Button size="small" type="primary" icon={<PlusOutlined />} disabled={!canWrite} onClick={() => setNameOpen(true)}>
         {t('ext.skills.add')}
       </Button>
-      <SkillImportMenu busy={busy === 'import'} onPick={source => void importFrom(source)} />
-      <Button size="small" onClick={() => setInstallOpen(true)}>
+      <SkillImportMenu busy={busy === 'import'} disabled={!canWrite} onPick={source => void importFrom(source)} />
+      <Button size="small" disabled={!canWrite} onClick={() => setInstallOpen(true)}>
         {t('ext.skills.installFromLib')}
       </Button>
       <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={() => void load()}>
@@ -285,6 +292,17 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
                 showIcon
                 title={t('ext.skills.profileNoneTitle')}
                 description={t('ext.skills.profileNoneDesc')}
+              />
+            )}
+            {listing !== null && !canWrite && (
+              // Says WHY the entrances are dead, where the entrances are: a disabled
+              // button cannot explain itself, and a click that only reports a refusal
+              // is the behaviour this replaces.
+              <Alert
+                type="info"
+                showIcon
+                title={t('ext.skills.noWritableTitle')}
+                description={t('ext.skills.noWritableDesc')}
               />
             )}
             {loading && listing === null
@@ -329,6 +347,7 @@ export default function SkillsManagePanel(p: { dshId: string }): JSX.Element {
                             entry={entry}
                             cell={cellFor(entry.name)}
                             busy={busyOf(entry.name)}
+                            canWrite={canWrite}
                             onOpen={editor => void open(entry, editor)}
                             onReinstall={() => void reinstall(entry)}
                             onDelete={() => void remove(entry)}

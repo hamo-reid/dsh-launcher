@@ -21,6 +21,9 @@ export type SkillImportSource = 'zip' | 'folder'
 interface SkillImportMenuProps {
   /** An import is in flight, for the button's spinner. */
   busy: boolean
+  /** Nothing to import INTO (a dsh whose config dropped its writable root): the
+   * trigger is dead, because both sources write to that root. */
+  disabled?: boolean
   /** The grid's own button is small; the empty state's action is not. */
   size?: 'small' | 'middle'
   onPick: (source: SkillImportSource) => void
@@ -28,10 +31,12 @@ interface SkillImportMenuProps {
 
 export default function SkillImportMenu(p: SkillImportMenuProps): JSX.Element {
   const { t } = useTranslation()
+  const disabled = p.disabled === true
   return (
     <Dropdown
       trigger={['click']}
       placement="bottomLeft"
+      disabled={disabled}
       menu={{
         items: [
           { key: 'zip', label: t('ext.skills.import'), icon: <UploadOutlined /> },
@@ -40,7 +45,7 @@ export default function SkillImportMenu(p: SkillImportMenuProps): JSX.Element {
         onClick: ({ key }) => p.onPick(key === 'folder' ? 'folder' : 'zip'),
       }}
     >
-      <Button size={p.size ?? 'small'} loading={p.busy} icon={<ImportOutlined />}>
+      <Button size={p.size ?? 'small'} loading={p.busy} disabled={disabled} icon={<ImportOutlined />}>
         {t('ext.skills.importMenu')}
         <DownOutlined style={{ fontSize: 10 }} />
       </Button>

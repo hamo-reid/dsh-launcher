@@ -39,6 +39,9 @@ interface DshSkillCardProps {
   cell: SkillLibInstall | undefined
   /** Which of this card's actions is running, for that button's spinner. */
   busy: 'open' | 'reinstall' | null
+  /** Whether this dsh has a writable root at all. Reinstall writes into it, so a
+   * dsh whose config dropped it offers none — the panel says why once, above. */
+  canWrite: boolean
   /** `true` opens the SKILL.md, `false` shows the folder that holds it. */
   onOpen: (editor: boolean) => void
   onReinstall: () => void
@@ -136,7 +139,7 @@ export default function DshSkillCard(p: DshSkillCardProps): JSX.Element {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: token.paddingSM, paddingTop: token.paddingSM, borderTop: `1px solid ${token.colorSplit}` }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
           <SkillOpenMenu name={entry.name} busy={p.busy === 'open'} onSelect={p.onOpen} />
-          {(stale || problem) && (
+          {p.canWrite && (stale || problem) && (
             // The label follows the STATE, not the action: an unreadable copy is
             // not "out of date", so offering a plain reinstall would name the
             // wrong problem (the same distinction the install dialog makes).

@@ -1196,6 +1196,8 @@ const en: typeof zh = {
     'ext.skills.installFromLib': 'Install from library',
     'ext.skills.profile': 'Profile (the scope that composes skill roots)',
     'ext.skills.profileNoneTitle': 'No profile selected',
+    'ext.skills.noWritableTitle': 'This dsh has no writable skill root',
+    'ext.skills.noWritableDesc': 'Its skill-filesystem config turned the default roots off (includeDefaultRoots: false), so the copies below can only be read or opened — creating, importing and installing have nowhere to land.',
     'ext.skills.profileNoneDesc': 'This is the machine-level view of the dsh: skill roots contributed by presets only exist inside a profile’s composition, so they are not listed. Pick a profile to see them.',
     'ext.skills.dropSubHintDsh': 'Drop it to import into this dsh’s writable root',
     'ext.skills.emptyDescDsh': 'Use New skill or Import ZIP above — or drop a zip anywhere on this panel.',

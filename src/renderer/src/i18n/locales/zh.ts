@@ -1194,6 +1194,8 @@ const zh = {
     'ext.skills.installFromLib': '从库安装',
     'ext.skills.profile': 'Profile（技能根的组合范围）',
     'ext.skills.profileNoneTitle': '未选 profile',
+    'ext.skills.noWritableTitle': '这台 dsh 没有可写的 skill 根',
+    'ext.skills.noWritableDesc': '它的 skill-filesystem config 关掉了默认根（includeDefaultRoots: false），所以下面的副本只能查看和打开：新建、导入、从库安装都没有落点。',
     'ext.skills.profileNoneDesc': '这是该 dsh 的机器级视图：preset 贡献的 skill 根只在某个 profile 的组合里才有意义，所以现在不列出。选一个 profile 即可看到它们。',
     'ext.skills.dropSubHintDsh': '松手即导入到该 dsh 的可写根',
     'ext.skills.emptyDescDsh': '用右上角的「新建 Skill」或「从 ZIP 导入」，也可以直接把 zip 拖到这个面板上。',
