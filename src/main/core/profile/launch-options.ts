@@ -21,9 +21,17 @@ interface SanitizedLaunchOptions {
 
 /** Environment keys the launcher owns and must never let a user override:
  * overriding the first two breaks the bundled-Electron-as-node shim; the rest
- * would hijack how Node resolves modules / the executable lookup. */
+ * would hijack how Node resolves modules / the executable lookup.
+ *
+ * `DSH_AGENTS_HOME` and `DSH_BUNDLED_SKILL_DIR` are here for a different reason:
+ * they would move two of the roots the extensions page reads. The launcher reads
+ * its OWN process environment for those two, so a value set only on the child
+ * would make the page report one set of skill roots while dsh scans another. The
+ * supported way to move them is the skill-filesystem row's config
+ * (`agentsHome` / `bundledSkillDir`), which both sides read. */
 const RESERVED_ENV_KEYS: ReadonlySet<string> = new Set([
   'ELECTRON_RUN_AS_NODE', 'DSH_HOME', 'NODE_OPTIONS', 'NODE_PATH', 'PATH',
+  'DSH_AGENTS_HOME', 'DSH_BUNDLED_SKILL_DIR',
 ])
 
 /** Launcher flags a user must not smuggle through the pass-through args: they

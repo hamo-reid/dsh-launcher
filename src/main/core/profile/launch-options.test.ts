@@ -53,6 +53,16 @@ describe('sanitizeLaunchOptions', () => {
     expect(() => sanitizeLaunchOptions({ env: { OK: 'a\nb' } })).toThrow()
   })
 
+  it('refuses the two env keys that would move a skill root behind the launcher\'s back', () => {
+    // The extensions page reads the launcher's OWN environment for these, so a
+    // value set only on the child would make the page report roots dsh does not
+    // scan. The config row (`agentsHome` / `bundledSkillDir`) is the way to move
+    // them — both sides read that.
+    expect(() => sanitizeLaunchOptions({ env: { DSH_AGENTS_HOME: 'C:/agents' } })).toThrow(/reserved/)
+    expect(() => sanitizeLaunchOptions({ env: { DSH_BUNDLED_SKILL_DIR: 'C:/bundled' } })).toThrow(/reserved/)
+    expect(() => sanitizeLaunchOptions({ env: { DSH_HOME: 'C:/elsewhere' } })).toThrow(/reserved/)
+  })
+
   it('validates the convenience port range', () => {
     expect(sanitizeLaunchOptions({ port: 0 }).port).toBe(0)
     expect(sanitizeLaunchOptions({ port: 65535 }).port).toBe(65535)
