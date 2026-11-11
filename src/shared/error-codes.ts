@@ -14,7 +14,6 @@ export const E = {
   nameInvalid: 'name.invalid',
   commonCancelled: 'common.cancelled',
   // dsh
-  needActiveDsh: 'dsh.needActive',
   dshNotFound: 'dsh.notFound',
   dshNotManaged: 'dsh.notManaged',
   dshUpToDate: 'dsh.upToDate',
@@ -48,7 +47,6 @@ export const E = {
   /** The catalog answered 403: the token is valid but cannot see this repository. */
   marketForbidden: 'market.forbidden',
   /** A catalog could not be saved: bad URL, empty name, or a duplicate name. */
-  marketBadCatalog: 'market.badCatalog',
   /** The catalog address is not an http(s) URL. */
   marketBadUrl: 'market.badUrl',
   /** The catalog name is empty. */
@@ -123,7 +121,6 @@ export const E = {
   presetNoPlugins: 'preset.noPlugins',
   presetBadComposition: 'preset.badComposition',
   // misc
-  npmNotFound: 'npm.notFound',
   yamlInvalid: 'yaml.invalid',
   shellOpenPath: 'shell.openPath',
   trashConflict: 'trash.conflict',

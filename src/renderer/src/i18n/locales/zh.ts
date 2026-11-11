@@ -641,7 +641,6 @@ const zh = {
     'plugin.localAdded': '已从本地加入本地存储',
 
     'errors.internal': '操作失败：{{detail}}',
-    'errors.dsh.needActive': '未选择 DSH —— 先在「DSH」页配置并激活。',
     'errors.dsh.notFound': '找不到该 DSH',
     'errors.dsh.versionExists': '版本名「{{name}}」已存在（目录非空）。请换一个名称，或先在 DSH 管理中删除该版本。',
     'errors.dsh.protected': '这是您自己安装的全局 DSH，无法删除。',
@@ -709,7 +708,6 @@ const zh = {
     'errors.registry.duplicateMirror': '已经有一个镜像源了——镜像源会接管所有未匹配的包，所以只能有一个。',
     'errors.registry.scopeRequired': '每条源都要填作用域 —— 没填作用域的源不参与任何包的解析。',
     'errors.registry.entryMissing': '这个源已经不存在了，可能已被删除。',
-    'errors.npm.notFound': '在 registry 上找不到这个包：{{detail}}',
     'errors.yaml.invalid': 'YAML 不合法：{{detail}}',
     'errors.trash.conflict': '回收站里已有同名项：{{detail}}',
     'errors.data.notSelected': '请先通过「从文件恢复…」选择数据包。',
@@ -1087,7 +1085,6 @@ const zh = {
     'errors.market.badName': '名称不能为空——市场用它在列表里区分目录。',
     'errors.market.unreachable': '这个地址取不到插件列表（{{detail}}）。确认它指向 plugins.json 本身，而不是浏览它的网页。',
     'errors.market.duplicateName': '已经有同名目录了，换个名称。',
-    'errors.market.badCatalog': '这个目录存不下来：地址要是 http(s)，名称不能为空，也不能和别的目录重名。',
     'errors.market.entryNotFound': '该插件已不在当前目录中——请刷新市场。',
 
     'ext.tab.mcp': 'MCP 服务器',

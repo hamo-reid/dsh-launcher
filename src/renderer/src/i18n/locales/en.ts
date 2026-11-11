@@ -643,7 +643,6 @@ const en: typeof zh = {
     'plugin.localAdded': 'Added to the local store',
 
     'errors.internal': 'Operation failed: {{detail}}',
-    'errors.dsh.needActive': 'No DSH selected — configure and activate one in the DSH page first.',
     'errors.dsh.notFound': 'DSH not found',
     'errors.dsh.versionExists': 'Version name “{{name}}” already exists (directory not empty). Use another name, or remove that version in DSH management first.',
     'errors.dsh.protected': 'This is your own globally-installed DSH and cannot be removed.',
@@ -711,7 +710,6 @@ const en: typeof zh = {
     'errors.registry.duplicateMirror': 'A mirror source already exists - it takes over every unmatched package, so there can only be one.',
     'errors.registry.scopeRequired': 'Every source needs a scope, e.g. @drahamo — an entry without one resolves no packages at all.',
     'errors.registry.entryMissing': 'That registry no longer exists — it may have been removed.',
-    'errors.npm.notFound': 'The registry has no such package: {{detail}}',
     'errors.yaml.invalid': 'Invalid YAML: {{detail}}',
     'errors.trash.conflict': 'The recycle bin already has an item with that name: {{detail}}',
     'errors.data.notSelected': 'Pick a data archive via “Restore from file…” first.',
@@ -1089,7 +1087,6 @@ const en: typeof zh = {
     'errors.market.badName': 'The name cannot be empty - the market uses it to tell catalogs apart.',
     'errors.market.unreachable': 'This address did not return a plugin list ({{detail}}). Make sure it points at plugins.json itself, not at a page that displays it.',
     'errors.market.duplicateName': 'Another catalog already uses that name.',
-    'errors.market.badCatalog': 'This catalog cannot be saved: the URL must be http(s), the name non-empty, and no two catalogs may share a name.',
     'errors.market.entryNotFound': 'This plugin is no longer in the loaded catalog — refresh the market.',
 
     'ext.tab.mcp': 'MCP servers',
