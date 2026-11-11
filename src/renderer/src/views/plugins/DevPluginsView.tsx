@@ -26,7 +26,7 @@ export default function DevPluginsView(): JSX.Element {
   const { token } = theme.useToken()
   const {
     hosts, target, listMeta, profileOptions, retarget,
-    plugins, usage, diags, loading, busy, reload,
+    plugins, usage, runningOf, diags, loading, busy, reload,
     detachPkg, detachFrom, closeDetach,
     detail, closeDetail, diagnose, buildMenuItems,
     add, install, runBuild, shim, unshim, snapshot, unregister,
@@ -78,6 +78,11 @@ export default function DevPluginsView(): JSX.Element {
    * archive, or a source dir that is gone. Saying "used by p1" for one of these
    * is the lie this whole path was built to stop. */
   const brokenProfiles = (name: string): string[] => usageOf(name).filter(u => u.broken === true).map(u => u.profile)
+  /** Profiles whose dsh still runs on this source. Building or installing into the
+   *  source changes files that process already resolved; HMR does not watch module
+   *  bodies, so it will not follow until it restarts. That is worth saying BEFORE
+   *  the build, not after it appears to do nothing. */
+  const runningFor = (name: string): string[] => runningOf(name)
 
   // The badges below belong to the last run, so the chain they were computed
   // against is shown with them.
@@ -110,6 +115,7 @@ export default function DevPluginsView(): JSX.Element {
                 const st = status(p.name)
                 const used = linkedProfiles(p.name)
                 const broken = brokenProfiles(p.name)
+                const running = runningFor(p.name)
                 return (
                   <div
                     key={p.name}
@@ -126,6 +132,13 @@ export default function DevPluginsView(): JSX.Element {
                         {broken.length > 0 && (
                           <Tooltip title={t('plugin.dev.brokenUsageHint')}>
                             <Tag color="error">{t('plugin.dev.brokenUsage', { profiles: broken.join(t('common.listSep')) })}</Tag>
+                          </Tooltip>
+                        )}
+                        {running.length > 0 && (
+                          <Tooltip title={t('plugin.dev.runningHint')}>
+                            <Tag color="warning">
+                              {t('plugin.dev.runningTag', { profiles: running.join(t('common.listSep')) })}
+                            </Tag>
                           </Tooltip>
                         )}
                       </div>

@@ -14,6 +14,7 @@ import {
   contextForEntry, dshEntryById, dshScopes, pluginDir, type DshContext,
 } from '../../core/profile/appState.ts'
 import { isProfileRunning } from '../dsh/run.ts'
+import { oneRunningRefusal, runningAmong } from './guard.ts'
 import { fail, failFromError, E } from '../../core/shared/errors.ts'
 import { dialogTitle } from '../../core/shared/dialog-text.ts'
 import { pathIdentifierInvalid, profileRefused, profileTarget } from '../validate.ts'
@@ -21,7 +22,7 @@ import { ctxOf } from '../ctxOf.ts'
 import { handle } from '../handle.ts'
 import type {
   DevBuildTarget, DevDiagnoseOptions, DevDiagnosis, DevLinkMode, DevPlugin, DevRunResult, DevScriptOptions,
-  DevSnapshotResult, IpcResult, PluginUsagePoint,
+  DevSnapshotResult, IpcResult, PluginUsagePoint, PluginWriteConsent, PluginWritePending,
 } from '../../../shared/types.ts'
 
 /** A context for a dsh-agnostic operation (dev-plugin diagnosis/peers), together
@@ -49,19 +50,30 @@ export function registerDevIpc(): void {
 
   /** The dev-plugin registry plus where each is used (derived from the overview,
    * so a link that drifted out of a profile shows as unused). */
-  handle('plugins:devList', (): IpcResult<{ plugins: DevPlugin[]; usage: Record<string, PluginUsagePoint[]> }> => {
+  handle('plugins:devList', (): IpcResult<{
+    plugins: DevPlugin[]
+    usage: Record<string, PluginUsagePoint[]>
+    /** Per package, the profiles whose dsh process is live. A dev source is linked
+     *  into the profile, so building or installing into it changes files a running
+     *  process already resolved — it will not see them until it restarts. */
+    running: Record<string, string[]>
+  }> => {
     try {
       // Re-read the manifests: the recorded version is written once at registration
       // and would otherwise keep showing a number the package no longer has.
       const plugins = syncDevVersions()
       const names = new Set(plugins.map(p => p.name))
       const usage: Record<string, PluginUsagePoint[]> = {}
+      const running: Record<string, string[]> = {}
       if (names.size > 0) {
         for (const row of buildInstalledOverview(dshScopes(), pluginDir())) {
-          if (names.has(row.name)) usage[row.name] = row.usage
+          if (!names.has(row.name)) continue
+          usage[row.name] = row.usage
+          const busy = runningAmong(row.usage)
+          if (busy.length > 0) running[row.name] = busy.map(item => `${item.dsh}·${item.profile}`)
         }
       }
-      return { ok: true, value: { plugins, usage } }
+      return { ok: true, value: { plugins, usage, running } }
     } catch (error) {
       return failFromError(error)
     }
@@ -183,12 +195,18 @@ export function registerDevIpc(): void {
 
   // Attach a dev plugin to a profile: `link` (live, edits picked up) or `copy`
   // (graduate: archive the current source state, then real-install it).
-  handle('plugins:devLinkToProfile', async (_event, dshId: string, profile: string, name: string, mode: DevLinkMode): Promise<IpcResult<string>> => {
+  handle('plugins:devLinkToProfile', async (
+    _event, dshId: string, profile: string, name: string, mode: DevLinkMode, consent?: PluginWriteConsent,
+  ): Promise<IpcResult<{ text: string } & PluginWritePending>> => {
     try {
       const ctx = ctxOf(dshId)
       if (ctx === null) return fail(E.dshNotFound)
       if (pathIdentifierInvalid(profile) || pathIdentifierInvalid(name)) return fail(E.nameInvalid)
-      if (isProfileRunning(dshId, profile)) return fail(E.runAlreadyRunning, { profile })
+      // The store's install-to-profile answers this as a question (`needsConfirm`)
+      // with the option to stop the process; two doors into the same act must not
+      // give two different answers.
+      const refusal = oneRunningRefusal(dshEntryById(dshId)?.name ?? dshId, dshId, profile, consent)
+      if (refusal !== undefined) return { ok: true, value: { text: '', ...refusal } }
       const dev = listDevPlugins().find(p => p.name === name)
       if (dev === undefined) return fail(E.nameInvalid, [], `未注册的开发插件：${name}`)
       if (mode === 'copy') {
@@ -201,27 +219,31 @@ export function registerDevIpc(): void {
         // that actually loads it.
         const shot = await snapshotDevPlugin(dev, ctx, { storeDir: store, profile, targets: [{ ctx, profile }] })
         if (!shot.ok) return fail(E.storeInstallFailed, { detail: shot.text })
-        return { ok: true, value: shot.text }
+        return { ok: true, value: { text: shot.text } }
       }
       const result = await linkDevToProfile(ctx, profile, name, dev.dir)
       if (!result.ok) return fail(E.storeOperationFailed, { detail: result.text })
       forgetDevDiagnosis()
-      return { ok: true, value: result.text }
+      return { ok: true, value: { text: result.text } }
     } catch (error) {
       return failFromError(error)
     }
   })
 
-  handle('plugins:devRepairLink', async (_event, dshId: string, profile: string, name: string, opts?: { inSource?: boolean }): Promise<IpcResult<string>> => {
+  handle('plugins:devRepairLink', async (
+    _event, dshId: string, profile: string, name: string, opts?: { inSource?: boolean },
+    consent?: PluginWriteConsent,
+  ): Promise<IpcResult<{ text: string } & PluginWritePending>> => {
     try {
       const ctx = ctxOf(dshId)
       if (ctx === null) return fail(E.dshNotFound)
       if (pathIdentifierInvalid(profile) || pathIdentifierInvalid(name)) return fail(E.nameInvalid)
-      if (isProfileRunning(dshId, profile)) return fail(E.runAlreadyRunning, { profile })
+      const refusal = oneRunningRefusal(dshEntryById(dshId)?.name ?? dshId, dshId, profile, consent)
+      if (refusal !== undefined) return { ok: true, value: { text: '', ...refusal } }
       const result = await repairDevLink(ctx, profile, name, opts ?? {})
       if (!result.ok) return fail(E.storeOperationFailed, { detail: result.text })
       forgetDevDiagnosis()
-      return { ok: true, value: result.text }
+      return { ok: true, value: { text: result.text } }
     } catch (error) {
       return failFromError(error)
     }

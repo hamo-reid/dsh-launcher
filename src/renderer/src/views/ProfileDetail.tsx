@@ -10,7 +10,7 @@ import {
 import type { DragEndEvent } from '@dnd-kit/core'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
-import { writeWithSharedLayerConfirm } from '../lib/pluginWrite.tsx'
+import { writeWithRunningConfirm, writeWithSharedLayerConfirm } from '../lib/pluginWrite.tsx'
 import { issueCount, lastSeenByRow, layerLabel, layerRowCount, type LayerLabel } from '../lib/profileLayers.ts'
 import { RenameProfileModal, TransferPatchModal } from './profile-detail/ProfileDialogs.tsx'
 import LayerDetail from './profile-detail/LayerDetail.tsx'
@@ -388,10 +388,11 @@ const loadSeq = useRef(0)
   // then treat `install` as a no-op — see TROUBLESHOOTING §1).
   const relinkBundle = async (bundle: string): Promise<void> => {
     setDepBusy(true)
-    const r = await window.api.plugins.devRepairLink(dshId, name, bundle)
+    const r = await writeWithRunningConfirm(consent => window.api.plugins.devRepairLink(dshId, name, bundle, undefined, consent))
     setDepBusy(false)
+    if (r === null) return
     if (!r.ok) { void message.error(apiErrorText(r)); return }
-    void message.success(r.value)
+    void message.success(r.value.text)
     void load()
     onChanged?.()
   }

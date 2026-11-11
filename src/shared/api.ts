@@ -365,7 +365,7 @@ eedsConfirm instead of doing it. */
     pkgVersions: (name: string, source?: RegistrySource) => Promise<IpcResult<PackageVersionInfo>>
     /** Local dev plugins: source dirs linked (not archived) into profiles, kept
      * in their own registry and managed separately from the store. */
-    devList: () => Promise<IpcResult<{ plugins: DevPlugin[]; usage: Record<string, PluginUsagePoint[]> }>>
+    devList: () => Promise<IpcResult<{ plugins: DevPlugin[]; usage: Record<string, PluginUsagePoint[]>; running: Record<string, string[]> }>>
     /** Pick a package dir and register it as a dev plugin (no copy). */
     devAdd: () => Promise<IpcResult<DevPlugin>>
     /** Unregister; never touches the source dir or any profile. */
@@ -384,8 +384,12 @@ eedsConfirm instead of doing it. */
     /** Install the dev package's own deps (durable peer fix). */
     devInstall: (name: string) => Promise<IpcResult<DevRunResult>>
     /** Attach to a profile: `link` (live) or `copy` (snapshot then install). */
-    devLinkToProfile: (dshId: string, profile: string, name: string, mode: DevLinkMode) => Promise<IpcResult<string>>
-    devRepairLink: (dshId: string, profile: string, name: string, opts?: { inSource?: boolean }) => Promise<IpcResult<string>>
+    devLinkToProfile: (
+      dshId: string, profile: string, name: string, mode: DevLinkMode, consent?: PluginWriteConsent,
+    ) => Promise<IpcResult<{ text: string } & PluginWritePending>>
+    devRepairLink: (
+      dshId: string, profile: string, name: string, opts?: { inSource?: boolean }, consent?: PluginWriteConsent,
+    ) => Promise<IpcResult<{ text: string } & PluginWritePending>>
     /** Archive the current source state into the store (graduate). `targets`
      *  additionally switches those profiles from their `link:` to the archive. */
     devSnapshot: (name: string, targets?: { dshId: string; profile: string }[]) => Promise<IpcResult<DevSnapshotResult>>

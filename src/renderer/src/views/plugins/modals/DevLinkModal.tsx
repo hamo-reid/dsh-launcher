@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react'
 import { Modal, Radio, Select, Space, theme, message } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../../../lib/ipc.ts'
+import { writeWithRunningConfirm } from '../../../lib/pluginWrite.tsx'
 import FieldLabel from '../../../components/FieldLabel.tsx'
 import { MODAL } from '../../../theme.ts'
 import type { DevLinkMode, DevPlugin } from '../../../../../shared/types.ts'
@@ -49,10 +50,14 @@ export default function DevLinkModal({ pkg, onClose, onLinked }: Props): JSX.Ele
   const doLink = async (): Promise<void> => {
     if (pkg === null || dshId === undefined || profile === undefined) return
     setLinking(true)
-    const r = await window.api.plugins.devLinkToProfile(dshId, profile, pkg.name, mode)
+    // The same running-profile question the store's install asks: linking rewrites
+    // the profile's manifest and node_modules under a live process otherwise.
+    const r = await writeWithRunningConfirm(consent =>
+      window.api.plugins.devLinkToProfile(dshId, profile, pkg.name, mode, consent))
     setLinking(false)
+    if (r === null) return
     if (!r.ok) { void message.error(apiErrorText(r)); return }
-    void message.success(r.value)
+    void message.success(r.value.text)
     onClose()
     await onLinked()
   }

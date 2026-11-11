@@ -547,6 +547,8 @@ const zh = {
     'plugin.dev.detachDone': '已从 {{count}} 个 profile 断开 {{name}}',
     'plugin.dev.detachNone': '这些 profile 里没有 {{name}} 的引用。',
     'plugin.dev.brokenUsage': '引用失效：{{profiles}}',
+    'plugin.dev.runningTag': '运行中：{{profiles}}',
+    'plugin.dev.runningHint': '这些 profile 的 dsh 还在跑，用的是这个源码目录。构建、装依赖或改源码不会进入运行中的进程（模块热替换默认关闭），需要重启它才生效。',
     'plugin.dev.brokenUsageHint': '这些 profile 仍声明着这个插件，但引用已无法解析（归档被删除，或源码目录不在了）。用「从 profile 断开…」清理。',
     'plugin.dev.status.ok': '解析正常',
     'plugin.dev.status.issues': '{{count}} 项问题',

@@ -16,10 +16,18 @@ import { openDatabase } from '../../core/settings/settings.ts'
 import { updateDshState } from '../../core/profile/appState.ts'
 import { registerDevPlugin } from '../../core/store/dev.ts'
 import { registerPluginsIpc } from './plugins.ts'
-import type { DevDiagnoseOptions, DevDiagnosis, IpcResult } from '../../../shared/types.ts'
+import type {
+  DevDiagnoseOptions, DevDiagnosis, IpcResult, PluginWritePending,
+} from '../../../shared/types.ts'
 
 /** Every registered channel, so a test can invoke one without ipcMain. */
 const channels = vi.hoisted(() => new Map<string, (event: unknown, ...args: unknown[]) => unknown>())
+/** The `(dshId, profile)` pairs that report a live run. */
+const running = vi.hoisted(() => new Set<string>())
+
+vi.mock('../dsh/run.ts', () => ({
+  isProfileRunning: (dshId: string, profile: string): boolean => running.has(`${dshId}\u0000${profile}`),
+}))
 
 vi.mock('electron', () => ({
   app: { getVersion: () => '0.0.0-test' },
@@ -81,6 +89,31 @@ beforeAll(async () => {
 }, 20000)
 
 afterAll(() => rmSync(root, { recursive: true, force: true }))
+
+describe('plugins:devLinkToProfile running guard', () => {
+  it('asks with the profile named instead of refusing outright', async () => {
+    // Linking rewrites the profile's manifest and node_modules. The store's
+    // install-to-profile answers that with a question plus an option to stop the
+    // process; the dev door has to give the same answer, not a dead end.
+    const dshId = binPath('a')
+    const dir = join(root, 'home-a', 'profiles', 'live')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'dsh-profile-live', dsh: { profile: { bundles: [] } } }))
+    running.add(`${dshId}\u0000live`)
+    try {
+      const fn = channels.get('plugins:devLinkToProfile')
+      if (fn === undefined) throw new Error('plugins:devLinkToProfile was not registered')
+      const res = await fn({}, dshId, 'live', '@me/dsh-foo', 'link') as IpcResult<{ text: string } & PluginWritePending>
+      expect(res.ok).toBe(true)
+      if (!res.ok) return
+      expect(res.value.needsConfirm).toBe('profiles-running')
+      expect(res.value.profiles?.[0]?.profile).toBe('live')
+      expect(res.value.text).toBe('')
+    } finally {
+      running.delete(`${dshId}\u0000live`)
+    }
+  })
+})
 
 describe('plugins:devDiagnose host selection', () => {
   it('resolves the patch row from the dsh the caller picked', async () => {

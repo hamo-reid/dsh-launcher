@@ -549,6 +549,8 @@ const en: typeof zh = {
     'plugin.dev.detachDone': 'Detached {{name}} from {{count}} profile(s)',
     'plugin.dev.detachNone': 'None of those profiles references {{name}}.',
     'plugin.dev.brokenUsage': 'broken reference: {{profiles}}',
+    'plugin.dev.runningTag': 'running: {{profiles}}',
+    'plugin.dev.runningHint': 'These profiles are still running on this source folder. Building, installing its deps, or editing its source will not reach that process (module hot replacement is off by default) — it needs a restart to pick the change up.',
     'plugin.dev.brokenUsageHint': 'These profiles still declare the plugin, but the reference no longer resolves (its archive was deleted, or the source folder is gone). Use "Detach from profile…" to clean it up.',
     'plugin.dev.status.ok': 'Resolved',
     'plugin.dev.status.issues': '{{count}} issue(s)',

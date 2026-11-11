@@ -41,6 +41,8 @@ interface DevPluginsApi {
   /** The list and its per-package reports. */
   plugins: DevPlugin[]
   usage: Record<string, PluginUsagePoint[]>
+  /** Per package, `dsh·profile` labels whose process is live right now. */
+  runningOf: (name: string) => string[]
   diags: Record<string, DevDiagnosis>
   loading: boolean
   /** The action currently running, as `${kind}:${name}` — empty when idle. */
@@ -78,6 +80,7 @@ export function useDevPlugins(): DevPluginsApi {
   const { t } = useTranslation()
   const [plugins, setPlugins] = useState<DevPlugin[]>([])
   const [usage, setUsage] = useState<Record<string, PluginUsagePoint[]>>({})
+  const [running, setRunning] = useState<Record<string, string[]>>({})
   /** The package being detached from profiles, if any. */
   const [detachPkg, setDetachPkg] = useState<string | null>(null)
   const [diags, setDiags] = useState<Record<string, DevDiagnosis>>({})
@@ -126,6 +129,7 @@ export function useDevPlugins(): DevPluginsApi {
     if (!r.ok) { setLoading(false); void message.error(apiErrorText(r)); return }
     setPlugins(r.value.plugins)
     setUsage(r.value.usage)
+    setRunning(r.value.running)
     // Diagnosis + build scripts are filesystem-only (no network), so run both for
     // every package to show a status badge and an actionable build menu up front.
     // The diagnosis is cached in the main process, so this is a map hit unless the
@@ -271,7 +275,7 @@ export function useDevPlugins(): DevPluginsApi {
 
   return {
     hosts, target, listMeta, profileOptions, retarget,
-    plugins, usage, diags, loading, busy, reload: load,
+    plugins, usage, runningOf: (name: string) => running[name] ?? [], diags, loading, busy, reload: load,
     detachPkg, detachFrom: setDetachPkg, closeDetach: () => setDetachPkg(null),
     detail, closeDetail: () => setDetail(null), diagnose, buildMenuItems,
     add, install, runBuild, shim, unshim, snapshot, unregister,

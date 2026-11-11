@@ -7,7 +7,8 @@ import {
 import { checkPluginUpdates } from '../../core/store/updates.ts'
 import { installSpecFor, marketSourceState, resolveMarket } from '../../core/store/market.ts'
 import { dshScopes, pluginDir, profilesRoot, profilesRootFor } from '../../core/profile/appState.ts'
-import { isProfileRunning, listRuns } from '../dsh/run.ts'
+import { isProfileRunning } from '../dsh/run.ts'
+import { runningAmong } from './guard.ts'
 import { fail, failFromError, E } from '../../core/shared/errors.ts'
 import { pathIdentifierInvalid, versionInvalid } from '../validate.ts'
 import { ctxOf } from '../ctxOf.ts'
@@ -161,9 +162,9 @@ export function registerUpdatesIpc(): void {
       const usage = buildInstalledOverview(dshes, store).find(r => r.name === name)?.usage ?? []
       if (usage.length === 0) return fail(E.pluginNotInstalled, { name })
       // Refuse while any using profile runs (mutating node_modules under a live run).
-      const running = new Set(listRuns().map(r => `${r.dshId}\u0000${r.profile}`))
-      const idByName = new Map(dshes.map(d => [d.name, d.id]))
-      const active = usage.filter(u => running.has(`${idByName.get(u.dsh) ?? ''}\u0000${u.profile}`))
+      // Keyed by the usage point's own `dshId`: a name→id map silently checked the
+      // wrong install when two entries happened to share a display name.
+      const active = runningAmong(usage)
       if (active.length > 0) return fail(E.runAlreadyRunning, { profile: active.map(u => u.profile).join('、') })
 
       if (storeVersions(store, pkgName).length === 0) {

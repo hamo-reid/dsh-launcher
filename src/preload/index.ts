@@ -347,7 +347,7 @@ const api = {
       ipcRenderer.invoke('plugins:search', query, opts),
     pkgVersions: (name: string, source?: RegistrySource): Promise<IpcResult<PackageVersionInfo>> =>
       ipcRenderer.invoke('plugins:pkgVersions', name, source),
-    devList: (): Promise<IpcResult<{ plugins: DevPlugin[]; usage: Record<string, PluginUsagePoint[]> }>> =>
+    devList: (): Promise<IpcResult<{ plugins: DevPlugin[]; usage: Record<string, PluginUsagePoint[]>; running: Record<string, string[]> }>> =>
       ipcRenderer.invoke('plugins:devList'),
     devAdd: (): Promise<IpcResult<DevPlugin>> =>
       ipcRenderer.invoke('plugins:devAdd'),
@@ -365,10 +365,14 @@ const api = {
       ipcRenderer.invoke('plugins:devBuild', name, target),
     devInstall: (name: string): Promise<IpcResult<DevRunResult>> =>
       ipcRenderer.invoke('plugins:devInstall', name),
-    devLinkToProfile: (dshId: string, profile: string, name: string, mode: DevLinkMode): Promise<IpcResult<string>> =>
-      ipcRenderer.invoke('plugins:devLinkToProfile', dshId, profile, name, mode),
-    devRepairLink: (dshId: string, profile: string, name: string, opts?: { inSource?: boolean }): Promise<IpcResult<string>> =>
-      ipcRenderer.invoke('plugins:devRepairLink', dshId, profile, name, opts),
+    devLinkToProfile: (
+      dshId: string, profile: string, name: string, mode: DevLinkMode, consent?: PluginWriteConsent,
+    ): Promise<IpcResult<{ text: string } & PluginWritePending>> =>
+      ipcRenderer.invoke('plugins:devLinkToProfile', dshId, profile, name, mode, consent),
+    devRepairLink: (
+      dshId: string, profile: string, name: string, opts?: { inSource?: boolean }, consent?: PluginWriteConsent,
+    ): Promise<IpcResult<{ text: string } & PluginWritePending>> =>
+      ipcRenderer.invoke('plugins:devRepairLink', dshId, profile, name, opts, consent),
     devSnapshot: (name: string, targets?: { dshId: string; profile: string }[]): Promise<IpcResult<DevSnapshotResult>> =>
       ipcRenderer.invoke('plugins:devSnapshot', name, targets),
     devReveal: (name: string): Promise<IpcResult<boolean>> =>
