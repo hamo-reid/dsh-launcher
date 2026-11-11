@@ -406,14 +406,15 @@ app.whenReady().then(async () => {
   // disk, so whatever succeeds here is already visible by the time the UI asks.
   repairArchiveLinks(pluginDir()).catch(error => logger.warn(`store relink failed: ${String(error)}`))
 
-  // Reclaim what a previous session could not delete because a running profile held
-  // it open. Synchronous and best-effort: a locked file just stays for next time,
-  // and the version it belonged to is already out of the store's namespace.
-  sweepStoreTrash(pluginDir())
-
   registerIpc()
   createWindow()
   logger.info('main window created')
+
+  // Reclaim what a previous session could not delete because a running profile held
+  // it open. Off the startup path on purpose: a stash can hold a whole archive, and
+  // a locked file just stays for next time — the version it belonged to is already
+  // out of the store's namespace, so nothing is waiting on this.
+  setImmediate(() => { sweepStoreTrash(pluginDir()) })
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

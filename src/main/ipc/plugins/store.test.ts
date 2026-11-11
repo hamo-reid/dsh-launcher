@@ -120,6 +120,20 @@ describe('plugins:uninstall', () => {
     expect(manifest().dependencies?.[PKG]).toBeUndefined()
     expect(manifest().dsh?.profile?.bundles).toEqual(['@deepseek-ai/dsh-base'])
   })
+
+  it('names the running profile when the archive cannot be moved aside', async () => {
+    running.add(`${DSH_ID}\u0000${PROFILE}`)
+    // The detach succeeds and rewrites the manifest; the retire then fails because
+    // a FILE sits where the stash directory belongs. The message still has to name
+    // who was holding the files — that is the only actionable part, and by then a
+    // fresh scan of the manifests finds no reference at all.
+    writeFileSync(join(pluginDir(), '.trash'), 'not a directory')
+    const res = await invoke('plugins:uninstall', PKG, { acknowledgeRunning: true })
+    expect(res.ok).toBe(false)
+    if (res.ok) return
+    expect(res.code).toBe('store.fileLocked')
+    expect(String((res.params as Record<string, string>).by)).toContain(PROFILE)
+  })
 })
 
 describe('plugins:installToProfile', () => {

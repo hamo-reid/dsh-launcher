@@ -64,10 +64,13 @@ export function ensurePluginStore(dir: string): IpcResult<string> {
   }
 }
 
-/** A parenthetical naming the live profiles that would hold a plugin's files
- * open. Empty when none is running, so the message stays a plain refusal. */
-function runningHint(scopes: DshScope[], pkg: string): string {
-  const busy = runningAmong(pluginsUsing(scopes, pkg))
+/** The parenthetical a locked-file message carries. Empty when nothing runs.
+ *
+ * It is built from the usage points the GUARD saw, on purpose: by the time the
+ * delete fails, the manifests have already been rewritten, so a fresh scan finds
+ * no reference and would name nobody — the one fact the message exists to convey. */
+function runningLabels(usages: readonly PluginUsagePoint[]): string {
+  const busy = runningAmong(usages)
   return busy.length === 0 ? '' : `（${busy.map(u => `${u.dsh}·${u.profile}`).join('、')} 正在运行）`
 }
 
@@ -169,16 +172,19 @@ export function registerStoreIpc(): void {
       if (pathIdentifierInvalid(name)) return fail(E.nameInvalid)
       if (version !== undefined && versionInvalid(version)) return fail(E.nameInvalid)
       const scopes = dshScopes()
+      // The set is computed once and used twice: for the question, and — after the
+      // manifests have been rewritten — for naming who held the files open.
+      const usages = version === undefined
+        ? pluginsUsing(scopes, name)
+        : profilesPointingAt(scopes, name, pluginVersionDir(pluginDir(), name, version))
       // Only the branches that touch a profile are gated. A single-version delete
       // that detaches nobody refuses on its own (`store.versionInUse`), and that
       // refusal has to stay the first thing the person sees.
       if (version === undefined || opts?.detach === true) {
-        const usages = version === undefined
-          ? pluginsUsing(scopes, name)
-          : profilesPointingAt(scopes, name, pluginVersionDir(pluginDir(), name, version))
         const refusal = runningRefusal(usages, { acknowledgeRunning: opts?.acknowledgeRunning === true })
         if (refusal !== undefined) return { ok: true, value: { text: '', detached: [], ...refusal } }
       }
+      const by = runningLabels(usages)
       if (version === undefined) {
         // Whole-plugin removal detaches every referencing profile by design.
         const detached = await removePluginFromProfiles(scopes, name)
@@ -187,7 +193,7 @@ export function registerStoreIpc(): void {
           // A store that refused to move the archive aside is not an "operation
           // failed": the files are held open, and who holds them is the answer.
           return res.locked === true
-            ? fail(E.storeFileLocked, { name, by: runningHint(scopes, name) })
+            ? fail(E.storeFileLocked, { name, by })
             : fail(E.storeOperationFailed, { detail: res.text })
         }
         return { ok: true, value: { text: res.text, detached } }
@@ -204,7 +210,7 @@ export function registerStoreIpc(): void {
           return fail(E.storeVersionInUse, { name, version, profiles: res.blockedBy.map(u => `${u.dsh}·${u.profile}`).join('、') })
         }
         return res.locked === true
-          ? fail(E.storeFileLocked, { name: `${name}@${version}`, by: runningHint(scopes, name) })
+          ? fail(E.storeFileLocked, { name: `${name}@${version}`, by })
           : fail(E.storeOperationFailed, { detail: res.text })
       }
       return { ok: true, value: { text: res.text, detached: res.blockedBy ?? [] } }
@@ -223,13 +229,15 @@ export function registerStoreIpc(): void {
     try {
       if (pathIdentifierInvalid(name)) return fail(E.nameInvalid)
       const scopes = dshScopes()
-      const refusal = runningRefusal(pluginsUsing(scopes, name), consent)
+      const usages = pluginsUsing(scopes, name)
+      const refusal = runningRefusal(usages, consent)
       if (refusal !== undefined) return { ok: true, value: { removed: [], ...refusal } }
+      const by = runningLabels(usages)
       const removed = await removePluginFromProfiles(scopes, name)
       const res = removePlugin(pluginDir(), name)
       if (!res.ok) {
         return res.locked === true
-          ? fail(E.storeFileLocked, { name, by: runningHint(scopes, name) })
+          ? fail(E.storeFileLocked, { name, by })
           : fail(E.storeOperationFailed, { detail: res.text })
       }
       return { ok: true, value: { removed } }

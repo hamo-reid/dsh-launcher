@@ -48,7 +48,9 @@ export function InstallToProfileModal(p: InstallToProfileModalProps): JSX.Elemen
     // answer becomes part of the retry, and the success path stays in one place.
     let force = false
     let consent: PluginWriteConsent | undefined
-    for (;;) {
+    // Two questions exist, so three attempts is already more than enough; a bound
+    // here keeps a server that keeps re-asking from spinning this dialog.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
       const res = await window.api.plugins.installToProfile(installDsh, installProfile, p.installPkg, version, force, consent)
       if (!res.ok) { setInstalling(false); void message.error(apiErrorText(res)); return }
       if (res.value.needsConfirm === 'profiles-running') {
@@ -75,6 +77,10 @@ export function InstallToProfileModal(p: InstallToProfileModalProps): JSX.Elemen
       await p.onDone()
       return
     }
+    // Unreachable in practice (two questions, three attempts). Reported rather
+    // than silently leaving the dialog spinning if it ever is.
+    setInstalling(false)
+    void message.error(t('plugin.install.unsettled'))
   }
 
   const showVersionPicker = p.versions.length > 1

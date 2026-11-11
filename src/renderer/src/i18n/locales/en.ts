@@ -346,6 +346,7 @@ const en: typeof zh = {
     'plugin.running.ok': 'Continue anyway',
     'plugin.running.stopAndContinue': 'Stop, then continue',
     'plugin.install.title': 'Install to profile · {{name}}',
+    'plugin.install.unsettled': 'The install did not settle (the server kept asking). Try again.',
     'plugin.install.prompt': 'Choose the DSH and profile to point “{{name}}” at (uses a link: dependency)',
     'plugin.install.dsh': 'DSH',
     'plugin.install.profile': 'Profile (select DSH first)',

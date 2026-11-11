@@ -195,11 +195,28 @@ export async function removePluginFromProfiles(
     // archive. A real directory is deleted via deleteTreePhysical (symlink-safe).
     const nmPkg = join(dir, 'node_modules', pkg)
     if (nmStat !== undefined) {
-      // isSymbolicLink() is true for a Windows junction too, but a bare rmSync
-      // on a junction throws ERR_FS_EISDIR — unlink (remove the link entry, do
-      // not follow it) is the only reliable path for both.
-      if (nmStat.isSymbolicLink()) unlinkSync(nmPkg)
-      else deleteTreePhysical(nmPkg)
+      // The reference is already gone from the manifest, so a link that will not
+      // unlink is REPORTED rather than thrown: one stubborn profile must not abort
+      // the detach of the others, and `pnpm install` below usually prunes it
+      // anyway. Silently ignoring it is what leaves an archive pinned for reasons
+      // nobody can see.
+      try {
+        if (nmStat.isSymbolicLink()) {
+          // isSymbolicLink() is true for a Windows junction too, but a bare rmSync
+          // on a junction throws ERR_FS_EISDIR — unlink (remove the link entry, do
+          // not follow it) is the only reliable path for both.
+          unlinkSync(nmPkg)
+        } else {
+          const stranded = deleteTreePhysical(nmPkg)
+          if (stranded.length > 0) {
+            logger.warn(`plugin detach: ${stranded.length} path(s) under ${nmPkg} could not be removed`, { profile: item.usage.profile })
+          }
+        }
+      } catch (error) {
+        logger.warn(`plugin detach: could not unlink ${nmPkg}`, {
+          profile: item.usage.profile, error: error instanceof Error ? error.message : String(error),
+        })
+      }
     }
     await runPnpm(dir, ['install', '--config.confirmModulesPurge=false'])
     // The spec is gone now, so it is not part of what was detached.

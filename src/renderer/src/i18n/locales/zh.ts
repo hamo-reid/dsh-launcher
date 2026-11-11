@@ -344,6 +344,7 @@ const zh = {
     'plugin.running.ok': '仍然继续',
     'plugin.running.stopAndContinue': '停止后继续',
     'plugin.install.title': '安装到 profile · {{name}}',
+    'plugin.install.unsettled': '安装没有得出结论（服务端仍在追问）。请重试。',
     'plugin.install.prompt': '选择要把「{{name}}」指向的 DSH 与 profile（采用 link: 软链接）',
     'plugin.install.dsh': 'DSH',
     'plugin.install.profile': 'Profile（需先选 DSH）',
