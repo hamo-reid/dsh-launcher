@@ -96,6 +96,45 @@ describe('cloneProfile', () => {
     expect(existsSync(join(profiles(), 'dst', 'node_modules'))).toBe(false)
   })
 
+  it('gives the clone its own conventional manifest name', () => {
+    createProfile(ctx(), 'src')
+    cloneProfile(ctx(), 'src', 'dst')
+    const manifest = JSON.parse(readFileSync(join(profiles(), 'dst', 'package.json'), 'utf8')) as { name: string }
+    expect(manifest.name).toBe('dsh-profile-dst')
+  })
+
+  it('leaves a hand-written manifest name alone', () => {
+    createProfile(ctx(), 'src')
+    const path = join(profiles(), 'src', 'package.json')
+    const manifest = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
+    manifest.name = 'my-own-name'
+    writeFileSync(path, JSON.stringify(manifest, null, 2) + '\n')
+    cloneProfile(ctx(), 'src', 'dst')
+    expect((JSON.parse(readFileSync(join(profiles(), 'dst', 'package.json'), 'utf8')) as { name: string }).name)
+      .toBe('my-own-name')
+  })
+
+  it('does not carry the source profile\'s runtime state', () => {
+    createProfile(ctx(), 'src')
+    const src = join(profiles(), 'src')
+    // The three things that would make the clone impersonate its source.
+    mkdirSync(join(src, '.plugin-manager', 'logs'), { recursive: true })
+    writeFileSync(join(src, '.plugin-manager', 'logs', 'pnpm.log'), 'x')
+    writeFileSync(join(src, 'cordis.patch.yml.bak'), '- id: old\n')
+    writeFileSync(join(src, 'compatibility.json'), '{}\n')
+    cloneProfile(ctx(), 'src', 'dst')
+    const dst = join(profiles(), 'dst')
+    expect(existsSync(join(dst, '.plugin-manager'))).toBe(false)
+    expect(existsSync(join(dst, 'cordis.patch.yml.bak'))).toBe(false)
+    // Everything else is still a copy of the configuration.
+    expect(existsSync(join(dst, 'cordis.patch.yml'))).toBe(true)
+    expect(existsSync(join(dst, 'pnpm-workspace.yaml'))).toBe(true)
+    expect(existsSync(join(dst, 'compatibility.json'))).toBe(true)
+    // And the id is its own, not the source's.
+    expect(readFileSync(join(dst, '.dsh-launcher-id'), 'utf8'))
+      .not.toBe(readFileSync(join(src, '.dsh-launcher-id'), 'utf8'))
+  })
+
   it('rejects missing source and invalid target', () => {
     expect(() => cloneProfile(ctx(), 'ghost', 'dst')).toThrow(/not found/)
     expect(() => cloneProfile(ctx(), 'src', 'Bad')).toThrow(/kebab-case/)

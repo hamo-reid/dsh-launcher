@@ -51,7 +51,9 @@ function ask(title: string, body: string): Promise<RunningAnswer> {
       content: body,
       closable: true,
       maskClosable: false,
-      onCancel: () => { resolve('cancel') },
+      // The X and Esc are a cancel answer like any other, and they must settle the
+      // promise — an unanswered question here would leave the write hanging.
+      onCancel: () => close('cancel'),
       footer: (
         <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
           <Button size="small" onClick={() => close('cancel')}>{i18n.t('common.cancel')}</Button>

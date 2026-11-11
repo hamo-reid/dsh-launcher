@@ -3,7 +3,7 @@
  * soft-deleting, and moving its patch layer to another profile.
  */
 import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, utimesSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import { listProfiles, profileDir, profilePatchPath, profilesDir } from './home.ts'
 import { profilesRootFor, type DshContext } from './appState.ts'
 import { readManifest } from './manifest.ts'
@@ -159,7 +159,24 @@ export function createProfile(ctx: DshContext, name: string, bundles: string[] =
   logger.info(`profile created: ${name} (${bundles.length} bundles)`)
 }
 
-/** Clone a profile's configuration (without installed node_modules). */
+/** Per-profile state that must not travel with a clone.
+ *
+ * `node_modules` is the heavy one, but not the only one that matters:
+ * `.plugin-manager` holds THIS profile's operation log, so a copy makes the new
+ * profile impersonate the old one in diagnostics; `.dsh-launcher-id` would hand
+ * the clone its source's saved launch settings; and a `.bak` is the source's
+ * history rather than a starting point. */
+const CLONE_EXCLUDED = new Set(['node_modules', '.plugin-manager', '.dsh-launcher-id'])
+
+/** Whether a path relative to the profile root belongs in the clone. */
+function cloneKeeps(relativePath: string): boolean {
+  if (relativePath === '') return true
+  if (relativePath.endsWith('.bak')) return false
+  return !relativePath.split(/[\\/]/).some(segment => CLONE_EXCLUDED.has(segment))
+}
+
+/** Clone a profile's configuration (without installed node_modules, and without
+ * the state that identifies the SOURCE profile). */
 export function cloneProfile(ctx: DshContext, name: string, newName: string): void {
   assertCustomProfileName(newName)
   const src = profileDir(ctx, name)
@@ -167,13 +184,18 @@ export function cloneProfile(ctx: DshContext, name: string, newName: string): vo
   if (!existsSync(src)) throw new Error(`profile "${name}" not found`)
   if (existsSync(dst)) throw new Error(`profile "${newName}" already exists`)
   mkdirSync(profilesDir(ctx), { recursive: true })
-  cpSync(src, dst, {
-    recursive: true,
-    filter: source => !source.includes('node_modules'),
-  })
-  // The clone is a distinct profile: give it its own id so it does not inherit
-  // the source's saved launch mode/parameters.
+  cpSync(src, dst, { recursive: true, filter: source => cloneKeeps(relative(src, source)) })
+  // The clone is a distinct profile: its own id (so it does not inherit the
+  // source's saved launch mode/parameters), and its own conventional manifest
+  // name — two profiles under one name mislead every diagnostic that prints it.
   writeNewProfileId(dst)
+  if (existsSync(join(dst, 'package.json'))) {
+    const manifest = readRawManifest(dst)
+    if (manifest.name === `dsh-profile-${name}`) {
+      manifest.name = `dsh-profile-${newName}`
+      writeRawManifest(dst, manifest)
+    }
+  }
   logger.info(`profile cloned: ${name} → ${newName}`)
 }
 

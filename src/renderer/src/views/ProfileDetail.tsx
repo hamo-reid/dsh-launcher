@@ -588,6 +588,13 @@ const loadSeq = useRef(0)
               <div style={{ flex: '0 0 200px' }}>
                 <FieldLabel>{t('profile.workspace.patchReload')}</FieldLabel>
                 <Select value={metaReload} onChange={v => setMetaReload(v)} style={{ width: '100%' }} options={[{ value: 'live', label: 'live' }, { value: 'startup', label: 'startup' }]} />
+                {/* The value is written faithfully, but whether the launched dsh
+                    reads it is the runtime's business — some builds have no such
+                    field and always watch. Saying so beats a setting that looks
+                    like an off switch and is not one. */}
+                <div style={{ marginTop: 4, fontSize: token.fontSizeSM, color: token.colorTextTertiary }}>
+                  {t('profile.workspace.patchReloadHint')}
+                </div>
               </div>
               <Button type="primary" loading={metaBusy} onClick={() => void saveMeta()}>{t('common.save')}</Button>
             </div>

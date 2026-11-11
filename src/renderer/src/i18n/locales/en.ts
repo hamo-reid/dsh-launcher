@@ -839,6 +839,7 @@ const en: typeof zh = {
     'profile.workspace.depBothRequired': 'Enter both a package name and a version / source',
     'profile.workspace.displayName': 'Display name',
     'profile.workspace.patchReload': 'Patch reload',
+    'profile.workspace.patchReloadHint': 'Written as dsh.profile.patchReload. Whether it takes effect depends on the launched dsh build: versions without the field always hot-reload the patch.',
     'profile.workspace.reveal': 'Open folder',
     'profile.workspace.summaryBundles': 'Bundle layers: {{count}}',
     'profile.workspace.summaryPatchRows': 'Profile patch rows: {{count}}',

@@ -279,6 +279,56 @@ launcher 用 Node 的解析链（从包锚点）逐行解析并报告：
 
 ---
 
+## 11. 一个 profile 改了，另一个 profile 的进程重载了（home 层是共享的）
+
+**症状**：同时跑两个 profile，在其中一个的页面上改了点东西（或装了/卸了一个插件），
+另一个进程的 dsh 立刻重新组合，日志里出现配置重载。
+
+### dsh 只监听三个路径
+
+每个通过 `--profile` 启动的进程都会启用 `@deepseek-ai/dsh-hmr`（base 组合里那一行的
+`disabled` 是 `!!js "!ctx.get('profileContext')"`），并监听：
+
+| 监听对象 | 作用域 | 变化后 |
+|---|---|---|
+| `<profile>/cordis.patch.yml` | 本 profile | 本进程重组合 |
+| **`<home>/cordis.patch.yml`** | **机器级，该 home 下所有 profile 共享** | **所有在跑的 profile 立刻重组合** |
+| `<profile>/package.json` | 本 profile | **仅当** `dsh.profile.bundles` 有序列表变化才重组合 |
+
+后两者的差别是关键：patch 文件没有 bundle 门槛，manifest 有。所以「只改了 dependencies」
+不会热重载，而「改了 home 层」会牵动所有 profile。
+
+另外 `<home>/cordis.patch.yml` **不存在时也在监听范围内**（watcher 会向上找到存在的祖先
+目录）。因此**第一次写入它——哪怕内容只是 `[]`——就是一次新增事件**，会让所有在跑的 profile 重载。
+
+### 本应用里哪些操作写的是 home 层
+
+- profile 工作区 → 层栈里 **home 层**的行（可开关）
+- profile 工作区 → **Home Patch** 分节（源码编辑）
+- MCP 表单把「层」选成 **home**
+- 插件库条目「应用到 profile / home」选 **home**
+
+这些操作现在都会先弹一个确认框，列出**当前正在运行的 profile**，并说明保存后它们会立刻
+重新组合；不想影响就取消，或先停下相关进程。
+
+### 不是 home 层的两种可能
+
+1. **同一个 profile 被两个 dsh 条目同时启动**。运行互斥的键是 `(dsh 条目, profile)`，不是
+   profile 名；两个条目指向同一个 `home` 时，两个进程的三个监听文件完全重合。
+2. **插件库是全局共享的**，profile 用绝对 `file:` 指向 `<插件库>/archive/<name>/<version>`。
+   删/换归档版本会同时影响所有引用它的 profile（见 §10「引用失效」）。
+
+### 相关限制（上游行为，不是本应用的 bug）
+
+- 替换**已安装的包版本**需要重启进程才能生效。
+- 源码模块热替换默认关闭（base 组合是 `root: []`），已发布 profile 都不启用。
+- 运行中的进程会占住已安装包里的原生模块：此时删除归档会失败。本应用现在**先把归档移出
+  `archive/`（进 `.trash`）再删字节**，所以不会被删成「一半」；下次启动会自动重试清理。
+- `dsh.profile.patchReload`（`live` / `startup`）在**不实现该字段的 dsh 版本上不生效**，
+  这类版本一律热重载 patch 文件。
+
+---
+
 ## 快速索引
 | 症状 | 章节 |
 |---|---|
@@ -292,3 +342,4 @@ launcher 用 Node 的解析链（从包锚点）逐行解析并报告：
 | 隔离测试打包产物 | §8 |
 | 手动重装 / 接入 dsh | §9 |
 | 本地 / monorepo 插件开发 | §10 |
+| 一个 profile 改了、另一个进程重载了 | §11 |

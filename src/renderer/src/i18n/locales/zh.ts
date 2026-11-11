@@ -837,6 +837,7 @@ const zh = {
     'profile.workspace.depBothRequired': '请填写包名与版本 / 来源',
     'profile.workspace.displayName': '显示名',
     'profile.workspace.patchReload': 'patch 重载',
+    'profile.workspace.patchReloadHint': '写入 dsh.profile.patchReload。是否生效取决于所启动的 dsh 版本：不支持该字段的版本一律热重载 patch。',
     'profile.workspace.reveal': '打开目录',
     'profile.workspace.summaryBundles': 'bundle 层：{{count}}',
     'profile.workspace.summaryPatchRows': 'profile patch 行：{{count}}',
