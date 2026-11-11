@@ -110,7 +110,7 @@ describe('isUpdateAvailable', () => {
 describe('toUpdateInfo', () => {
   it('marks an npm plugin with a newer latest as updatable', () => {
     const info = toUpdateInfo(
-      { name: 'p', versions: ['1.0.0'], usage: [{ dsh: 'd', profile: 'a', version: '1.0.0' }], origin: 'npm' },
+      { name: 'p', versions: ['1.0.0'], usage: [{ dsh: 'd', dshId: 'd', profile: 'a', version: '1.0.0' }], origin: 'npm' },
       '2.0.0',
     )
     expect(info).toMatchObject({ name: 'p', origin: 'npm', applied: ['1.0.0'], archived: ['1.0.0'], latest: '2.0.0', updateAvailable: true, manual: false })
@@ -118,7 +118,7 @@ describe('toUpdateInfo', () => {
 
   it('marks github/local origins as manual with no latest', () => {
     const info = toUpdateInfo(
-      { name: 'g', versions: ['1.0.0'], usage: [{ dsh: 'd', profile: 'a', version: '1.0.0' }], origin: 'github' },
+      { name: 'g', versions: ['1.0.0'], usage: [{ dsh: 'd', dshId: 'd', profile: 'a', version: '1.0.0' }], origin: 'github' },
       undefined,
     )
     expect(info.manual).toBe(true)
@@ -128,7 +128,7 @@ describe('toUpdateInfo', () => {
 
   it('treats a github origin with a resolved latest as checkable, not manual', () => {
     const info = toUpdateInfo(
-      { name: 'g', versions: ['1.0.0'], usage: [{ dsh: 'd', profile: 'a', version: '1.0.0' }], origin: 'github' },
+      { name: 'g', versions: ['1.0.0'], usage: [{ dsh: 'd', dshId: 'd', profile: 'a', version: '1.0.0' }], origin: 'github' },
       '2.0.0',
     )
     expect(info.manual).toBe(false)
@@ -138,7 +138,7 @@ describe('toUpdateInfo', () => {
 
   it('dedupes applied versions across profiles', () => {
     const info = toUpdateInfo(
-      { name: 'p', versions: [], usage: [{ dsh: 'd', profile: 'a', version: '1.0.0' }, { dsh: 'd', profile: 'b', version: '1.0.0' }], origin: 'npm' },
+      { name: 'p', versions: [], usage: [{ dsh: 'd', dshId: 'd', profile: 'a', version: '1.0.0' }, { dsh: 'd', dshId: 'd', profile: 'b', version: '1.0.0' }], origin: 'npm' },
       '1.0.0',
     )
     expect(info.applied).toEqual(['1.0.0'])

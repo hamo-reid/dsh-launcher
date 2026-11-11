@@ -126,6 +126,9 @@ export type ProfilePatchReload = 'live' | 'startup'
 /** One point where a plugin is in use: a profile under some dsh. */
 export interface PluginUsagePoint {
   dsh: string
+  /** The dsh entry id, so a caller can ask the run registry whether THIS profile
+   * has a live process — the dsh NAME is a label, not an identity. */
+  dshId: string
   dshVersion?: string
   profile: string
   /** The resolved version of this plugin actually installed in the profile's
@@ -139,6 +142,43 @@ export interface PluginUsagePoint {
    * dangling entry in its node_modules. A usage point that is broken still has to
    * be shown — it is the one state that needs a person to do something. */
   broken?: boolean
+}
+
+/** A profile that currently has a live dsh process. */
+export interface RunningProfileRef {
+  dsh: string
+  /** The dsh entry id, so a caller can address the run rather than only show it. */
+  dshId: string
+  profile: string
+}
+
+/** Why a plugin write stopped before touching anything.
+ *
+ * `replaces-dev-link` — the profile is on a dev link and the write would replace
+ * it; `force` answers that. `profiles-running` — a profile the write would affect
+ * has a live dsh process; stop it, or answer `acknowledgeRunning` to go on. */
+export type PluginWriteConfirm = 'replaces-dev-link' | 'profiles-running'
+
+/** The refusal fields a plugin write carries. Nothing was written. */
+export interface PluginWriteRefusal {
+  needsConfirm: PluginWriteConfirm
+  /** Set for `profiles-running`: which live profiles the write would affect. */
+  profiles?: RunningProfileRef[]
+}
+
+/** The optional refusal fields a plugin write may carry. Present only when the
+ * write stopped for a question; the payload also carries the empty result arrays
+ * so a caller never has to distinguish "refused" from "nothing affected". */
+export type PluginWritePending = Partial<PluginWriteRefusal>
+
+/** What the caller has already accepted, so a write stops offering.
+ *
+ * Every flag answers a refusal the same call returned earlier — nothing here
+ * pre-empts a check. That ordering is the point: the main process decides, the
+ * person is told, and only then does the retry carry the answer. */
+export interface PluginWriteConsent {
+  /** The user saw the running-profile warning and chose to continue. */
+  acknowledgeRunning?: boolean
 }
 
 /** How an archived plugin version got into the store. `dsh` = shipped with the

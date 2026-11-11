@@ -4,6 +4,7 @@ import {
 } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
+import { writeWithRunningConfirm } from '../lib/pluginWrite.ts'
 import AppShell from '../components/AppShell.tsx'
 import Panel from '../components/Panel.tsx'
 import Toolbar from '../components/Toolbar.tsx'
@@ -141,8 +142,10 @@ export default function PluginsSection() {
     setBusy(true)
     // Cascade full uninstall: detach the plugin from every using profile, then
     // remove the whole plugin from the store (frees the archive on Windows).
-    const res = await window.api.plugins.uninstall(name)
+    const res = await writeWithRunningConfirm(consent => window.api.plugins.uninstall(name, consent))
     setBusy(false)
+    // Declined: a live profile would have kept the files open. Nothing changed.
+    if (res === null) return
     if (!res.ok) { void message.error(apiErrorText(res)); setTarget(null); return }
     const detached = res.value.removed.length
     setTarget(null)
@@ -161,8 +164,12 @@ export default function PluginsSection() {
   // Deleting without that would leave a `file:` aimed at a directory that is gone.
   const uninstallVersion = async (name: string, version: string, detach = false): Promise<void> => {
     setBusy(true)
-    const res = await window.api.plugins.remove(name, version, detach ? { detach: true } : undefined)
+    const res = await writeWithRunningConfirm(consent => window.api.plugins.remove(name, version, {
+      ...(detach ? { detach: true } : {}),
+      ...consent,
+    }))
     setBusy(false)
+    if (res === null) return
     if (!res.ok) {
       if (res.code === 'store.versionInUse') {
         Modal.confirm({
@@ -190,8 +197,10 @@ export default function PluginsSection() {
   const detach = async (name: string, usage: PluginUsagePoint): Promise<void> => {
     const key = `${usage.dsh}·${usage.profile}`
     setDetaching(key)
-    const res = await window.api.plugins.detach(name, [{ dsh: usage.dsh, profile: usage.profile }])
+    const res = await writeWithRunningConfirm(consent =>
+      window.api.plugins.detach(name, [{ dsh: usage.dsh, profile: usage.profile }], consent))
     setDetaching('')
+    if (res === null) return
     if (!res.ok) { void message.error(apiErrorText(res)); return }
     void message.success(t('plugin.detachedOne', { name, profile: usage.profile }))
     const rows = await load()
@@ -208,8 +217,9 @@ export default function PluginsSection() {
       okButtonProps: { danger: true },
       onOk: async () => {
         setBusy(true)
-        const res = await window.api.plugins.remove(name)
+        const res = await writeWithRunningConfirm(consent => window.api.plugins.remove(name, undefined, consent))
         setBusy(false)
+        if (res === null) return
         if (!res.ok) void message.error(apiErrorText(res))
         else { void message.success(res.value.text); await Promise.all([load(), refreshStoreNames()]) }
       },

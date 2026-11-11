@@ -6,10 +6,11 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } 
 import { join, resolve } from 'node:path'
 import {
   addLocalPlugin, addPlugin, buildInstalledOverview, findInstalledDir, initStore, installIntoProfile, listPlugins,
-  listProfileScopes, readPluginReadme, removeArchivedVersion, removePlugin, removePluginFromProfiles,
+  listProfileScopes, pluginVersionDir, pluginsUsing, profilesPointingAt, readPluginReadme, removeArchivedVersion,
+  removePlugin, removePluginFromProfiles,
 } from '../../core/store/plugins.ts'
 import { listComboPlugins } from '../../core/store/combo.ts'
-import { dshScopes, pluginDir, profilesRootFor, type DshScope } from '../../core/profile/appState.ts'
+import { dshEntryById, dshScopes, pluginDir, profilesRootFor, type DshScope } from '../../core/profile/appState.ts'
 import { inlineRelativeImages } from '../../core/shared/app-util.ts'
 import { fetchPackageVersions, npmSearch } from '../../core/store/npm.ts'
 import { attachBindings, attachPluginSizes, attachRegistryLabels, versionSizes } from '../../core/store/overview.ts'
@@ -19,8 +20,10 @@ import { dialogFilter, dialogTitle } from '../../core/shared/dialog-text.ts'
 import { pathIdentifierInvalid, versionInvalid } from '../validate.ts'
 import { ctxOf } from '../ctxOf.ts'
 import { handle } from '../handle.ts'
+import { oneRunningRefusal, runningRefusal } from './guard.ts'
 import type {
-  ComboPlugin, InstalledOverviewRow, IpcResult, NpmSearchHit, PackageVersionInfo, PluginUsagePoint, RegistrySource,
+  ComboPlugin, InstalledOverviewRow, IpcResult, NpmSearchHit, PackageVersionInfo, PluginUsagePoint,
+  PluginWriteConsent, PluginWritePending, RegistrySource,
 } from '../../../shared/types.ts'
 
 /** Validate a candidate plugin dir and make it usable: create it, prove it is
@@ -122,12 +125,20 @@ export function registerStoreIpc(): void {
   // Point a profile (under an explicit dsh) at a locally-downloaded plugin.
   // `force` answers the confirmation the store asks for when the profile is on a
   // dev link: the caller has seen what it replaces and means it.
-  handle('plugins:installToProfile', async (_event, dshId: string, profile: string, pkg: string, version?: string, force?: boolean): Promise<IpcResult<{ text: string; needsConfirm?: 'replaces-dev-link' }>> => {
+  handle('plugins:installToProfile', async (
+    _event, dshId: string, profile: string, pkg: string, version?: string, force?: boolean,
+    consent?: PluginWriteConsent,
+  ): Promise<IpcResult<{ text: string } & PluginWritePending>> => {
     try {
       const ctx = ctxOf(dshId)
       if (ctx === null) return fail(E.dshNotFound)
       if (pathIdentifierInvalid(profile) || pathIdentifierInvalid(pkg)) return fail(E.nameInvalid)
       if (version !== undefined && versionInvalid(version)) return fail(E.nameInvalid)
+      // Installing rewrites the profile's manifest and runs pnpm inside it. A
+      // running process keeps the package bodies open and will not pick the
+      // result up, so this is the last moment the person can be told.
+      const refusal = oneRunningRefusal(dshEntryById(dshId)?.name ?? dshId, dshId, profile, consent)
+      if (refusal !== undefined) return { ok: true, value: { text: '', ...refusal } }
       const result = await installIntoProfile(profilesRootFor(ctx), profile, pkg, pluginDir(), {
         ...(version !== undefined ? { version } : {}),
         ...(force === true ? { force: true } : {}),
@@ -145,19 +156,30 @@ export function registerStoreIpc(): void {
   // names the profiles — deleting a version and detaching the profiles that
   // depend on it are two different acts, and only the first used to happen.
   handle('plugins:remove', async (
-    _event, name: string, version?: string, opts?: { detach?: boolean },
-  ): Promise<IpcResult<{ text: string; detached: PluginUsagePoint[] }>> => {
+    _event, name: string, version?: string, opts?: { detach?: boolean; acknowledgeRunning?: boolean },
+  ): Promise<IpcResult<{ text: string; detached: PluginUsagePoint[] } & PluginWritePending>> => {
     try {
       if (pathIdentifierInvalid(name)) return fail(E.nameInvalid)
       if (version !== undefined && versionInvalid(version)) return fail(E.nameInvalid)
+      const scopes = dshScopes()
+      // Only the branches that touch a profile are gated. A single-version delete
+      // that detaches nobody refuses on its own (`store.versionInUse`), and that
+      // refusal has to stay the first thing the person sees.
+      if (version === undefined || opts?.detach === true) {
+        const usages = version === undefined
+          ? pluginsUsing(scopes, name)
+          : profilesPointingAt(scopes, name, pluginVersionDir(pluginDir(), name, version))
+        const refusal = runningRefusal(usages, { acknowledgeRunning: opts?.acknowledgeRunning === true })
+        if (refusal !== undefined) return { ok: true, value: { text: '', detached: [], ...refusal } }
+      }
       if (version === undefined) {
         // Whole-plugin removal detaches every referencing profile by design.
-        const detached = await removePluginFromProfiles(dshScopes(), name)
+        const detached = await removePluginFromProfiles(scopes, name)
         const res = removePlugin(pluginDir(), name)
         if (!res.ok) return fail(E.storeOperationFailed, { detail: res.text })
         return { ok: true, value: { text: res.text, detached } }
       }
-      const res = await removeArchivedVersion(dshScopes(), pluginDir(), name, version, {
+      const res = await removeArchivedVersion(scopes, pluginDir(), name, version, {
         ...(opts?.detach === true ? { detach: true } : {}),
       })
       if (!res.ok) {
@@ -179,10 +201,15 @@ export function registerStoreIpc(): void {
   // (dropping the link dep + bundle layer + pnpm install frees the store archive
   // from junction-occupied Windows), then remove the whole plugin from the store.
   // Returns which profiles were detached so the renderer can surface them.
-  handle('plugins:uninstall', async (_event, name: string): Promise<IpcResult<{ removed: PluginUsagePoint[] }>> => {
+  handle('plugins:uninstall', async (
+    _event, name: string, consent?: PluginWriteConsent,
+  ): Promise<IpcResult<{ removed: PluginUsagePoint[] } & PluginWritePending>> => {
     try {
       if (pathIdentifierInvalid(name)) return fail(E.nameInvalid)
-      const removed = await removePluginFromProfiles(dshScopes(), name)
+      const scopes = dshScopes()
+      const refusal = runningRefusal(pluginsUsing(scopes, name), consent)
+      if (refusal !== undefined) return { ok: true, value: { removed: [], ...refusal } }
+      const removed = await removePluginFromProfiles(scopes, name)
       const res = removePlugin(pluginDir(), name)
       if (!res.ok) return fail(E.storeOperationFailed, { detail: res.text })
       return { ok: true, value: { removed } }
@@ -199,11 +226,15 @@ export function registerStoreIpc(): void {
   // UI hands back — carries the name and nothing else to address with.
   handle('plugins:detach', async (
     _event, name: string, targets?: { dsh: string; profile: string }[],
-  ): Promise<IpcResult<{ detached: PluginUsagePoint[] }>> => {
+    consent?: PluginWriteConsent,
+  ): Promise<IpcResult<{ detached: PluginUsagePoint[] } & PluginWritePending>> => {
     try {
       if (pathIdentifierInvalid(name)) return fail(E.nameInvalid)
       const scopes = dshScopes()
+      const usages = pluginsUsing(scopes, name)
       if (targets === undefined) {
+        const refusal = runningRefusal(usages, consent)
+        if (refusal !== undefined) return { ok: true, value: { detached: [], ...refusal } }
         return { ok: true, value: { detached: await removePluginFromProfiles(scopes, name) } }
       }
       const wanted = new Set<string>()
@@ -215,6 +246,8 @@ export function registerStoreIpc(): void {
         if (!list.includes(scope)) list.push(scope)
         wanted.add(`${scope.name}\u0000${raw.profile}`)
       }
+      const refusal = runningRefusal(usages.filter(u => wanted.has(`${u.dsh}\u0000${u.profile}`)), consent)
+      if (refusal !== undefined) return { ok: true, value: { detached: [], ...refusal } }
       const detached = await removePluginFromProfiles(list, name, {
         only: (dshName, profile) => wanted.has(`${dshName}\u0000${profile}`),
       })

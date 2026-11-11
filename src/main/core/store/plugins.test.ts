@@ -429,7 +429,7 @@ describe('buildInstalledOverview', () => {
     // template bundle in use but not in store → builtin
     const tpl = rows.find(r => r.name === 'tpl')!
     expect(tpl.builtin).toBe(true)
-    expect(tpl.usage).toEqual([{ dsh: 'dsh@d', dshVersion: 'd', profile: 'p1', version: '9.9.9' }])
+    expect(tpl.usage).toEqual([{ dsh: 'dsh@d', dshId: 'd', dshVersion: 'd', profile: 'p1', version: '9.9.9' }])
     // built-in template (in use, not in store) → sourced from the dsh harness.
     expect(tpl.sources).toEqual(['dsh'])
 
@@ -440,7 +440,7 @@ describe('buildInstalledOverview', () => {
     // here → its usage version stays undefined (signals "not applied yet"). It
     // carries its declared spec, which is what the tooltip names.
     expect(bundleA.usage).toEqual([{
-      dsh: 'dsh@d', dshVersion: 'd', profile: 'p1', version: undefined, spec: '^1',
+      dsh: 'dsh@d', dshId: 'd', dshVersion: 'd', profile: 'p1', version: undefined, spec: '^1',
     }])
     // no origin record → falls back to a generic "store" source.
     expect(bundleA.sources).toEqual(['store'])

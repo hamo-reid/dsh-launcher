@@ -101,9 +101,9 @@ describe('facetMatches', () => {
 
 describe('applyOverviewFilters', () => {
   const rows = [
-    row({ name: 'a', origin: 'npm', kind: 'bundle', provenances: ['store'], inStore: true, usage: [{ dsh: 'd', profile: 'p' }] }),
+    row({ name: 'a', origin: 'npm', kind: 'bundle', provenances: ['store'], inStore: true, usage: [{ dsh: 'd', dshId: 'd', profile: 'p' }] }),
     row({ name: 'b', origin: 'npm', kind: 'template', provenances: ['official'] }),
-    row({ name: 'c', origin: 'local', kind: 'dependency', provenances: ['store', 'official'], inStore: true, usage: [{ dsh: 'd', profile: 'q' }] }),
+    row({ name: 'c', origin: 'local', kind: 'dependency', provenances: ['store', 'official'], inStore: true, usage: [{ dsh: 'd', dshId: 'd', profile: 'q' }] }),
     row({ name: 'd', origin: 'github', kind: 'store-only', provenances: ['sub-bundle'], inStore: true }),
   ]
   const names = (list: InstalledOverviewRow[]): string[] => list.map(r => r.name)

@@ -3,14 +3,15 @@
  * the symlink/junction-safe tree deletion Windows needs) and detaching a plugin
  * from every profile that links into it, so the archive can actually be freed.
  */
-import { existsSync, lstatSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { runPnpm } from '../dsh/pnpm.ts'
 import { logger } from '../shared/logger.ts'
 import { pathWithin } from '../profile/name-guard.ts'
-import { pluginVersionDir, versionsRoot, type ProfileManifestShape } from './layout.ts'
+import { pluginVersionDir, versionsRoot } from './layout.ts'
 import { readDeps, readRef } from './refstate.ts'
 import { listBundleSubdepNames } from './subdeps.ts'
+import { localSpecPath, scanPluginUsages } from './usage.ts'
 import { profilesRoot, type DshScope } from '../profile/appState.ts'
 import type { PluginUsagePoint } from '../../../shared/types.ts'
 
@@ -91,67 +92,45 @@ function pruneEmptyScopes(from: string): void {
  * detach the profiles first. Returns the affected usage points.
  */
 export async function removePluginFromProfiles(
-  dshes: DshScope[], pkg: string, opts?: { only?: (home: string, profile: string) => boolean },
+  dshes: DshScope[], pkg: string, opts?: { only?: (dshName: string, profile: string) => boolean },
 ): Promise<PluginUsagePoint[]> {
   const affected: PluginUsagePoint[] = []
-  for (const dsh of dshes) {
-    const dir = profilesRoot(dsh.home)
-    if (!existsSync(dir)) continue
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue
-      if (opts?.only !== undefined && !opts.only(dsh.name, entry.name)) continue
-      const profileDirPath = join(dir, entry.name)
-      const manifestPath = join(profileDirPath, 'package.json')
-      if (!existsSync(manifestPath)) continue
-      let manifest: ProfileManifestShape
-      try {
-        manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
-      } catch {
-        continue
+  // Discovery is `scanPluginUsages`, the same predicate the "is it in use by a
+  // running profile" guards consult. Acting on a different set than the guard
+  // judged is how a refusal and a cascade end up disagreeing.
+  for (const item of scanPluginUsages(dshes, pkg, opts)) {
+    const { dir, manifest, spec, inBundles, nmStat } = item
+    const manifestPath = join(dir, 'package.json')
+    if (manifest.dependencies?.[pkg] !== undefined) delete manifest.dependencies[pkg]
+    // Also drop the sub-bundle `link:` deps this aggregate bundle pulled into the
+    // profile, so removing it leaves no orphaned links (the `pnpm install` below
+    // prunes the leftover junctions).
+    const localPath = localSpecPath(spec)
+    if (localPath !== undefined) {
+      for (const sub of listBundleSubdepNames(localPath)) {
+        if (manifest.dependencies?.[sub] !== undefined) delete manifest.dependencies[sub]
       }
-      const spec = manifest.dependencies?.[pkg]
-      const isLinked = typeof spec === 'string' && (spec.startsWith('link:') || spec.startsWith('file:'))
-      const bundles = manifest.dsh?.profile?.bundles
-      const inBundles = bundles !== undefined && bundles.includes(pkg)
-      const nmPkg = join(profileDirPath, 'node_modules', pkg)
-      // lstat-based existence: catches dangling junctions whose target is already
-      // gone (existsSync would report false for those, yet the link still pins
-      // the store archive and must be unlinked).
-      let nmSt
-      try { nmSt = lstatSync(nmPkg) } catch { /* absent */ }
-      const nmHasIt = nmSt !== undefined
-      // A profile counts as "using it" if it still declares the plugin OR its
-      // node_modules holds a leftover entry. The latter alone keeps the store
-      // archive occupied on Windows — even a manifest-cleared profile with a
-      // stale junction must be detached so the archive can actually be removed.
-      if (!isLinked && !inBundles && !nmHasIt) continue
-      if (manifest.dependencies?.[pkg] !== undefined) delete manifest.dependencies[pkg]
-      // Also drop the sub-bundle `link:` deps this aggregate bundle pulled into the
-      // profile, so removing it leaves no orphaned links (the `pnpm install` below
-      // prunes the leftover junctions).
-      if (isLinked && typeof spec === 'string') {
-        const pkgDir = spec.startsWith('file:') ? spec.slice('file:'.length) : spec.slice('link:'.length)
-        for (const sub of listBundleSubdepNames(pkgDir)) {
-          if (manifest.dependencies?.[sub] !== undefined) delete manifest.dependencies[sub]
-        }
-      }
-      if (inBundles) {
-        manifest.dsh = { ...manifest.dsh, profile: { ...manifest.dsh?.profile, bundles: bundles.filter(b => b !== pkg) } }
-      }
-      writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
-      // PHYSICALLY remove the plugin's folder here. A leftover junction must be
-      // unlinked directly (never recursed into), else it keeps pinning the store
-      // archive. A real directory is deleted via deleteTreePhysical (symlink-safe).
-      if (nmSt !== undefined) {
-        // isSymbolicLink() is true for a Windows junction too, but a bare rmSync
-        // on a junction throws ERR_FS_EISDIR — unlink (remove the link entry, do
-        // not follow it) is the only reliable path for both.
-        if (nmSt.isSymbolicLink()) unlinkSync(nmPkg)
-        else deleteTreePhysical(nmPkg)
-      }
-      await runPnpm(profileDirPath, ['install', '--config.confirmModulesPurge=false'])
-      affected.push({ dsh: dsh.name, dshVersion: dsh.version, profile: entry.name })
     }
+    if (inBundles) {
+      const bundles = manifest.dsh?.profile?.bundles ?? []
+      manifest.dsh = { ...manifest.dsh, profile: { ...manifest.dsh?.profile, bundles: bundles.filter(b => b !== pkg) } }
+    }
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
+    // PHYSICALLY remove the plugin's folder here. A leftover junction must be
+    // unlinked directly (never recursed into), else it keeps pinning the store
+    // archive. A real directory is deleted via deleteTreePhysical (symlink-safe).
+    const nmPkg = join(dir, 'node_modules', pkg)
+    if (nmStat !== undefined) {
+      // isSymbolicLink() is true for a Windows junction too, but a bare rmSync
+      // on a junction throws ERR_FS_EISDIR — unlink (remove the link entry, do
+      // not follow it) is the only reliable path for both.
+      if (nmStat.isSymbolicLink()) unlinkSync(nmPkg)
+      else deleteTreePhysical(nmPkg)
+    }
+    await runPnpm(dir, ['install', '--config.confirmModulesPurge=false'])
+    // The spec is gone now, so it is not part of what was detached.
+    const { dsh, dshId, dshVersion, profile } = item.usage
+    affected.push({ dsh, dshId, ...(dshVersion !== undefined ? { dshVersion } : {}), profile })
   }
   return affected
 }
@@ -197,7 +176,7 @@ export function profilesPointingAt(dshes: DshScope[], pkg: string, target: strin
       // A spec names the package BODY (`file:<version>/node_modules/<pkg>`), not the
       // version dir, so match the dir or anything inside it.
       if (ref.target !== undefined && pathWithin(wanted, ref.target)) {
-        found.push({ dsh: dsh.name, dshVersion: dsh.version, profile: entry.name, ...(ref.spec !== undefined ? { spec: ref.spec } : {}) })
+        found.push({ dsh: dsh.name, dshId: dsh.id, dshVersion: dsh.version, profile: entry.name, ...(ref.spec !== undefined ? { spec: ref.spec } : {}) })
       }
     }
   }

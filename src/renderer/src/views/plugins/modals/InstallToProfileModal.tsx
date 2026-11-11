@@ -8,8 +8,10 @@ import { useEffect, useState } from 'react'
 import { Modal, Select, message } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../../../lib/ipc.ts'
+import { askReplaceDevLink, askRunning } from '../../../lib/pluginWrite.ts'
 import FieldLabel from '../../../components/FieldLabel.tsx'
 import { MODAL } from '../../../theme.ts'
+import type { PluginWriteConsent } from '../../../../../shared/types.ts'
 
 // ── Install into a profile ─────────────────────────────────────────────────
 
@@ -41,34 +43,32 @@ export function InstallToProfileModal(p: InstallToProfileModalProps): JSX.Elemen
   const doInstall = async (): Promise<void> => {
     if (p.installPkg === null || installDsh === undefined || installProfile === undefined) { void message.warning(t('plugin.install.needBoth')); return }
     setInstalling(true)
-    const res = await window.api.plugins.installToProfile(installDsh, installProfile, p.installPkg, version)
-    setInstalling(false)
-    if (!res.ok) { void message.error(apiErrorText(res)); return }
-    // The profile may be on a dev link: the store answered with a question rather
-    // than doing it, and the answer decides whether the working copy is replaced.
-    if (res.value.needsConfirm !== undefined) {
-      Modal.confirm({
-        title: t('plugin.install.replaceDevTitle'),
-        content: res.value.text,
-        okText: t('plugin.install.replaceDevOk'),
-        cancelText: t('common.cancel'),
-        onOk: async () => {
-          const forced = await window.api.plugins.installToProfile(installDsh, installProfile, String(p.installPkg), version, true)
-          if (!forced.ok) { void message.error(apiErrorText(forced)); return }
-          void message.success(`${p.installPkg}${version !== undefined ? `@${version}` : ''} → ${installProfile}：${forced.value.text}`)
-          p.onClose()
-          setInstallDsh(undefined)
-          setInstallProfile(undefined)
-          await p.onDone()
-        },
-      })
+    // The store can refuse twice: a running profile first (it would keep the old
+    // package open), then a dev link (installing drops the working copy). Each
+    // answer becomes part of the retry, and the success path stays in one place.
+    let force = false
+    let consent: PluginWriteConsent | undefined
+    for (;;) {
+      const res = await window.api.plugins.installToProfile(installDsh, installProfile, p.installPkg, version, force, consent)
+      if (!res.ok) { setInstalling(false); void message.error(apiErrorText(res)); return }
+      if (res.value.needsConfirm === 'profiles-running') {
+        if (!await askRunning(res.value.profiles ?? [])) { setInstalling(false); return }
+        consent = { acknowledgeRunning: true }
+        continue
+      }
+      if (res.value.needsConfirm === 'replaces-dev-link') {
+        if (!await askReplaceDevLink(res.value.text)) { setInstalling(false); return }
+        force = true
+        continue
+      }
+      setInstalling(false)
+      void message.success(`${p.installPkg}${version !== undefined ? `@${version}` : ''} → ${installProfile}：${res.value.text}`)
+      p.onClose()
+      setInstallDsh(undefined)
+      setInstallProfile(undefined)
+      await p.onDone()
       return
     }
-    void message.success(`${p.installPkg}${version !== undefined ? `@${version}` : ''} → ${installProfile}：${res.value.text}`)
-    p.onClose()
-    setInstallDsh(undefined)
-    setInstallProfile(undefined)
-    await p.onDone()
   }
 
   const showVersionPicker = p.versions.length > 1

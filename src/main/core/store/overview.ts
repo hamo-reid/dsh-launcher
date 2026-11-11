@@ -278,7 +278,7 @@ export function buildInstalledOverview(dshes: DshScope[], storeDir: string): Ins
         // that separates a healthy profile from one whose archive was deleted.
         const ref = readRef(name, profileDirPath, depSpecs[name])
         row.usage.push({
-          dsh: dsh.name, dshVersion: dsh.version, profile,
+          dsh: dsh.name, dshId: dsh.id, dshVersion: dsh.version, profile,
           version: resolved,
           ...(ref.spec !== undefined ? { spec: ref.spec } : {}),
           ...(ref.broken ? { broken: true } : {}),

@@ -34,6 +34,8 @@ import type {
   IpcResult,
   AppUpdateInfo,
   PluginUsagePoint,
+  PluginWriteConsent,
+  PluginWritePending,
   MarketAnnotations,
   MarketListOpts,
   MarketPage,
@@ -285,20 +287,24 @@ const api = {
       ipcRenderer.invoke('plugins:add', source, name),
     addLocal: (): Promise<IpcResult<string>> =>
       ipcRenderer.invoke('plugins:addLocal'),
-    installToProfile: (dshId: string, profile: string, pkg: string, version?: string, force?: boolean): Promise<IpcResult<{ text: string; needsConfirm?: 'replaces-dev-link' }>> =>
-      ipcRenderer.invoke('plugins:installToProfile', dshId, profile, pkg, version, force),
+    installToProfile: (
+      dshId: string, profile: string, pkg: string, version?: string, force?: boolean, consent?: PluginWriteConsent,
+    ): Promise<IpcResult<{ text: string } & PluginWritePending>> =>
+      ipcRenderer.invoke('plugins:installToProfile', dshId, profile, pkg, version, force, consent),
     installOptions: (): Promise<IpcResult<{ id: string; name: string; version?: string; profiles: string[] }[]>> =>
       ipcRenderer.invoke('plugins:installOptions'),
     remove: (
-      name: string, version?: string, opts?: { detach?: boolean },
-    ): Promise<IpcResult<{ text: string; detached: PluginUsagePoint[] }>> =>
+      name: string, version?: string, opts?: { detach?: boolean; acknowledgeRunning?: boolean },
+    ): Promise<IpcResult<{ text: string; detached: PluginUsagePoint[] } & PluginWritePending>> =>
       ipcRenderer.invoke('plugins:remove', name, version, opts),
     detach: (
-      name: string, targets?: { dsh: string; profile: string }[],
-    ): Promise<IpcResult<{ detached: PluginUsagePoint[] }>> =>
-      ipcRenderer.invoke('plugins:detach', name, targets),
-    uninstall: (name: string): Promise<IpcResult<{ removed: PluginUsagePoint[] }>> =>
-      ipcRenderer.invoke('plugins:uninstall', name),
+      name: string, targets?: { dsh: string; profile: string }[], consent?: PluginWriteConsent,
+    ): Promise<IpcResult<{ detached: PluginUsagePoint[] } & PluginWritePending>> =>
+      ipcRenderer.invoke('plugins:detach', name, targets, consent),
+    uninstall: (
+      name: string, consent?: PluginWriteConsent,
+    ): Promise<IpcResult<{ removed: PluginUsagePoint[] } & PluginWritePending>> =>
+      ipcRenderer.invoke('plugins:uninstall', name, consent),
     listCombo: (dshId: string, profile: string): Promise<IpcResult<ComboPlugin[]>> =>
       ipcRenderer.invoke('plugins:listCombo', dshId, profile),
     overview: (): Promise<IpcResult<InstalledOverviewRow[]>> =>

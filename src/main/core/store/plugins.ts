@@ -11,6 +11,7 @@ export { needsStoreMigration, migrateStore } from './migration.ts'
 export {
   deleteTreePhysical, detachProfiles, profilesPointingAt, removeArchivedVersion, removePlugin, removePluginFromProfiles,
 } from './uninstall.ts'
+export { localSpecPath, pluginsUsing, scanPluginUsages } from './usage.ts'
 export {
   addLocalPlugin, addPlugin, installIntoProfile, installSource, packageNameFromSource, repairArchiveLinks,
 } from './install.ts'

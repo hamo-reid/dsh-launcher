@@ -7,7 +7,7 @@ import { brokenPluginNames, brokenRefs, describeBroken, isBrokenUsage } from './
 import type { InstalledOverviewRow, PluginUsagePoint } from '../../../shared/types.ts'
 
 const usage = (over: Partial<PluginUsagePoint> = {}): PluginUsagePoint =>
-  ({ dsh: 'dsh', profile: 'p1', ...over })
+  ({ dsh: 'dsh', dshId: 'dsh', profile: 'p1', ...over })
 
 const row = (name: string, usagePoints: PluginUsagePoint[]): InstalledOverviewRow =>
   ({ name, usage: usagePoints }) as InstalledOverviewRow

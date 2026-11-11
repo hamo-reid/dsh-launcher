@@ -35,6 +35,8 @@ import type {
   InsertConflict,
   IpcResult,
   PluginUsagePoint,
+  PluginWriteConsent,
+  PluginWritePending,
   MarketAnnotations,
   MarketListOpts,
   MarketPage,
@@ -299,22 +301,26 @@ export interface WindowApi {
     /** orce confirms replacing a dev link the profile is currently on; without
      * it the store answers 
 eedsConfirm instead of doing it. */
-    installToProfile: (dshId: string, profile: string, pkg: string, version?: string, force?: boolean) => Promise<IpcResult<{ text: string; needsConfirm?: 'replaces-dev-link' }>>
+    installToProfile: (
+      dshId: string, profile: string, pkg: string, version?: string, force?: boolean, consent?: PluginWriteConsent,
+    ) => Promise<IpcResult<{ text: string } & PluginWritePending>>
     /** Delete an archived version (or the whole plugin when `version` is omitted).
      * A single version is REFUSED while a profile still points at it — the failure
      * comes back as `store.versionInUse` carrying the profile list. Re-call with
      * `detach: true` to remove those references and delete in one step. */
     remove: (
-      name: string, version?: string, opts?: { detach?: boolean },
-    ) => Promise<IpcResult<{ text: string; detached: PluginUsagePoint[] }>>
+      name: string, version?: string, opts?: { detach?: boolean; acknowledgeRunning?: boolean },
+    ) => Promise<IpcResult<{ text: string; detached: PluginUsagePoint[] } & PluginWritePending>>
     /** Detach a plugin from profiles WITHOUT touching the library. No `targets` =
      * every referencing profile; given = only those. This is the one operation the
      * store page could not express before. */
-    detach: (name: string, targets?: { dsh: string; profile: string }[]) => Promise<IpcResult<{ detached: PluginUsagePoint[] }>>
+    detach: (
+      name: string, targets?: { dsh: string; profile: string }[], consent?: PluginWriteConsent,
+    ) => Promise<IpcResult<{ detached: PluginUsagePoint[] } & PluginWritePending>>
     /** Cascade full uninstall: detach the plugin from every using profile, then
      * remove the whole plugin (all versions) from the store. Returns the detached
      * usage points. */
-    uninstall: (name: string) => Promise<IpcResult<{ removed: PluginUsagePoint[] }>>
+    uninstall: (name: string, consent?: PluginWriteConsent) => Promise<IpcResult<{ removed: PluginUsagePoint[] } & PluginWritePending>>
     listCombo: (dshId: string, profile: string) => Promise<IpcResult<ComboPlugin[]>>
     overview: () => Promise<IpcResult<InstalledOverviewRow[]>>
     /** Size of each plugin (inode-dedup) — manual, triggered by the calc button. */
