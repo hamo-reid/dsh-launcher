@@ -17,7 +17,7 @@ import { listProfiles } from '../../core/profile/home.ts'
 import type { PluginWriteConsent, RunningProfileRef } from '../../../shared/types.ts'
 
 /** Profiles under this context's home that currently have a live dsh process. */
-export function runningProfilesFor(ctx: DshContext): RunningProfileRef[] {
+function runningProfilesFor(ctx: DshContext): RunningProfileRef[] {
   // The dsh NAME is what the confirmation shows; the id is what addresses a run.
   const dsh = dshEntryById(ctx.id)?.name ?? ctx.id
   return listProfiles(ctx)

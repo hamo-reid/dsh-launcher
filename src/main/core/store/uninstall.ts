@@ -1,14 +1,21 @@
 /**
- * Removing plugins from the store — physically deleting archived versions (with
- * the symlink/junction-safe tree deletion Windows needs) and detaching a plugin
- * from every profile that links into it, so the archive can actually be freed.
+ * Removing plugins from the store, and detaching a plugin from every profile that
+ * links into it so the archive can actually be freed.
+ *
+ * Removal is two steps, not one: the archive is moved into the store's stash
+ * ({@link retireTree}) and only then deleted, because on Windows a directory
+ * holding an open file can usually still be MOVED while the file itself cannot be
+ * removed. That is what keeps one locked native module from leaving a store that
+ * no longer lists a plugin but still holds half of it. Tree deletion itself is
+ * junction-aware ({@link deleteTreePhysical}) and reports what it could not
+ * remove instead of abandoning the rest.
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { runPnpm } from '../dsh/pnpm.ts'
 import { logger } from '../shared/logger.ts'
 import { pathWithin } from '../profile/name-guard.ts'
-import { pluginVersionDir, versionsRoot } from './layout.ts'
+import { pluginVersionDir, stashLeaf, storeTrashDir, versionsRoot } from './layout.ts'
 import { readDeps, readRef } from './refstate.ts'
 import { listBundleSubdepNames } from './subdeps.ts'
 import { localSpecPath, scanPluginUsages } from './usage.ts'
@@ -22,6 +29,11 @@ import type { PluginUsagePoint } from '../../../shared/types.ts'
  * "physically deleted" plugin stays in the overview). We instead unlink every
  * symlink/junction FIRST (removing the link entry itself, never following it
  * into a target), then delete the remaining files/dirs. Deterministic.
+ * @param dir - The tree to remove.
+ * @param failures - Accumulator for paths that could not be removed; a locked
+ *   file is reported here rather than thrown, so one of them cannot abandon the
+ *   rest of the tree.
+ * @returns The same list, so a caller can act on a partial delete.
  */
 export function deleteTreePhysical(dir: string, failures: string[] = []): string[] {
   let entries
@@ -55,13 +67,6 @@ export function deleteTreePhysical(dir: string, failures: string[] = []): string
   return failures
 }
 
-/** The store's stash area: bytes already out of the version namespace but not yet
- * deleted. It sits at the store ROOT (never under `archive/`), so the version
- * enumeration cannot mistake a leftover for an installed version. */
-function storeTrashDir(storeDir: string): string {
-  return join(storeDir, '.trash')
-}
-
 /**
  * Take an archive path out of the store's namespace, then delete its bytes.
  *
@@ -93,11 +98,6 @@ export function retireTree(
     return { moved: false, failures: [target] }
   }
   return { moved: true, failures: deleteTreePhysical(stash) }
-}
-
-/** A stash leaf name: the package (scoped names flattened) plus a discriminator. */
-function stashLeaf(pkg: string, suffix: string): string {
-  return `${pkg.replace(/[\\/]/g, '+')}@${suffix}`
 }
 
 /**
@@ -274,9 +274,11 @@ export function profilesPointingAt(dshes: DshScope[], pkg: string, target: strin
   return found
 }
 
-/** A profile's identity, for matching a usage point back to its directory. */
-function usageKey(home: string, profile: string): string {
-  return `${home}\u0000${profile}`
+/** A profile's identity, for matching a usage point back to its directory. The
+ * first half is the dsh NAME — that is what a usage point carries, and what
+ * {@link detachProfiles}'s selector is keyed by. */
+function usageKey(dshName: string, profile: string): string {
+  return `${dshName}\u0000${profile}`
 }
 
 /**
@@ -303,7 +305,7 @@ export async function removeArchivedVersion(
   }
   if (referencing.length > 0) {
     const only = new Set(referencing.map(u => usageKey(u.dsh, u.profile)))
-    await detachProfiles(dshes, pkg, (home, profile) => only.has(usageKey(home, profile)))
+    await detachProfiles(dshes, pkg, (dshName, profile) => only.has(usageKey(dshName, profile)))
   }
   const res = removePlugin(dir, pkg, version)
   return res.ok

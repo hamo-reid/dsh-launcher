@@ -132,7 +132,6 @@ export function registerStoreIpc(): void {
   })
 
   // Point a profile (under an explicit dsh) at a locally-downloaded plugin.
-  // Point a profile (under an explicit dsh) at a locally-downloaded plugin.
   // `force` answers the confirmation the store asks for when the profile is on a
   // dev link: the caller has seen what it replaces and means it.
   handle('plugins:installToProfile', async (

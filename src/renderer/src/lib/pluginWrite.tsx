@@ -18,7 +18,7 @@ import type {
 export type RunningAnswer = 'cancel' | 'continue' | 'stop'
 
 /** The live profiles a result stopped for, or `undefined` when it went through. */
-export function runningRefusalOf<T extends PluginWritePending>(
+function runningRefusalOf<T extends PluginWritePending>(
   result: IpcResult<T>,
 ): RunningProfileRef[] | undefined {
   if (!result.ok) return undefined
@@ -73,7 +73,7 @@ export function askRunning(profiles: readonly RunningProfileRef[]): Promise<Runn
 
 /** Ask about the machine-level patch layer: every running profile reloads as
  * soon as it lands, which is what the person has to be told. */
-export function askSharedLayer(profiles: readonly RunningProfileRef[]): Promise<RunningAnswer> {
+function askSharedLayer(profiles: readonly RunningProfileRef[]): Promise<RunningAnswer> {
   return ask(i18n.t('profile.shared.title'), i18n.t('profile.shared.body', { profiles: who(profiles) }))
 }
 

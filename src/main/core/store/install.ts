@@ -11,8 +11,8 @@ import AdmZip from 'adm-zip'
 import { PNPM_WORKSPACE_YAML, runPnpm, type PnpmResult } from '../dsh/pnpm.ts'
 import { logger } from '../shared/logger.ts'
 import {
-  archivedPluginNames, initStore, latestStoreVersion, pluginVersionDir, readVersion, storeVersions,
-  versionStagingDir, versionsRoot, type ProfileManifestShape,
+  archivedPluginNames, initStore, latestStoreVersion, pluginVersionDir, readVersion, stashLeaf, storeTrashDir,
+  storeVersions, versionStagingDir, versionsRoot, type ProfileManifestShape,
 } from './layout.ts'
 import { bindingOf, devDirKey } from './binding.ts'
 import { listDevPlugins } from './dev.ts'
@@ -316,8 +316,8 @@ export async function installSource(
     // dir under `archive/<name>/` that holds a package body — a sibling would be
     // read as a version of its own. It is one flat leaf, removed on success, so
     // nothing accumulates.
-    const stash = join(storeDir, '.trash', `${name.replace(/[\\/]/g, '+')}@${version}`)
-    mkdirSync(dirname(stash), { recursive: true })
+    const stash = join(storeTrashDir(storeDir), stashLeaf(name, version))
+    mkdirSync(storeTrashDir(storeDir), { recursive: true })
     rmSync(stash, { recursive: true, force: true })
     try {
       renameSync(dest, stash)

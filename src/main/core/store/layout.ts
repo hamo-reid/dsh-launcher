@@ -112,6 +112,25 @@ export function installedStoreVersion(storeDir: string, name: string): string | 
   return latestStoreVersion(storeDir, name) ?? readVersion(join(storeDir, 'node_modules', name))
 }
 
+/** The store's retire area: bytes already OUT of the version namespace but not yet
+ * deleted — a replaced archive, or a version being removed.
+ *
+ * It sits at the store ROOT and never under `archive/`, because
+ * {@link storeVersions} enumerates every directory under `archive/<name>/` that
+ * holds a package body: a leftover there would be read as a version of its own.
+ * Both places that park bytes (replace-during-install, remove) name their leaf
+ * through {@link stashLeaf}, so the area has one shape. */
+export function storeTrashDir(storeDir: string): string {
+  return join(storeDir, '.trash')
+}
+
+/** One leaf inside {@link storeTrashDir}: the package with its scope flattened
+ * (`@me/plugin` stays a single path segment) plus a caller-chosen
+ * discriminator, which is what keeps two retirements from colliding. */
+export function stashLeaf(pkg: string, suffix: string): string {
+  return `${pkg.replace(/[\\/]/g, '+')}@${suffix}`
+}
+
 /** Ensure the store directory is a pnpm project with an empty manifest. */
 export function initStore(dir: string): void {
   logger.debug(`plugin store ensured: ${dir}`)

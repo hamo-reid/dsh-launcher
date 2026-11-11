@@ -159,17 +159,15 @@ export interface RunningProfileRef {
  * has a live dsh process; stop it, or answer `acknowledgeRunning` to go on. */
 export type PluginWriteConfirm = 'replaces-dev-link' | 'profiles-running'
 
-/** The refusal fields a plugin write carries. Nothing was written. */
-export interface PluginWriteRefusal {
-  needsConfirm: PluginWriteConfirm
+/** The refusal fields a plugin write may carry. Present only when the write
+ * stopped for a question and NOTHING was written; the payload also carries its
+ * empty result arrays, so a caller never has to tell "refused" from "nothing
+ * affected". */
+export interface PluginWritePending {
+  needsConfirm?: PluginWriteConfirm
   /** Set for `profiles-running`: which live profiles the write would affect. */
   profiles?: RunningProfileRef[]
 }
-
-/** The optional refusal fields a plugin write may carry. Present only when the
- * write stopped for a question; the payload also carries the empty result arrays
- * so a caller never has to distinguish "refused" from "nothing affected". */
-export type PluginWritePending = Partial<PluginWriteRefusal>
 
 /** What a guarded patch-layer write answers with. `written: false` means the
  * write stopped for a question and nothing changed. */

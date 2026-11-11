@@ -8,11 +8,14 @@ export type { DshScope } from '../profile/appState.ts'
 
 export { initStore, installedStoreVersion, latestStoreVersion, pluginVersionDir, storeVersions } from './layout.ts'
 export { needsStoreMigration, migrateStore } from './migration.ts'
+// `detachProfiles` and `retireTree` stay inside this directory: the first is how
+// `removeArchivedVersion` names a selective detach for its own call site, the
+// second is the step `removePlugin` builds on. Neither is a facade entry point.
 export {
-  deleteTreePhysical, detachProfiles, profilesPointingAt, removeArchivedVersion, removePlugin, removePluginFromProfiles,
-  retireTree, sweepStoreTrash,
+  deleteTreePhysical, profilesPointingAt, removeArchivedVersion, removePlugin, removePluginFromProfiles,
+  sweepStoreTrash,
 } from './uninstall.ts'
-export { localSpecPath, pluginsUsing, scanPluginUsages } from './usage.ts'
+export { pluginsUsing } from './usage.ts'
 export {
   addLocalPlugin, addPlugin, installIntoProfile, installSource, packageNameFromSource, repairArchiveLinks,
 } from './install.ts'
