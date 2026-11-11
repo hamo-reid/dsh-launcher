@@ -1,5 +1,5 @@
 /** Editing the patch rows themselves: add, remove, copy from a bundle, and set a row's config body. */
-
+
 
 import { shell } from 'electron'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
