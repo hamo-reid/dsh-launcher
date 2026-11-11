@@ -3,7 +3,7 @@
  * the symlink/junction-safe tree deletion Windows needs) and detaching a plugin
  * from every profile that links into it, so the archive can actually be freed.
  */
-import { existsSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { runPnpm } from '../dsh/pnpm.ts'
 import { logger } from '../shared/logger.ts'
@@ -23,28 +23,102 @@ import type { PluginUsagePoint } from '../../../shared/types.ts'
  * symlink/junction FIRST (removing the link entry itself, never following it
  * into a target), then delete the remaining files/dirs. Deterministic.
  */
-export function deleteTreePhysical(dir: string): void {
+export function deleteTreePhysical(dir: string, failures: string[] = []): string[] {
   let entries
   try {
     entries = readdirSync(dir, { withFileTypes: true })
   } catch {
-    rmSync(dir, { recursive: true, force: true })
-    return
+    try { rmSync(dir, { recursive: true, force: true }) } catch { failures.push(dir) }
+    return failures
   }
   for (const entry of entries) {
     const full = join(dir, entry.name)
-    if (entry.isSymbolicLink()) {
-      // unlink the link itself (stop it from pinning the tree / following into a
-      // target) — never recurse into what it points at. Must use unlinkSync, not
-      // rmSync: a bare rmSync on a junction throws ERR_FS_EISDIR on Windows.
-      unlinkSync(full)
-    } else if (entry.isDirectory()) {
-      deleteTreePhysical(full)
-    } else {
-      rmSync(full, { force: true })
+    // A path that cannot be removed is COLLECTED, never thrown: one locked file
+    // must not abandon the rest of the tree half-deleted. The caller decides what
+    // a leftover means; on Windows it usually means a process still holds it.
+    try {
+      if (entry.isSymbolicLink()) {
+        // unlink the link itself (stop it from pinning the tree / following into a
+        // target) — never recurse into what it points at. Must use unlinkSync, not
+        // rmSync: a bare rmSync on a junction throws ERR_FS_EISDIR on Windows.
+        unlinkSync(full)
+      } else if (entry.isDirectory()) {
+        deleteTreePhysical(full, failures)
+      } else {
+        rmSync(full, { force: true })
+      }
+    } catch {
+      failures.push(full)
     }
   }
-  rmSync(dir, { recursive: true, force: true })
+  try { rmSync(dir, { recursive: true, force: true }) } catch { failures.push(dir) }
+  return failures
+}
+
+/** The store's stash area: bytes already out of the version namespace but not yet
+ * deleted. It sits at the store ROOT (never under `archive/`), so the version
+ * enumeration cannot mistake a leftover for an installed version. */
+function storeTrashDir(storeDir: string): string {
+  return join(storeDir, '.trash')
+}
+
+/**
+ * Take an archive path out of the store's namespace, then delete its bytes.
+ *
+ * A rename and a recursive delete differ on Windows in exactly the way that
+ * matters: a directory holding an open file can usually still be MOVED, while the
+ * file itself cannot be removed. Moving first means the version is already gone
+ * from the version enumeration (which only reads `archive/`) before a single byte
+ * is deleted — so a locked file leaves a reclaimable leftover in the stash instead
+ * of a half-deleted archive that still reads as installed.
+ * @param storeDir - The store root.
+ * @param target - The archive path to retire (a version dir or a whole plugin dir).
+ * @param leaf - Stash name; unique per call so two removals never collide.
+ * @returns `moved` is false when the move itself was refused — the archive is
+ *   then left exactly as it was, because a store that refused to change beats a
+ *   broken one. `failures` names what the delete could not reclaim.
+ */
+export function retireTree(
+  storeDir: string, target: string, leaf: string,
+): { moved: boolean; failures: string[] } {
+  const stash = join(storeTrashDir(storeDir), leaf)
+  try {
+    // Preparing the stash is part of "can this be retired at all": a store whose
+    // stash cannot be created must report the refusal, not throw from a delete.
+    mkdirSync(storeTrashDir(storeDir), { recursive: true })
+    rmSync(stash, { recursive: true, force: true })
+    renameSync(target, stash)
+  } catch (error) {
+    logger.warn(`plugin store: could not move ${target} aside: ${error instanceof Error ? error.message : String(error)}`)
+    return { moved: false, failures: [target] }
+  }
+  return { moved: true, failures: deleteTreePhysical(stash) }
+}
+
+/** A stash leaf name: the package (scoped names flattened) plus a discriminator. */
+function stashLeaf(pkg: string, suffix: string): string {
+  return `${pkg.replace(/[\\/]/g, '+')}@${suffix}`
+}
+
+/**
+ * Retry the stashed leftovers of an earlier removal. Runs at startup: the process
+ * that held a file open has usually exited by then, so what could not be deleted
+ * during a live session can be now. Best effort — a leftover is invisible to the
+ * overview, so failing again costs disk and nothing else.
+ * @param storeDir - The store root; `''` is a no-op.
+ */
+export function sweepStoreTrash(storeDir: string): void {
+  if (storeDir === '') return
+  const trash = storeTrashDir(storeDir)
+  if (!existsSync(trash)) return
+  for (const entry of readdirSync(trash)) {
+    const failures = deleteTreePhysical(join(trash, entry))
+    if (failures.length === 0) logger.info(`plugin store: reclaimed stashed ${entry}`)
+    else logger.warn(`plugin store: ${entry} is still held open (${failures.length} path(s))`)
+  }
+  try {
+    if (readdirSync(trash).length === 0) rmSync(trash, { recursive: true, force: true })
+  } catch { /* still in use; the next start retries */ }
 }
 
 /** True when `name` still exists in the legacy top-level layout. Shared with the
@@ -200,7 +274,7 @@ function usageKey(home: string, profile: string): string {
  */
 export async function removeArchivedVersion(
   dshes: DshScope[], dir: string, pkg: string, version: string, opts?: { detach?: boolean },
-): Promise<{ ok: boolean; text: string; blockedBy?: PluginUsagePoint[] }> {
+): Promise<{ ok: boolean; text: string; blockedBy?: PluginUsagePoint[]; locked?: true }> {
   if (dir === '') return { ok: false, text: '未配置插件保存位置 —— 请在「设置」中指定' }
   if (version === '.' || version === '..') return { ok: false, text: `非法版本号：${version}` }
   const target = pluginVersionDir(dir, pkg, version)
@@ -225,7 +299,9 @@ export async function removeArchivedVersion(
  *
  * The single-version form has a guard the whole-plugin form does not need — see
  * `removeArchivedVersion`, which is what a delete should go through. */
-export function removePlugin(dir: string, name: string, version?: string): { ok: boolean; text: string } {
+export function removePlugin(
+  dir: string, name: string, version?: string,
+): { ok: boolean; text: string; locked?: true } {
   if (dir === '') return { ok: false, text: '未配置插件保存位置 —— 请在「设置」中指定' }
   // Defense in depth: `.`/`..` pass the (character-class) version validation but
   // join OUT of the version dir — `..` would resolve to `archive/` itself and
@@ -234,33 +310,28 @@ export function removePlugin(dir: string, name: string, version?: string): { ok:
   const pRoot = join(versionsRoot(dir), name)
   if (version === undefined) {
     if (!existsSync(pRoot) && !isLegacyPkg(dir, name)) return { ok: false, text: `${name} 未在插件库中` }
-    // PHYSICALLY delete the whole archived dir — the overview scans folders, so
-    // any leftover keeps the plugin visible. Windows can still hold a junction'd
-    // file open for a brief beat after the profile link is released, so retry.
-    try {
-      deleteTreePhysical(pRoot)
-    } catch (error) {
-      return { ok: false, text: `${name} 删除失败（目录被占用）：${error instanceof Error ? error.message : String(error)}` }
-    }
+    // Retire the whole archived dir. Moving it aside first is what keeps a locked
+    // file from leaving a half-deleted archive the overview still lists.
+    const { moved, failures } = retireTree(dir, pRoot, stashLeaf(name, `all.${Date.now()}`))
+    if (!moved) return { ok: false, locked: true, text: `${name} 的归档目录被占用，无法移出` }
     pruneEmptyScopes(dirname(pRoot))
     legacyRemove(dir, name)
-    if (existsSync(pRoot)) {
-      // A residual archive dir means the physical delete did not fully land — do
-      // not pretend otherwise; the overview will still show the plugin.
-      logger.warn(`plugin store: archive dir still present after remove for ${name}`)
-      return { ok: false, text: `${name} 的归档目录仍残留（可能被 profile 引用占用），请先在 profile 中移除其引用后重试` }
-    }
     logger.info(`plugin store remove: ${name}`)
-    return { ok: true, text: `已删除 ${name}` }
+    return failures.length === 0
+      ? { ok: true, text: `已删除 ${name}` }
+      : { ok: true, text: `已移除 ${name}；${failures.length} 个文件仍被占用，已移入 .trash 待下次启动重试` }
   }
   const tgt = pluginVersionDir(dir, name, version)
   if (!existsSync(tgt)) return { ok: false, text: `${name}@${version} 未在插件库中` }
-  deleteTreePhysical(tgt)
+  const { moved, failures } = retireTree(dir, tgt, stashLeaf(name, `${version}.${Date.now()}`))
+  if (!moved) return { ok: false, locked: true, text: `${name}@${version} 的归档目录被占用，无法移出` }
   // Drop the plugin dir once its last version is gone.
   if (existsSync(pRoot) && readdirSync(pRoot).filter(e => e !== '.staging').length === 0) {
     deleteTreePhysical(pRoot)
   }
   pruneEmptyScopes(dirname(pRoot))
   logger.info(`plugin store remove: ${name}@${version}`)
-  return { ok: true, text: `已删除 ${name}@${version}` }
+  return failures.length === 0
+    ? { ok: true, text: `已删除 ${name}@${version}` }
+    : { ok: true, text: `已移除 ${name}@${version}；${failures.length} 个文件仍被占用，已移入 .trash 待下次启动重试` }
 }

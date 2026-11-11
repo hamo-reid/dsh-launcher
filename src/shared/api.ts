@@ -286,6 +286,9 @@ export interface WindowApi {
     start: (profile: string, mode: RunMode | undefined, options: LaunchOptions | undefined, dshId: string) => Promise<IpcResult<{ id: string }>>
     /** Stop one run by id. */
     stop: (id: string) => Promise<IpcResult<boolean>>
+    /** Stop every run of one (dsh, profile), for a caller that knows the profile
+     * is in the way but not which run id it is. */
+    stopProfile: (dshId: string, profile: string) => Promise<IpcResult<{ stopped: number }>>
     /** Snapshot of every active run (no logs; fetch via `logs`). */
     list: () => Promise<IpcResult<RunInfo[]>>
     /** Full buffered output of one run. */

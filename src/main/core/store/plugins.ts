@@ -10,6 +10,7 @@ export { initStore, installedStoreVersion, latestStoreVersion, pluginVersionDir,
 export { needsStoreMigration, migrateStore } from './migration.ts'
 export {
   deleteTreePhysical, detachProfiles, profilesPointingAt, removeArchivedVersion, removePlugin, removePluginFromProfiles,
+  retireTree, sweepStoreTrash,
 } from './uninstall.ts'
 export { localSpecPath, pluginsUsing, scanPluginUsages } from './usage.ts'
 export {

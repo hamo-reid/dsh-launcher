@@ -351,6 +351,16 @@ export function registerRunIpc(): void {
     return { ok: true, value: true }
   })
 
+  // Stop every run of one (dsh, profile). Addressed by identity rather than by
+  // run id so a caller that only knows WHICH profile is in the way — the plugin
+  // write that has to get past it — can clear it without first listing runs.
+  handle('run:stopProfile', (_event, dshId: string, profile: string): IpcResult<{ stopped: number }> => {
+    const ids = [...runs.values()].filter(run => run.dshId === dshId && run.profile === profile).map(run => run.id)
+    const stopped = ids.filter(id => stopRun(id)).length
+    if (stopped === 0) return fail(E.runNotRunning, { profile })
+    return { ok: true, value: { stopped } }
+  })
+
   handle('run:list', (): IpcResult<RunInfo[]> => {
     return { ok: true, value: listRuns() }
   })

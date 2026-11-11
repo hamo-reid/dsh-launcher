@@ -30,7 +30,7 @@ import {
 import { configureAppState, pluginDir } from './core/profile/appState.ts'
 import { migrateLaunchConfigKeys } from './core/profile/launch-config.ts'
 import { configurePnpmRegistryEnv, configurePnpmStore } from './core/dsh/pnpm.ts'
-import { repairArchiveLinks } from './core/store/plugins.ts'
+import { repairArchiveLinks, sweepStoreTrash } from './core/store/plugins.ts'
 import { applyRegistryConfig } from './core/store/registry-config.ts'
 import { setRegistryTokenCipher } from './core/store/registry-auth.ts'
 import { initGithubAuth, setTokenCipher } from './core/github/auth.ts'
@@ -405,6 +405,11 @@ app.whenReady().then(async () => {
   // Fire-and-forget: a clean store is a read-only no-op; the IPC path reads live
   // disk, so whatever succeeds here is already visible by the time the UI asks.
   repairArchiveLinks(pluginDir()).catch(error => logger.warn(`store relink failed: ${String(error)}`))
+
+  // Reclaim what a previous session could not delete because a running profile held
+  // it open. Synchronous and best-effort: a locked file just stays for next time,
+  // and the version it belonged to is already out of the store's namespace.
+  sweepStoreTrash(pluginDir())
 
   registerIpc()
   createWindow()

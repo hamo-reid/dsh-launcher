@@ -37,6 +37,7 @@ export const E = {
   storeInstallFailed: 'store.installFailed',
   storeOperationFailed: 'store.operationFailed',
   storeVersionInUse: 'store.versionInUse',
+  storeFileLocked: 'store.fileLocked',
   pluginNotInstalled: 'plugin.notInstalled',
   // launcher data root
   dataRootBusy: 'dataRoot.busy',

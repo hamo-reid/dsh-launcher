@@ -20,7 +20,7 @@ import { dialogFilter, dialogTitle } from '../../core/shared/dialog-text.ts'
 import { pathIdentifierInvalid, versionInvalid } from '../validate.ts'
 import { ctxOf } from '../ctxOf.ts'
 import { handle } from '../handle.ts'
-import { oneRunningRefusal, runningRefusal } from './guard.ts'
+import { oneRunningRefusal, runningAmong, runningRefusal } from './guard.ts'
 import type {
   ComboPlugin, InstalledOverviewRow, IpcResult, NpmSearchHit, PackageVersionInfo, PluginUsagePoint,
   PluginWriteConsent, PluginWritePending, RegistrySource,
@@ -62,6 +62,13 @@ export function ensurePluginStore(dir: string): IpcResult<string> {
   } catch (error) {
     return fail(E.storeUnusable, { detail: String(error) })
   }
+}
+
+/** A parenthetical naming the live profiles that would hold a plugin's files
+ * open. Empty when none is running, so the message stays a plain refusal. */
+function runningHint(scopes: DshScope[], pkg: string): string {
+  const busy = runningAmong(pluginsUsing(scopes, pkg))
+  return busy.length === 0 ? '' : `（${busy.map(u => `${u.dsh}·${u.profile}`).join('、')} 正在运行）`
 }
 
 export function registerStoreIpc(): void {
@@ -176,7 +183,13 @@ export function registerStoreIpc(): void {
         // Whole-plugin removal detaches every referencing profile by design.
         const detached = await removePluginFromProfiles(scopes, name)
         const res = removePlugin(pluginDir(), name)
-        if (!res.ok) return fail(E.storeOperationFailed, { detail: res.text })
+        if (!res.ok) {
+          // A store that refused to move the archive aside is not an "operation
+          // failed": the files are held open, and who holds them is the answer.
+          return res.locked === true
+            ? fail(E.storeFileLocked, { name, by: runningHint(scopes, name) })
+            : fail(E.storeOperationFailed, { detail: res.text })
+        }
         return { ok: true, value: { text: res.text, detached } }
       }
       const res = await removeArchivedVersion(scopes, pluginDir(), name, version, {
@@ -187,8 +200,11 @@ export function registerStoreIpc(): void {
         // needs to see WHO holds the version, then choose. It carries its own code
         // so the renderer can offer "detach those and delete" rather than
         // showing a dead end.
-        return res.blockedBy !== undefined
-          ? fail(E.storeVersionInUse, { name, version, profiles: res.blockedBy.map(u => `${u.dsh}·${u.profile}`).join('、') })
+        if (res.blockedBy !== undefined) {
+          return fail(E.storeVersionInUse, { name, version, profiles: res.blockedBy.map(u => `${u.dsh}·${u.profile}`).join('、') })
+        }
+        return res.locked === true
+          ? fail(E.storeFileLocked, { name: `${name}@${version}`, by: runningHint(scopes, name) })
           : fail(E.storeOperationFailed, { detail: res.text })
       }
       return { ok: true, value: { text: res.text, detached: res.blockedBy ?? [] } }
@@ -211,7 +227,11 @@ export function registerStoreIpc(): void {
       if (refusal !== undefined) return { ok: true, value: { removed: [], ...refusal } }
       const removed = await removePluginFromProfiles(scopes, name)
       const res = removePlugin(pluginDir(), name)
-      if (!res.ok) return fail(E.storeOperationFailed, { detail: res.text })
+      if (!res.ok) {
+        return res.locked === true
+          ? fail(E.storeFileLocked, { name, by: runningHint(scopes, name) })
+          : fail(E.storeOperationFailed, { detail: res.text })
+      }
       return { ok: true, value: { removed } }
     } catch (error) {
       return failFromError(error)

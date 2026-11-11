@@ -8,7 +8,7 @@ import { useEffect, useState } from 'react'
 import { Modal, Select, message } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../../../lib/ipc.ts'
-import { askReplaceDevLink, askRunning } from '../../../lib/pluginWrite.ts'
+import { askReplaceDevLink, askRunning } from '../../../lib/pluginWrite.tsx'
 import FieldLabel from '../../../components/FieldLabel.tsx'
 import { MODAL } from '../../../theme.ts'
 import type { PluginWriteConsent } from '../../../../../shared/types.ts'
@@ -52,7 +52,13 @@ export function InstallToProfileModal(p: InstallToProfileModalProps): JSX.Elemen
       const res = await window.api.plugins.installToProfile(installDsh, installProfile, p.installPkg, version, force, consent)
       if (!res.ok) { setInstalling(false); void message.error(apiErrorText(res)); return }
       if (res.value.needsConfirm === 'profiles-running') {
-        if (!await askRunning(res.value.profiles ?? [])) { setInstalling(false); return }
+        const profiles = res.value.profiles ?? []
+        const answer = await askRunning(profiles)
+        if (answer === 'cancel') { setInstalling(false); return }
+        // Stopping first is the answer that makes the install actually apply.
+        if (answer === 'stop') {
+          for (const item of profiles) await window.api.run.stopProfile(item.dshId, item.profile)
+        }
         consent = { acknowledgeRunning: true }
         continue
       }

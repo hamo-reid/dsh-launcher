@@ -10,7 +10,7 @@ import {
 import type { DragEndEvent } from '@dnd-kit/core'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
-import { writeWithSharedLayerConfirm } from '../lib/pluginWrite.ts'
+import { writeWithSharedLayerConfirm } from '../lib/pluginWrite.tsx'
 import { issueCount, lastSeenByRow, layerLabel, layerRowCount, type LayerLabel } from '../lib/profileLayers.ts'
 import { RenameProfileModal, TransferPatchModal } from './profile-detail/ProfileDialogs.tsx'
 import LayerDetail from './profile-detail/LayerDetail.tsx'

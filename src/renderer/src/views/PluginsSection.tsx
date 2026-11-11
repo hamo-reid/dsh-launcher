@@ -4,7 +4,7 @@ import {
 } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
-import { writeWithRunningConfirm } from '../lib/pluginWrite.ts'
+import { writeWithRunningConfirm } from '../lib/pluginWrite.tsx'
 import AppShell from '../components/AppShell.tsx'
 import Panel from '../components/Panel.tsx'
 import Toolbar from '../components/Toolbar.tsx'

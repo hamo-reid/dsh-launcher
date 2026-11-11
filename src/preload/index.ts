@@ -271,6 +271,8 @@ const api = {
       ipcRenderer.invoke('run:start', profile, mode, options, dshId),
     stop: (id: string): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('run:stop', id),
+    stopProfile: (dshId: string, profile: string): Promise<IpcResult<{ stopped: number }>> =>
+      ipcRenderer.invoke('run:stopProfile', dshId, profile),
     list: (): Promise<IpcResult<RunInfo[]>> =>
       ipcRenderer.invoke('run:list'),
     logs: (id: string): Promise<IpcResult<string>> =>
