@@ -64,17 +64,6 @@ export function writeHomePatch(ctx: DshContext, text: string): void {
   writePatchFile(homePatchPath(ctx), text)
 }
 
-/** Read one profile's own patch layer. `text` is `''` when it does not exist. */
-export function readProfilePatch(ctx: DshContext, name: string): { text: string; path: string } {
-  const path = profilePatchPath(ctx, name)
-  return { text: existsSync(path) ? readFileSync(path, 'utf8') : '', path }
-}
-
-/** Write one profile's own patch layer after YAML validation, then verify. */
-export function writeProfilePatch(ctx: DshContext, name: string, text: string): void {
-  writePatchFile(profilePatchPath(ctx, name), text)
-}
-
 /** One profile's directory. */
 export function profileDir(ctx: DshContext, name: string): string {
   return join(profilesDir(ctx), name)

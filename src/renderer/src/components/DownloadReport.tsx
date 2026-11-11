@@ -73,12 +73,6 @@ const ADVICE_OF: Record<string, string> = {
   installBuildTools: 'download.advice.installBuildTools',
 }
 
-/** Resolve one advice key to its i18n key, or undefined when unknown (a report
- * written by a newer main process must not break the view). */
-export function adviceKeyOf(key: string): string | undefined {
-  return ADVICE_OF[key]
-}
-
 /**
  * Localize a headline that came from the main process.
  *
