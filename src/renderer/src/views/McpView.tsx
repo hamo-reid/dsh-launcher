@@ -16,6 +16,7 @@ import { Button, Pagination, Segmented, Skeleton, Space, theme, message } from '
 import { KeyOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
+import { writeWithSharedLayerConfirm } from '../lib/pluginWrite.ts'
 import EmptyState from '../components/EmptyState.tsx'
 import Panel from '../components/Panel.tsx'
 import SearchInput from '../components/SearchInput.tsx'
@@ -132,8 +133,11 @@ export default function McpView(): JSX.Element {
   const apply = async (target: McpApplyTarget): Promise<void> => {
     if (applyEntry === null) return
     setBusy('apply')
-    const r = await window.api.ext.libMcpApply(applyEntry.serverName, target)
+    // A home-layer target is machine-level; that write asks before it lands.
+    const r = await writeWithSharedLayerConfirm(consent =>
+      window.api.ext.libMcpApply(applyEntry.serverName, target, consent))
     setBusy('')
+    if (r === null) return
     if (!r.ok) { void message.error(apiErrorText(r)); return }
     void message.success(t('ext.mcp.applied', { name: applyEntry.serverName }))
     setApplyEntry(null)

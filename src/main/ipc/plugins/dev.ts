@@ -39,7 +39,7 @@ function devHostTarget(dshId: unknown): { ctx: DshContext; id: string; name: str
   if (scope === undefined) return null
   const version = scope.version ?? ''
   return {
-    ctx: { execPath: scope.execPath ?? '', home: scope.home, version },
+    ctx: { id: scope.id, execPath: scope.execPath ?? '', home: scope.home, version },
     id: scope.id, name: scope.name, version,
   }
 }

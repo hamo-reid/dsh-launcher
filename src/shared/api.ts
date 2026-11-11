@@ -34,6 +34,7 @@ import type {
   InstalledPlugin,
   InsertConflict,
   IpcResult,
+  LayerWrite,
   PluginUsagePoint,
   PluginWriteConsent,
   PluginWritePending,
@@ -141,10 +142,12 @@ export interface WindowApi {
   openPatchSource: (dshId: string, name: string) => Promise<IpcResult<boolean>>
 
   home: {
-    setDisabled: (dshId: string, id: string, disabled: boolean) => Promise<IpcResult<boolean>>
+    setDisabled: (
+      dshId: string, id: string, disabled: boolean, consent?: PluginWriteConsent,
+    ) => Promise<IpcResult<{ disabled: boolean } & PluginWritePending>>
     /** The home patch layer's raw text (source mode). */
     readPatch: (dshId: string) => Promise<IpcResult<{ text: string; path: string }>>
-    writePatch: (dshId: string, text: string) => Promise<IpcResult<boolean>>
+    writePatch: (dshId: string, text: string, consent?: PluginWriteConsent) => Promise<IpcResult<LayerWrite>>
   }
 
   /** Agent presets: ONE profile's roster, with each preset graded against that
@@ -182,11 +185,18 @@ export interface WindowApi {
     /** The dsh's home-layer MCP rows alone (the "every profile" scope). */
     mcpHomeList: (dshId: string) => Promise<IpcResult<McpServer[]>>
     /** Create or update one row in the chosen layer. */
-    mcpSave: (dshId: string, profile: string, input: McpServerInput, layer: 'profile' | 'home') => Promise<IpcResult<boolean>>
+    mcpSave: (
+      dshId: string, profile: string, input: McpServerInput, layer: 'profile' | 'home', consent?: PluginWriteConsent,
+    ) => Promise<IpcResult<LayerWrite>>
     /** Remove one row; its `insert:` block goes with it when it was the last. */
-    mcpRemove: (dshId: string, profile: string, id: string, layer: 'profile' | 'home') => Promise<IpcResult<boolean>>
+    mcpRemove: (
+      dshId: string, profile: string, id: string, layer: 'profile' | 'home', consent?: PluginWriteConsent,
+    ) => Promise<IpcResult<LayerWrite>>
     /** Reversible off switch — the row stays, dsh does not load it. */
-    mcpSetDisabled: (dshId: string, profile: string, id: string, disabled: boolean, layer: 'profile' | 'home') => Promise<IpcResult<boolean>>
+    mcpSetDisabled: (
+      dshId: string, profile: string, id: string, disabled: boolean, layer: 'profile' | 'home',
+      consent?: PluginWriteConsent,
+    ) => Promise<IpcResult<LayerWrite>>
     /** Names of the launch secrets stored in the launcher (encrypted at rest,
      * injected into every dsh child). Values never leave the main process. */
     mcpSecrets: () => Promise<IpcResult<string[]>>
@@ -229,7 +239,9 @@ export interface WindowApi {
     libMcpRemove: (serverName: string) => Promise<IpcResult<boolean>>
     /** Materialize a library entry as a row in a profile layer or the home
      * layer. Fails when the target layer already has a row of that name. */
-    libMcpApply: (serverName: string, target: McpApplyTarget) => Promise<IpcResult<boolean>>
+    libMcpApply: (
+      serverName: string, target: McpApplyTarget, consent?: PluginWriteConsent,
+    ) => Promise<IpcResult<LayerWrite>>
     /** Rewrite every drifted, non-handwritten applied row from the library. */
     libMcpSync: (serverName: string) => Promise<IpcResult<{ updated: number; skipped: number }>>
     /** Really connect to one library entry - a single initialize handshake, no

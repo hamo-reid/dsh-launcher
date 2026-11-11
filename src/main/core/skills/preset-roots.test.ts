@@ -22,7 +22,7 @@ let root: string
 let home: string
 let install: string
 
-const ctx = (): DshContext => ({ execPath: install, home, version: '0.2.0-rc.1' })
+const ctx = (): DshContext => ({ id: 'd1', execPath: install, home, version: '0.2.0-rc.1' })
 
 /** A directory-model preset: a composition plus an optional `skills/` beside it. */
 function dirPreset(id: string, withSkills: boolean): string {

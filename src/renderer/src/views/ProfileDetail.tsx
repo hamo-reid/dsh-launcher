@@ -10,6 +10,7 @@ import {
 import type { DragEndEvent } from '@dnd-kit/core'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
+import { writeWithSharedLayerConfirm } from '../lib/pluginWrite.ts'
 import { issueCount, lastSeenByRow, layerLabel, layerRowCount, type LayerLabel } from '../lib/profileLayers.ts'
 import { RenameProfileModal, TransferPatchModal } from './profile-detail/ProfileDialogs.tsx'
 import LayerDetail from './profile-detail/LayerDetail.tsx'
@@ -157,8 +158,12 @@ const loadSeq = useRef(0)
     void load()
     onChanged?.()
   }
+  // The home layer is machine-level: every running profile recomposes when it is
+  // written, so the write asks first and does nothing if the person declines.
   const toggleHome = async (id: string, disabled: boolean): Promise<void> => {
-    const result = await window.api.home.setDisabled(dshId, id, disabled)
+    const result = await writeWithSharedLayerConfirm(consent =>
+      window.api.home.setDisabled(dshId, id, disabled, consent))
+    if (result === null) return
     if (!result.ok) { void message.error(apiErrorText(result)); return }
     void load()
     onChanged?.()
@@ -268,8 +273,9 @@ const loadSeq = useRef(0)
 
   const saveHome = async (): Promise<void> => {
     setFileSaving(true)
-    const result = await window.api.home.writePatch(dshId, homeText)
+    const result = await writeWithSharedLayerConfirm(consent => window.api.home.writePatch(dshId, homeText, consent))
     setFileSaving(false)
+    if (result === null) return
     if (!result.ok) { void message.error(apiErrorText(result)); return }
     void message.success(t('profile.detail.fileSaved'))
     void load()

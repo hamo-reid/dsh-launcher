@@ -33,6 +33,7 @@ import type {
   InsertConflict,
   IpcResult,
   AppUpdateInfo,
+  LayerWrite,
   PluginUsagePoint,
   PluginWriteConsent,
   PluginWritePending,
@@ -159,12 +160,16 @@ const api = {
     ipcRenderer.invoke('profile:openPatchSource', dshId, name),
 
   home: {
-    setDisabled: (dshId: string, id: string, disabled: boolean): Promise<IpcResult<boolean>> =>
-      ipcRenderer.invoke('home:setDisabled', dshId, id, disabled),
+    setDisabled: (
+      dshId: string, id: string, disabled: boolean, consent?: PluginWriteConsent,
+    ): Promise<IpcResult<{ disabled: boolean } & PluginWritePending>> =>
+      ipcRenderer.invoke('home:setDisabled', dshId, id, disabled, consent),
     readPatch: (dshId: string): Promise<IpcResult<{ text: string; path: string }>> =>
       ipcRenderer.invoke('home:readPatch', dshId),
-    writePatch: (dshId: string, text: string): Promise<IpcResult<boolean>> =>
-      ipcRenderer.invoke('home:writePatch', dshId, text),
+    writePatch: (
+      dshId: string, text: string, consent?: PluginWriteConsent,
+    ): Promise<IpcResult<LayerWrite>> =>
+      ipcRenderer.invoke('home:writePatch', dshId, text, consent),
   },
 
   preset: {
@@ -189,12 +194,19 @@ const api = {
       ipcRenderer.invoke('ext:mcpList', dshId, profile),
     mcpHomeList: (dshId: string): Promise<IpcResult<McpServer[]>> =>
       ipcRenderer.invoke('ext:mcpHomeList', dshId),
-    mcpSave: (dshId: string, profile: string, input: McpServerInput, layer: 'profile' | 'home'): Promise<IpcResult<boolean>> =>
-      ipcRenderer.invoke('ext:mcpSave', dshId, profile, input, layer),
-    mcpRemove: (dshId: string, profile: string, id: string, layer: 'profile' | 'home'): Promise<IpcResult<boolean>> =>
-      ipcRenderer.invoke('ext:mcpRemove', dshId, profile, id, layer),
-    mcpSetDisabled: (dshId: string, profile: string, id: string, disabled: boolean, layer: 'profile' | 'home'): Promise<IpcResult<boolean>> =>
-      ipcRenderer.invoke('ext:mcpSetDisabled', dshId, profile, id, disabled, layer),
+    mcpSave: (
+      dshId: string, profile: string, input: McpServerInput, layer: 'profile' | 'home', consent?: PluginWriteConsent,
+    ): Promise<IpcResult<LayerWrite>> =>
+      ipcRenderer.invoke('ext:mcpSave', dshId, profile, input, layer, consent),
+    mcpRemove: (
+      dshId: string, profile: string, id: string, layer: 'profile' | 'home', consent?: PluginWriteConsent,
+    ): Promise<IpcResult<LayerWrite>> =>
+      ipcRenderer.invoke('ext:mcpRemove', dshId, profile, id, layer, consent),
+    mcpSetDisabled: (
+      dshId: string, profile: string, id: string, disabled: boolean, layer: 'profile' | 'home',
+      consent?: PluginWriteConsent,
+    ): Promise<IpcResult<LayerWrite>> =>
+      ipcRenderer.invoke('ext:mcpSetDisabled', dshId, profile, id, disabled, layer, consent),
     mcpSecrets: (): Promise<IpcResult<string[]>> =>
       ipcRenderer.invoke('ext:mcpSecrets'),
     mcpSecretSet: (name: string, value: string): Promise<IpcResult<boolean>> =>
@@ -221,8 +233,10 @@ const api = {
       ipcRenderer.invoke('ext:libMcpSave', previousServerName, input),
     libMcpRemove: (serverName: string): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('ext:libMcpRemove', serverName),
-    libMcpApply: (serverName: string, target: McpApplyTarget): Promise<IpcResult<boolean>> =>
-      ipcRenderer.invoke('ext:libMcpApply', serverName, target),
+    libMcpApply: (
+      serverName: string, target: McpApplyTarget, consent?: PluginWriteConsent,
+    ): Promise<IpcResult<LayerWrite>> =>
+      ipcRenderer.invoke('ext:libMcpApply', serverName, target, consent),
     libMcpSync: (serverName: string): Promise<IpcResult<{ updated: number; skipped: number }>> =>
       ipcRenderer.invoke('ext:libMcpSync', serverName),
     libMcpTest: (serverName: string): Promise<IpcResult<McpProbeResult>> =>

@@ -75,6 +75,10 @@ export function effectiveProfileDir(entry: DshEntry): string {
 /** The dsh context a profile/data operation targets. Carries just the fields
  * core functions need, so they don't depend on the full entry. */
 export interface DshContext {
+  /** The dsh ENTRY id. A context names one registered install, and callers that
+   * ask the run registry about a profile need that identity rather than the
+   * display name (two entries may share a name after a re-scan). */
+  id: string
   /** The dsh executable (for install-anchor / bundle resolution). */
   execPath: string
   /** The harness home (`DSH_HOME`); profiles live at `<home>/profiles`. */
@@ -85,7 +89,7 @@ export interface DshContext {
 
 /** Build a DshContext from a dsh entry. */
 export function contextForEntry(entry: DshEntry): DshContext {
-  return { execPath: entry.execPath, home: entry.home, version: entry.version }
+  return { id: entry.id, execPath: entry.execPath, home: entry.home, version: entry.version }
 }
 
 /** The profiles root a context operates on: always `<home>/profiles`. */

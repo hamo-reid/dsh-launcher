@@ -164,6 +164,17 @@ export default function LayerDetail({
               ? t('profile.detail.layerMeta', { count: entries.length })
               : t('profile.detail.rowCountFiltered', { shown: visible.length, total: entries.length })}
           </div>
+          {/* The home layer's rows are toggleable, but the file behind them is
+              composed into every profile under this home. Say so where the switch
+              is, not only in a hint nobody opens. */}
+          {actions.shared === true && (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ padding: '2px 8px', fontSize: token.fontSizeSM }}
+              message={t('profile.detail.sharedLayer')}
+            />
+          )}
           <Input
             size="small"
             value={query}

@@ -97,6 +97,9 @@ export interface RowActions {
   canToggle: boolean
   canCover: boolean
   canEdit: boolean
+  /** Set for a layer every profile in this home composes: editing it is a
+   * machine-level act, not a change to one profile. */
+  shared?: boolean
   canDelete: boolean
 }
 
@@ -126,7 +129,9 @@ export function rowActionsOf(layer: Pick<ProfileLayer, 'source' | 'bundle'>): Ro
   if (layer.source === 'bundle') {
     return { canToggle: false, canCover: layer.bundle !== undefined, canEdit: false, canDelete: false }
   }
-  if (layer.source === 'home') return { canToggle: true, canCover: false, canEdit: false, canDelete: false }
+  if (layer.source === 'home') {
+    return { canToggle: true, canCover: false, canEdit: false, canDelete: false, shared: true }
+  }
   return { canToggle: true, canCover: false, canEdit: true, canDelete: true }
 }
 

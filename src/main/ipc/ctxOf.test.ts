@@ -27,7 +27,7 @@ afterAll(() => rmSync(root, { recursive: true, force: true }))
 
 describe('ctxOf', () => {
   it('projects a registered entry onto the fields core operations need', () => {
-    expect(ctxOf('a')).toEqual({ execPath: '/fake/a', home: join(root, 'home'), version: '1.2.3' })
+    expect(ctxOf('a')).toEqual({ id: 'a', execPath: '/fake/a', home: join(root, 'home'), version: '1.2.3' })
   })
 
   it('resolves an unregistered id to null', () => {

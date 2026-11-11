@@ -16,6 +16,7 @@ import { DeleteOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import { apiErrorText } from '../lib/ipc.ts'
+import { writeWithSharedLayerConfirm } from '../lib/pluginWrite.ts'
 import Panel from '../components/Panel.tsx'
 import { confirmDanger } from '../components/ConfirmMenu.tsx'
 import McpServerModal from './ExtensionsModals.tsx'
@@ -96,18 +97,24 @@ export default function McpManagePanel(p: McpManagePanelProps): JSX.Element {
 
   useEffect(() => { void load() }, [load])
 
+  // A row that lives in the home layer is machine-level: writing it recomposes
+  // every running profile, so those writes ask first (a profile-layer row does not).
   const setDisabled = async (server: McpServer, disabled: boolean): Promise<void> => {
     setBusy(`toggle:${server.id}`)
-    const r = await window.api.ext.mcpSetDisabled(p.dshId, p.profile ?? '', server.id, disabled, writeLayerOf(server))
+    const r = await writeWithSharedLayerConfirm(consent =>
+      window.api.ext.mcpSetDisabled(p.dshId, p.profile ?? '', server.id, disabled, writeLayerOf(server), consent))
     setBusy('')
+    if (r === null) return
     if (!r.ok) { void message.error(apiErrorText(r)); return }
     await load()
   }
 
   const remove = async (server: McpServer): Promise<void> => {
     setBusy(`remove:${server.id}`)
-    const r = await window.api.ext.mcpRemove(p.dshId, p.profile ?? '', server.id, writeLayerOf(server))
+    const r = await writeWithSharedLayerConfirm(consent =>
+      window.api.ext.mcpRemove(p.dshId, p.profile ?? '', server.id, writeLayerOf(server), consent))
     setBusy('')
+    if (r === null) return
     if (!r.ok) { void message.error(apiErrorText(r)); return }
     void message.success(t('ext.mcp.removed', { name: server.serverName || server.id }))
     await load()
@@ -116,8 +123,10 @@ export default function McpManagePanel(p: McpManagePanelProps): JSX.Element {
   const saveEdit = async (input: McpServerInput): Promise<void> => {
     if (editing === null) return
     setBusy('save')
-    const r = await window.api.ext.mcpSave(p.dshId, p.profile ?? '', input, writeLayerOf(editing))
+    const r = await writeWithSharedLayerConfirm(consent =>
+      window.api.ext.mcpSave(p.dshId, p.profile ?? '', input, writeLayerOf(editing), consent))
     setBusy('')
+    if (r === null) return
     if (!r.ok) { void message.error(apiErrorText(r)); return }
     void message.success(t('ext.mcp.saved', { name: input.serverName }))
     setModalOpen(false)
@@ -128,10 +137,11 @@ export default function McpManagePanel(p: McpManagePanelProps): JSX.Element {
   const applyEntry = async (entry: McpLibEntry): Promise<void> => {
     setPickOpen(false)
     setBusy('apply')
-    const r = await window.api.ext.libMcpApply(entry.serverName, homeOnly
+    const r = await writeWithSharedLayerConfirm(consent => window.api.ext.libMcpApply(entry.serverName, homeOnly
       ? { dshId: p.dshId, layer: 'home' }
-      : { dshId: p.dshId, layer: 'profile', profile: p.profile ?? '' })
+      : { dshId: p.dshId, layer: 'profile', profile: p.profile ?? '' }, consent))
     setBusy('')
+    if (r === null) return
     if (!r.ok) { void message.error(apiErrorText(r)); return }
     void message.success(t('ext.mcp.applied', { name: entry.serverName }))
     await load()

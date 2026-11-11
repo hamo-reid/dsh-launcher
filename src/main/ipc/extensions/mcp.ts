@@ -1,5 +1,5 @@
 /** The MCP half of `ext:*`: the servers a dsh resolves (bundle → profile → home), the launcher-global library, and the secrets that keep their values out of a patch file. */
-
+
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { app } from 'electron'
@@ -22,8 +22,10 @@ import { assertPatchDocValid, setRowDisabled } from '../../core/patch/patch.ts'
 import { verifyDisabledState } from '../../core/shared/app-util.ts'
 import { fail, failFromError, E } from '../../core/shared/errors.ts'
 import { rowIdInvalid } from '../validate.ts'
+import { sharedLayerRefusal } from '../profile/shared-layer.ts'
 import type {
   IpcResult, McpApplyTarget, McpLayer, McpLibOverviewRow, McpListing, McpProbeResult, McpServer, McpServerInput,
+  PluginWriteConsent, PluginWritePending,
 } from '../../../shared/types.ts'
 
 
@@ -40,6 +42,26 @@ function layerPath(ctx: DshContext, profile: string, layer: McpWriteLayer): stri
 /** Read a patch layer, defaulting to an empty document. */
 function readLayer(path: string): string {
   return existsSync(path) ? readFileSync(path, 'utf8') : '[]'
+}
+
+/** The shape every guarded layer write answers with. */
+interface LayerWrite extends PluginWritePending {
+  /** Whether the layer file was written; `false` means nothing changed. */
+  written: boolean
+}
+
+/** Wrap a boolean layer-write result in {@link LayerWrite}. */
+function layerWrite(result: IpcResult<boolean>): IpcResult<LayerWrite> {
+  return result.ok ? { ok: true, value: { written: result.value } } : result
+}
+
+/** The shared-layer question, for writes that target `layer === 'home'`. */
+function refuseShared(
+  ctx: DshContext, layer: McpWriteLayer, consent?: PluginWriteConsent,
+): IpcResult<LayerWrite> | undefined {
+  if (layer !== 'home') return undefined
+  const refusal = sharedLayerRefusal(ctx, consent)
+  return refusal === undefined ? undefined : { ok: true, value: { written: false, ...refusal } }
 }
 
 /** Validate a row id (also the `- id:` token, so the same guard applies). */
@@ -146,27 +168,37 @@ export function registerMcpExtIpc(): void {
   })
 
   // Create or update one MCP row in the chosen layer.
-  handle('ext:mcpSave', (_event, dshId: string, profile: string, input: McpServerInput, layer: McpWriteLayer): IpcResult<boolean> => {
+  handle('ext:mcpSave', (
+    _event, dshId: string, profile: string, input: McpServerInput, layer: McpWriteLayer,
+    consent?: PluginWriteConsent,
+  ): IpcResult<LayerWrite> => {
     const ctx = ctxOf(dshId)
     if (ctx === null) return fail(E.dshNotFound)
     if (layer !== 'profile' && layer !== 'home') return fail(E.internal, undefined, 'bad layer')
     const rejected = rejectInput(input)
     if (rejected !== null) return rejected
-    return saveMcpRow(ctx, profile, input, layer)
+    const refused = refuseShared(ctx, layer, consent)
+    if (refused !== undefined) return refused
+    return layerWrite(saveMcpRow(ctx, profile, input, layer))
   })
 
   // Remove one MCP row (its `insert:` block goes with it when it was the last).
-  handle('ext:mcpRemove', (_event, dshId: string, profile: string, id: string, layer: McpWriteLayer): IpcResult<boolean> => {
+  handle('ext:mcpRemove', (
+    _event, dshId: string, profile: string, id: string, layer: McpWriteLayer,
+    consent?: PluginWriteConsent,
+  ): IpcResult<LayerWrite> => {
     const ctx = ctxOf(dshId)
     if (ctx === null) return fail(E.dshNotFound)
     if (layer !== 'profile' && layer !== 'home') return fail(E.internal, undefined, 'bad layer')
     if (rowIdInvalid(id)) return fail(E.nameInvalid)
     try {
+      const refused = refuseShared(ctx, layer, consent)
+      if (refused !== undefined) return refused
       const path = layerPath(ctx, profile, layer)
       const current = readLayer(path)
       if (!mcpRowIds(current).includes(id)) return fail(E.patchNothingToRemove, { id })
       const next = removeMcpServer(current, id)
-      return commitLayer(path, next, text => findMcpServer(text, id) === undefined, id)
+      return layerWrite(commitLayer(path, next, text => findMcpServer(text, id) === undefined, id))
     } catch (error) {
       return failFromError(error)
     }
@@ -176,19 +208,24 @@ export function registerMcpExtIpc(): void {
   // A shipped (bundle) row cannot be edited or removed, but it CAN be switched
   // off: the override is an id-targeted row in the profile layer, which the host
   // merges over the bundle's insert — never a second insert of the same server.
-  handle('ext:mcpSetDisabled', (_event, dshId: string, profile: string, id: string, disabled: boolean, layer: McpWriteLayer): IpcResult<boolean> => {
+  handle('ext:mcpSetDisabled', (
+    _event, dshId: string, profile: string, id: string, disabled: boolean, layer: McpWriteLayer,
+    consent?: PluginWriteConsent,
+  ): IpcResult<LayerWrite> => {
     const ctx = ctxOf(dshId)
     if (ctx === null) return fail(E.dshNotFound)
     if (layer !== 'profile' && layer !== 'home') return fail(E.internal, undefined, 'bad layer')
     if (rowIdInvalid(id)) return fail(E.nameInvalid)
     try {
       if (!listMcpServers(ctx, profile).some(server => server.id === id)) return fail(E.patchNothingToRemove, { id })
+      const refused = refuseShared(ctx, layer, consent)
+      if (refused !== undefined) return refused
       const path = layerPath(ctx, profile, layer)
       const current = readLayer(path)
       const next = setRowDisabled(current, id, disabled)
       // `verifyDisabledState` reads the id row whether it is an insert child or a
       // bare id-targeted override, so it works for both shapes.
-      return commitLayer(path, next, text => verifyDisabledState(text, id, disabled), id)
+      return layerWrite(commitLayer(path, next, text => verifyDisabledState(text, id, disabled), id))
     } catch (error) {
       return failFromError(error)
     }
@@ -260,7 +297,9 @@ export function registerMcpExtIpc(): void {
 
   // Materialize a library entry as a row in a profile layer or the home layer.
   // A row with the same serverName in the target layer blocks a second insert.
-  handle('ext:libMcpApply', (_event, serverName: string, target: McpApplyTarget): IpcResult<boolean> => {
+  handle('ext:libMcpApply', (
+    _event, serverName: string, target: McpApplyTarget, consent?: PluginWriteConsent,
+  ): IpcResult<LayerWrite> => {
     const entry = findMcpLibraryEntry(serverName)
     if (entry === undefined) return fail(E.extMcpNotInLib, { detail: serverName })
     if (target === null || typeof target !== 'object') return fail(E.internal, undefined, 'bad target')
@@ -270,6 +309,9 @@ export function registerMcpExtIpc(): void {
     }
     const ctx = ctxOf(target.dshId)
     if (ctx === null) return fail(E.dshNotFound)
+    // Applying into the home layer is a machine-level write like any other.
+    const refused = refuseShared(ctx, target.layer, consent)
+    if (refused !== undefined) return refused
     // Validate the input as it will be WRITTEN: an entry's own `id` is
     // discarded on apply (`saveMcpRow` derives it from the serverName), so
     // checking it here would refuse an entry this path can happily apply.
@@ -288,7 +330,7 @@ export function registerMcpExtIpc(): void {
         clash = readMcpServers(readHomePatch(ctx).text, 'home').some(server => server.serverName === entry.serverName)
       }
       if (clash) return fail(E.extMcpExists, { detail: entry.serverName })
-      return saveMcpRow(ctx, target.profile ?? '', { ...entry.input, id: '' }, target.layer)
+      return layerWrite(saveMcpRow(ctx, target.profile ?? '', { ...entry.input, id: '' }, target.layer))
     } catch (error) {
       return failFromError(error)
     }
@@ -297,6 +339,10 @@ export function registerMcpExtIpc(): void {
   // One-click sync: rewrite every drifted, non-handwritten applied row from the
   // library (row ids and disabled flags preserved). Handwritten rows are
   // reported as skipped, never overwritten.
+  //
+  // Not behind the shared-layer question on purpose: this repairs rows that
+  // ALREADY sit in layers the person chose earlier. It decides nothing new about
+  // where a row lives, so there is no new shared-state decision to disclose.
   handle('ext:libMcpSync', (_event, serverName: string): IpcResult<{ updated: number; skipped: number }> => {
     const entry = findMcpLibraryEntry(serverName)
     if (entry === undefined) return fail(E.extMcpNotInLib, { detail: serverName })

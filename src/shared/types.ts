@@ -171,6 +171,12 @@ export interface PluginWriteRefusal {
  * so a caller never has to distinguish "refused" from "nothing affected". */
 export type PluginWritePending = Partial<PluginWriteRefusal>
 
+/** What a guarded patch-layer write answers with. `written: false` means the
+ * write stopped for a question and nothing changed. */
+export interface LayerWrite extends PluginWritePending {
+  written: boolean
+}
+
 /** What the caller has already accepted, so a write stops offering.
  *
  * Every flag answers a refusal the same call returned earlier — nothing here

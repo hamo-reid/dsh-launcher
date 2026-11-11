@@ -779,7 +779,7 @@ describe('every provider row is read, not just the first', () => {
     const install = join(root, 'install')
     mkdirSync(join(install, 'node_modules', '.bin'), { recursive: true })
     writeFileSync(join(install, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: '1.0.0' }))
-    const dsh: DshContext = { execPath: install, home, version: '' }
+    const dsh: DshContext = { id: 'd1', execPath: install, home, version: '' }
     const profileDir = join(home, 'profiles', 'web')
     mkdirSync(profileDir, { recursive: true })
     writeFileSync(join(profileDir, 'package.json'), JSON.stringify({

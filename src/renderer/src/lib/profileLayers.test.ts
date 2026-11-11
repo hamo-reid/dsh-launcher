@@ -169,8 +169,10 @@ describe('rowActionsOf', () => {
     expect(rowActionsOf({ source: 'bundle' })).toEqual({ canToggle: false, canCover: false, canEdit: false, canDelete: false })
   })
 
-  it('lets a home row be toggled, and nothing else', () => {
-    expect(rowActionsOf({ source: 'home' })).toEqual({ canToggle: true, canCover: false, canEdit: false, canDelete: false })
+  it('lets a home row be toggled, and nothing else — and marks the layer shared', () => {
+    // `shared` is what tells the pane this file is composed into every profile.
+    expect(rowActionsOf({ source: 'home' }))
+      .toEqual({ canToggle: true, canCover: false, canEdit: false, canDelete: false, shared: true })
   })
 
   it('lets the profile\'s own row be edited and dropped', () => {
