@@ -19,7 +19,6 @@
 import { updateSettings } from '../settings/settings.ts'
 import { createSecretCodec, type SecretCipher } from '../settings/secret-at-rest.ts'
 import { logger } from '../shared/logger.ts'
-import { normalizeScope } from './npmrc.ts'
 import { registries, registryEntries } from './registry.ts'
 import type { PrivateSource } from './npmrc.ts'
 import type { RegistryEntryRecord } from '../settings/normalize.ts'

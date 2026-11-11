@@ -3,7 +3,7 @@
  * bundle's patch references, resolving each to its on-disk dir, and producing the
  * `link:` mappings the install side writes into a profile. Pure FS, no pnpm.
  */
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { join } from 'node:path'

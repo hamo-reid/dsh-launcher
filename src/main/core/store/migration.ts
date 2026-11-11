@@ -116,7 +116,7 @@ export async function migrateLegacyStore(storeDir: string): Promise<void> {
   logger.info(`store migration: completed ${archived.length} plugin(s) into archive/`)
   // Profiles that `link:` into a now-removed top-level path must point at the new
   // archived copy, else their link would go dangling once the dir is gone.
-  await rewriteProfileLinks(storeDir, moves)
+  await rewriteProfileLinks(moves)
 }
 
 /**
@@ -126,7 +126,7 @@ export async function migrateLegacyStore(storeDir: string): Promise<void> {
  * the affected profiles so their node_modules real-installs the package. Safe
  * no-op when there are no profiles (or no app-state yet).
  */
-async function rewriteProfileLinks(storeDir: string, moves: { old: string; next: string }[]): Promise<void> {
+async function rewriteProfileLinks(moves: { old: string; next: string }[]): Promise<void> {
   const redirect = new Map(moves.map(m => [normalize(m.old), normalize(m.next)]))
   logger.info(`store migration: rewriteProfileLinks scanning (${moves.length} moved)`)
   let scopes: Awaited<ReturnType<typeof dshScopes>> = []

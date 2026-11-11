@@ -1,6 +1,5 @@
 /** Update detection and application, plus the archived-version cleanup they share. */
 
-import { join } from 'node:path'
 import {
   addPlugin, buildInstalledOverview, installIntoProfile, removePlugin, removePluginFromProfiles, storeVersions,
 } from '../../core/store/plugins.ts'

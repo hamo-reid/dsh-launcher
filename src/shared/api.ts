@@ -48,7 +48,6 @@ import type {
   OnboardingPayload,
   OnboardingState,
   PackageVersionInfo,
-  PluginRow,
   PresetListing,
   PresetMetaInput,
   ProfileDetail,

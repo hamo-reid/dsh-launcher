@@ -16,8 +16,6 @@ import { assertPatchDocValid, parsePatchRows } from '../../core/patch/patch.ts'
 import { loadStructureOnly, type StructureParse } from '../../core/patch/yaml.ts'
 import { profileBundleInfo } from '../../core/profile/profile.ts'
 import { pluginDir, type DshContext } from '../../core/profile/appState.ts'
-import { ctxOf } from '../ctxOf.ts'
-import { handle } from '../handle.ts'
 import { pathIdentifierInvalid } from '../validate.ts'
 import type { ProfileDetail, ProfilePatchReload } from '../../../shared/types.ts'
 

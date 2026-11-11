@@ -5,8 +5,7 @@
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
-import { basename, dirname, join, sep } from 'node:path'
-import os from 'node:os'
+import { dirname, join, sep } from 'node:path'
 import { logger } from '../shared/logger.ts'
 import { resolveLaunchEntry } from './launch.ts'
 import { installDir, isDeletableDsh } from './probe.ts'

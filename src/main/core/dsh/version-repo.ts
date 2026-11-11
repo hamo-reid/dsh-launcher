@@ -8,8 +8,6 @@
 
 import { existsSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import os from 'node:os'
-import { logger } from '../shared/logger.ts'
 import { readPkgVersion } from './launch.ts'
 import type { DshEntry } from '../../../shared/types.ts'
 

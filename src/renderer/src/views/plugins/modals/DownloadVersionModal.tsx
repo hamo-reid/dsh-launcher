@@ -32,7 +32,6 @@ export function DownloadVersionModal(p: DownloadVersionModalProps): JSX.Element 
   const [info, setInfo] = useState<PackageVersionInfo | null>(null)
   const [version, setVersion] = useState<string>()
   const [loading, setLoading] = useState(false)
-  const [installing, setInstalling] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -63,7 +62,7 @@ export function DownloadVersionModal(p: DownloadVersionModalProps): JSX.Element 
   const tags = info !== null ? Object.entries(info.distTags) : []
   return (
     <Modal title={t('plugin.version.title', { name: p.pkg ?? '' })} open={p.pkg !== null} onCancel={p.onClose}
-      okText={t('plugin.version.download')} onOk={() => void doDownload()} confirmLoading={installing}
+      okText={t('plugin.version.download')} onOk={() => void doDownload()}
       okButtonProps={{ disabled: version === undefined || loading || info === null }}
       width={MODAL.narrow}>
       <Space orientation="vertical" style={{ width: '100%' }} size="small">

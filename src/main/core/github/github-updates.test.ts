@@ -4,7 +4,7 @@
  * a live API otherwise, keeping `checkAppUpdate`'s decision rule covered.
  */
 import { describe, expect, it } from 'vitest'
-import { normalizeRelease, pickLatestRelease, type RawGitHubRelease } from './updates.ts'
+import { normalizeRelease, pickLatestRelease } from './updates.ts'
 
 describe('normalizeRelease', () => {
   it('strips a leading v and maps the fields', () => {

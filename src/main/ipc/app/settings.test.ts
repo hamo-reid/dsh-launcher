@@ -11,7 +11,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { openDatabase, loadSettings, patchSettings } from '../../core/settings/settings.ts'
+import { openDatabase, patchSettings } from '../../core/settings/settings.ts'
 import { registerSettingsIpc } from './settings.ts'
 import type { IpcResult } from '../../../shared/types.ts'
 

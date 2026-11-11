@@ -8,7 +8,6 @@
  * would surface later as a misleading 401.
  */
 
-import { child } from '../shared/logger.ts'
 import type { McpKV } from '../../../shared/types.ts'
 
 /**

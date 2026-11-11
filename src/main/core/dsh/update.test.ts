@@ -7,7 +7,7 @@ vi.mock('../store/npm.ts', () => ({
   fetchPackageVersions: vi.fn(),
 }))
 
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fetchPackageVersions } from '../store/npm.ts'

@@ -30,7 +30,7 @@ import { child } from '../shared/logger.ts'
 import {
   consumeLines, consumeSseData, INIT_ID, isRecord, judgeResponse, messageOf, parseSseFrames, tail,
 } from './framing.ts'
-import { quoteForShell, resolveJsExpr, resolveKv } from './env.ts'
+import { quoteForShell, resolveKv } from './env.ts'
 import type { ResponseVerdict } from './framing.ts'
 import type { McpProbeResult, McpProbeStage, McpServerInput } from '../../../shared/types.ts'
 

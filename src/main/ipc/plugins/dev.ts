@@ -2,7 +2,6 @@
  * archived, and the diagnosis that explains what resolution is missing. */
 
 import { dialog, shell } from 'electron'
-import { resolve } from 'node:path'
 import { buildInstalledOverview } from '../../core/store/plugins.ts'
 import { linkDevToProfile, repairDevLink } from '../../core/profile/profile.ts'
 import {

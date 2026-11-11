@@ -9,9 +9,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  Alert, Button, Input, List, message, Modal, Pagination, Popover, Select, Skeleton, Space, Tag, theme,
+  Alert, Button, List, message, Modal, Pagination, Select, Skeleton, Space, Tag, theme,
 } from 'antd'
-import { DatabaseOutlined, GithubOutlined, LinkOutlined, ReloadOutlined } from '@ant-design/icons'
+import { GithubOutlined, LinkOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../lib/ipc.ts'
 import { fmtNum } from '../lib/format.ts'
@@ -33,10 +33,6 @@ export default function MarketSection(): JSX.Element {
 
   // Loading route; null until the persisted route is read back on mount.
   const [srcState, setSrcState] = useState<MarketSourceState | null>(null)
-  const [customUrl, setCustomUrl] = useState('')
-  const [savingSource, setSavingSource] = useState(false)
-  /** Token for a private catalog. Empty = leave the saved one alone. */
-  const [customToken, setCustomToken] = useState('')
 
   // Server-side query → one page of rows + total (never the whole catalog).
   const [rows, setRows] = useState<MarketPlugin[]>([])
@@ -108,10 +104,7 @@ export default function MarketSection(): JSX.Element {
   useEffect(() => {
     void (async () => {
       const s = await window.api.market.source()
-      if (s.ok) {
-        setCustomUrl(s.value.url)
-        setSrcState(s.value)
-      }
+      if (s.ok) setSrcState(s.value)
     })()
     void refreshStoreNames()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -133,21 +126,6 @@ export default function MarketSection(): JSX.Element {
     void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, category, sort, page, pageSize, srcState])
-
-  const applySource = async (): Promise<void> => {
-    if (srcState === null) return
-    const next: MarketSourceState = { source: srcState.source, url: customUrl }
-    setSavingSource(true)
-    const r = await window.api.market.setSource(next)
-    setSavingSource(false)
-    if (!r.ok) { void message.error(apiErrorText(r)); return }
-    if (!r.value) { void message.error(t('plugin.market.invalidUrl')); return }
-    // Route change → back to the first page of the (now) new catalog. The
-    // query effect refetches once srcState flips.
-    setPage(1)
-    setSrcState(next)
-    void message.success(t('plugin.market.sourceSaved'))
-  }
 
   /** Switch catalog: a browsing choice, so it only refetches. */
   const switchCatalog = async (id: string | null): Promise<void> => {

@@ -4,11 +4,9 @@
  * Pure — text in, value out. No filesystem and no dsh context, so every rule about
  * what dsh will and will not accept is readable on its own.
  */
-
 
-import { join } from 'node:path'
+
 import { loadYaml } from '../patch/yaml.ts'
-import { logger } from '../shared/logger.ts'
 import { SKILL_NAME_RE } from '../../../shared/skill.ts'
 
 

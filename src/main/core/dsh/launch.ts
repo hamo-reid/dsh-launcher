@@ -6,7 +6,6 @@
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { dirname, join, sep } from 'node:path'
 import os from 'node:os'
-import { logger } from '../shared/logger.ts'
 
 /** A runnable-from-anywhere launch command (absolute path). A source checkout
  * maps to `node --import tsx/esm "<repo>/apps/cli/src/bin.ts"`; a real dsh

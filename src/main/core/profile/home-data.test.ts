@@ -10,8 +10,6 @@ import {
 import type { DshContext } from './appState.ts'
 
 let root: string
-let home: string
-let srcData: string
 
 function dir(...segments: string[]): string {
   const p = isAbsolute(segments[0]) ? segments[0] : join(root, ...segments)
@@ -27,8 +25,6 @@ function file(rel: string, content = 'x'): string {
 
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), 'pm-homedata-'))
-  home = dir('home')
-  srcData = dir('src')
 })
 
 afterAll(() => {

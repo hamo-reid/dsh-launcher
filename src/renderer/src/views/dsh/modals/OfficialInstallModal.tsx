@@ -3,25 +3,16 @@
  * steps stream in.
  */
 import { useEffect, useState } from 'react'
-import { Alert, Button, Input, Modal, Select, Space, Spin, Tag, message, theme } from 'antd'
+import { Alert, Button, Input, Modal, Select, Space, Spin, Tag, message } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { apiErrorText } from '../../../lib/ipc.ts'
 import FieldLabel from '../../../components/FieldLabel.tsx'
 import { MODAL } from '../../../theme.ts'
 import { latestPackageVersion } from '../../../../../shared/version.ts'
-import type { DshInstallStep, PackageVersionInfo } from '../../../../../shared/types.ts'
+import type { PackageVersionInfo } from '../../../../../shared/types.ts'
 
 // ── Official install ───────────────────────────────────────────────────────
 
-/** One progress row of an official install (per `DshInstallStep`). */
-interface InstallRow {
-  key: string
-  label: string
-  status: 'running' | 'ok' | 'error'
-  /** Right-aligned version detail (pinned/resolved version once known). */
-  meta?: string
-  detail?: string
-}
 interface OfficialInstallModalProps {
   open: boolean
   onClose: () => void
@@ -31,8 +22,6 @@ interface OfficialInstallModalProps {
 }
 export function OfficialInstallModal(p: OfficialInstallModalProps): JSX.Element {
   const { t } = useTranslation()
-  const { token } = theme.useToken()
-  const [error, setError] = useState('')
   const [versionDir, setVersionDir] = useState('')
   const [installName, setInstallName] = useState('official')
   // npm 版本选择（官方包 @deepseek-ai/dsh）。
@@ -43,7 +32,6 @@ export function OfficialInstallModal(p: OfficialInstallModalProps): JSX.Element 
   useEffect(() => {
     if (!p.open) return
     // 重新打开时重置状态，避免残留上一次的进度/结果。
-    setError('')
     setVersionDir('')
     setPkgInfo(null)
     setVersion('')

@@ -233,16 +233,6 @@ export default function SettingsSection() {
     })
   }
 
-  /** What the probe means, as one severity and one sentence.
-   *
-   * A registry's root answering 404 is normal, so a status code is never the
-   * headline: the answer is about the ADDRESS and the CREDENTIAL, which need
-   * different fixes. */
-  const reloadMarket = async (): Promise<void> => {
-    const r = await window.api.market.catalogs()
-    if (r.ok) setMarket({ activeId: r.value.activeId ?? null, catalogs: r.value.catalogs ?? [] })
-  }
-
   const submitCatalog = async (): Promise<void> => {
     if (catalogBusy) return
     setCatalogBusy(true)

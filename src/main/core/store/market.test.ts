@@ -184,7 +184,7 @@ describe('loadMarket', () => {
   })
 
   it('reuses the memo on 304 without re-parsing', async () => {
-    const fn = vi.fn(async (url: string, init: RequestInit) => {
+    const fn = vi.fn(async (_url: string, init: RequestInit) => {
       // First real fetch → 200; any later call gets a 304 when the validator matches.
       const ifNoneMatch = (init.headers as Record<string, string> | undefined)?.['if-none-match']
       return ifNoneMatch === '"v1"' ? fakeRes(304) : fakeRes(200, body, '"v1"')

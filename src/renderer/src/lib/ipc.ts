@@ -1,7 +1,6 @@
 /** Small helpers for talking to the preload `window.api` from the renderer. */
 
 import i18n from 'i18next'
-import type { IpcResult } from '../../../shared/types.ts'
 
 type Params = Record<string, string> | string[]
 

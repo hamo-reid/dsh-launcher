@@ -18,8 +18,6 @@ const MCP_INPUT_KEYS = [
 /** Every key `McpReconnect` declares. */
 const RECONNECT_KEYS = ['enabled', 'initialDelayMs', 'maxDelayMs', 'maxAttempts'] as const
 
-const KV_MODES: readonly McpValueMode[] = ['plain', 'env', 'js']
-
 /** A blank input for a new server. */
 export function blankMcpInput(): McpServerInput {
   return { id: '', serverName: '', transport: 'stdio', command: '', args: [], env: [], cwd: '' }

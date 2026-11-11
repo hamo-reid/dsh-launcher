@@ -3,7 +3,7 @@
  * global-bin slot scan. Uses temp dirs / env overrides; no real dsh needed.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { EventEmitter } from 'node:events'
 import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'

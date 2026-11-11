@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_FILTERS, applyOverviewFilters, facetMatches, parseStoredFilters, type Facet, type StoredFilters,
 } from './pluginFilters.ts'
-import type { InstalledOverviewRow, PluginProvenance, PluginUpdateInfo } from '../../../shared/types.ts'
+import type { InstalledOverviewRow, PluginUpdateInfo } from '../../../shared/types.ts'
 
 const row = (over: Partial<InstalledOverviewRow> & { name: string }): InstalledOverviewRow => ({
   versions: [], usage: [], inStore: false, sources: [], ...over,

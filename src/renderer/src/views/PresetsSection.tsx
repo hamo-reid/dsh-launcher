@@ -214,8 +214,10 @@ export default function PresetsSection(): JSX.Element {
   // dialog built from the roster alone offers a create that is certain to fail.
   const takenIds = presetTakenIds(presets, legacy)
 
-  /** The minimal instance: a fresh preset off the deployment's smallest one. */
-  const createPreset = async (mode: PresetCreateMode, fromId: string, toId: string, name: string): Promise<void> => {
+  /** Create from the dialog: the modal already resolved the mode into `fromId`
+   * (its smallest preset for "minimal", the selected one for "copy"), so the mode
+   * itself is not needed on this side. */
+  const createPreset = async (_mode: PresetCreateMode, fromId: string, toId: string, name: string): Promise<void> => {
     if (selectedId === undefined || profile === undefined) return
     setBusy('create')
     const r = await window.api.preset.copy(selectedId, profile, fromId, toId, name)

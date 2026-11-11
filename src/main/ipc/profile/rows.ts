@@ -1,7 +1,7 @@
 /** Editing the patch rows themselves: add, remove, copy from a bundle, and set a row's config body. */
-
 
-import { app, shell } from 'electron'
+
+import { shell } from 'electron'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { profilePatchPath } from '../../core/profile/home.ts'
 import { appendRowBlock, extractRowBlock, removeRow, setRowConfig, upsertRow } from '../../core/patch/patch.ts'

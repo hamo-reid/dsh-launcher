@@ -7,7 +7,6 @@ import {
 } from '../../core/store/downloads.ts'
 import { pluginDir } from '../../core/profile/appState.ts'
 import { fail, failFromError, E } from '../../core/shared/errors.ts'
-import { ctxOf } from '../ctxOf.ts'
 import { handle } from '../handle.ts'
 import type { DownloadSessionInfo, IpcResult } from '../../../shared/types.ts'
 

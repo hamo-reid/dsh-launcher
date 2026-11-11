@@ -25,7 +25,7 @@ export default function DevPluginsView(): JSX.Element {
   const { t } = useTranslation()
   const { token } = theme.useToken()
   const {
-    hosts, target, listMeta, profileOptions, retarget,
+    hosts, target, listMeta, retarget,
     plugins, usage, runningOf, diags, loading, busy, reload,
     detachPkg, detachFrom, closeDetach,
     detail, closeDetail, diagnose, buildMenuItems,
