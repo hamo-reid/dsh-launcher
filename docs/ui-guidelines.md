@@ -41,6 +41,8 @@
 
 > 命名的坑:不要再写 `#e6f4ff`(旧选中底)、`#f0f0f0`(旧边框)、`#777/#888/#999`(旧次要文字)——它们在亮色下尚可,暗色下失去对比,必须用 token。
 
+> **图表配色**:分类色板用 antd 预设色 token(`token.blue` / `cyan` / `purple` / `green` / `gold` / `orange` / `magenta` / `geekblue`),并刻意**不使用**语义色(`colorPrimary` / `colorError` / `colorWarning`)——否则一个红色弧段会被读成"出错了"。这里同样禁止硬编码 hex,亮/暗两套主题自动跟随。现有实现见 `views/dsh/HomeUsagePie.tsx`。
+
 ### 2.2 尺寸、间距、字号
 
 | Token | 值 | 用途 |

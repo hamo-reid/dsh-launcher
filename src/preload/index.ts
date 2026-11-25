@@ -12,6 +12,9 @@ import type {
   DshDataImportResult,
   DshDataManifest,
   DshEntry,
+  DshHomeTarget,
+  DshHomeUsage,
+  HomeBrowseResult,
   DshProfileInfo,
   DshUpdateInfo,
   DevBuildTarget,
@@ -507,6 +510,14 @@ const api = {
       ipcRenderer.invoke('dsh:rename', id, name),
     revealDir: (id: string): Promise<IpcResult<boolean>> =>
       ipcRenderer.invoke('dsh:revealDir', id),
+    homeTargets: (): Promise<IpcResult<DshHomeTarget[]>> =>
+      ipcRenderer.invoke('home:targets'),
+    homeScan: (home: string): Promise<IpcResult<DshHomeUsage>> =>
+      ipcRenderer.invoke('home:scan', home),
+    browseHome: (home: string, relPath?: string, limit?: number): Promise<IpcResult<HomeBrowseResult>> =>
+      ipcRenderer.invoke('home:browse', home, relPath, limit),
+    revealHome: (home: string, relPath?: string): Promise<IpcResult<boolean>> =>
+      ipcRenderer.invoke('home:reveal', home, relPath),
     checkUpdate: (id: string): Promise<IpcResult<DshUpdateInfo | null>> =>
       ipcRenderer.invoke('dsh:checkUpdate', id),
     update: (id: string, opts?: { version?: string; ackMajorRisk?: boolean }): Promise<IpcResult<{ id: string }>> =>

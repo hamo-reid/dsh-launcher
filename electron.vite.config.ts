@@ -46,6 +46,9 @@ export default defineConfig({
             // "react", so it must be split before the react bucket matches.
             if (/react-markdown|remark|rehype|hast|unist|mdast|micromark|vfile|character-entities|character-reference|comma-separated-tokens|ccount|decode-named-character|markdown-table|stringify-entities|parse-entities|property-information|web-namespaces|html-void-elements|space-separated-tokens|trim-lines|tight-bounds|longest-streak|emoji-regex|mdurl|zwitch|bail|trough|unified|is-plain-obj/.test(id)) return 'vendor-markdown'
             if (/@dnd-kit/.test(id)) return 'vendor-dnd'
+            // The donut in the DSH page. Only that lazy view needs it, and
+            // chart.js is three quarters of the view's own chunk otherwise.
+            if (/\/chart\.js@|react-chartjs-2@|\@kurkle/.test(id)) return 'vendor-charts'
             if (/\/dayjs@/.test(id)) return 'vendor-dayjs'
             // antd + its rc-* primitives form one closed group — splitting the
             // rc-* modules off would create a vendor <-> vendor-antd cycle.

@@ -15,6 +15,9 @@ import type {
   DshDataImportResult,
   DshDataManifest,
   DshEntry,
+  DshHomeTarget,
+  DshHomeUsage,
+  HomeBrowseResult,
   DshProfileInfo,
   DshUpdateInfo,
   DevBuildTarget,
@@ -549,6 +552,27 @@ eedsConfirm instead of doing it. */
     addManual: (alias: string, execPath: string) => Promise<IpcResult<DshEntry>>
     rename: (id: string, name: string) => Promise<IpcResult<boolean>>
     revealDir: (id: string) => Promise<IpcResult<boolean>>
+    /**
+     * The MANAGED dsh HOMEs (profiles, sessions, attachments, …) — identity only,
+     * no measurement, so this is cheap. Never the dsh install and never the
+     * plugin store.
+     */
+    homeTargets: () => Promise<IpcResult<DshHomeTarget[]>>
+    /**
+     * Measure ONE managed home. Called once per target so the page can paint each
+     * result as it lands — measuring them all in one request froze the main
+     * process for seconds behind a single spinner.
+     */
+    homeScan: (home: string) => Promise<IpcResult<DshHomeUsage>>
+    /**
+     * List ONE level of a managed home, for the structure browser. `relPath` is
+     * `/`-separated and relative to the home ('' = the root); a path that would
+     * escape it is refused. Children come back largest first, capped — `omitted`
+     * says how many were not returned.
+     */
+    browseHome: (home: string, relPath?: string, limit?: number) => Promise<IpcResult<HomeBrowseResult>>
+    /** Reveal a managed home — or a sub-directory of it — in the OS file explorer. */
+    revealHome: (home: string, relPath?: string) => Promise<IpcResult<boolean>>
     /** Whether a managed dsh has a newer release. `null` = up to date. */
     checkUpdate: (id: string) => Promise<IpcResult<DshUpdateInfo | null>>
     /** In-place update a managed dsh (cross-major needs `ackMajorRisk`). Returns the new session id. */

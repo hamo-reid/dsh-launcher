@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Button, Input, Modal, theme, message } from 'antd'
 import { useTranslation } from 'react-i18next'
 import SectionHeading from './SectionHeading.tsx'
@@ -11,11 +11,14 @@ interface Props {
   value: string
   /** Apply a new value; resolves to an error string, or '' on success. */
   onSave: (next: string) => Promise<string>
+  /** Extra buttons beside 「Edit」 — an action on the CURRENT value (reveal it,
+   * copy it), as opposed to editing it. */
+  actions?: ReactNode
 }
 
 /** A single-config edit flow: shows the current value (+「Edit」), opens a small
  * dialog (title "Edit X", input, confirm/cancel) to edit it. */
-export default function ConfigRow({ title, description, value, onSave }: Props) {
+export default function ConfigRow({ title, description, value, onSave, actions }: Props) {
   const { t } = useTranslation()
   const { token } = theme.useToken()
   const [open, setOpen] = useState(false)
@@ -54,6 +57,7 @@ export default function ConfigRow({ title, description, value, onSave }: Props) 
           {value.trim() === '' ? t('common.unconfigured') : value}
         </span>
         <Button onClick={openEdit}>{t('common.edit')}</Button>
+        {actions}
       </div>
 
       <Modal

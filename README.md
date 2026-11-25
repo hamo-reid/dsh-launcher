@@ -42,6 +42,10 @@ Built with Electron, React and Ant Design.
   cross-major upgrades require confirmation).
 - **Version tracks** — Check for both the stable `latest` and prerelease `next`
   releases; the official-install picker tags them so you can tell them apart.
+- **Home inspection** — Disk usage of the selected DSH's home (`profiles`,
+  `sessions`, `attachments`, …) as a bar list or a donut, with hard-link-aware
+  numbers, plus a level-by-level structure browser. Read-only: it measures and
+  reveals, never deletes.
 - **Profile migration** — Copy a profile into another installed dsh version and
   rebuild its bundle layers there; the source profile is kept.
 - **Data export / migration** — Export a dsh's profiles and home data to a zip,

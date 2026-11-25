@@ -11,6 +11,7 @@ import { registerProfileIpc } from './ipc/profile/profile.ts'
 import { registerHomeIpc } from './ipc/profile/home.ts'
 import { registerPluginsIpc } from './ipc/plugins/plugins.ts'
 import { registerDshIpc } from './ipc/dsh/dsh.ts'
+import { registerHomeUsageIpc } from './ipc/dsh/home-usage.ts'
 import { registerHomeDataIpc } from './ipc/profile/home-data.ts'
 import { registerTrashIpc } from './ipc/profile/trash.ts'
 import { setMarketTokenCipher } from './core/store/market.ts'
@@ -336,6 +337,7 @@ function registerIpc(): void {
   registerExtensionsIpc()
   registerPresetsIpc()
   registerDshIpc()
+  registerHomeUsageIpc()
   registerHomeDataIpc()
   registerTrashIpc()
   registerSettingsIpc()

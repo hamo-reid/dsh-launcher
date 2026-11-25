@@ -690,6 +690,120 @@ export interface DshEntry {
   dir?: string
 }
 
+// ── dsh home disk usage ─────────────────────────────────────────────────────
+
+/**
+ * What a top-level entry of a dsh home is, for labelling a usage row.
+ *
+ * This is a LABEL, never a filter: a dsh owns its home and its layout changes
+ * between dsh versions (`attachments` / `cache` / `plugin-data` did not always
+ * exist), so anything the launcher does not know is reported as `unknown`
+ * rather than hidden. A row the page never shows is a size the user cannot
+ * account for.
+ */
+export type HomeEntryRole =
+  | 'profiles' | 'sessions' | 'attachments' | 'storages' | 'skills' | 'cache'
+  | 'logs' | 'plugin-data' | 'agent-presets' | 'deps' | 'config' | 'unknown'
+
+/** One top-level entry of a dsh home, measured. */
+export interface HomeEntryUsage {
+  /** The entry's own name (the directory / file the home actually holds). */
+  name: string
+  kind: 'dir' | 'file'
+  role: HomeEntryRole
+  /**
+   * Sum of every file's reported length. Over-counts: pnpm hard-links one body
+   * into the store, the dsh install and every profile, and each link reports
+   * the full size.
+   */
+  apparentBytes: number
+  /**
+   * Bytes whose EVERY hard link lives inside this home — what deleting the home
+   * actually frees. The honest headline number.
+   */
+  reclaimableBytes: number
+  /** Bytes that also have links outside this home (plugin store, dsh install,
+   * another home). Deleting this home does not necessarily free them. */
+  sharedBytes: number
+  /** Files counted (hard links inside this home included). */
+  files: number
+  /**
+   * Bytes that live under a `node_modules` directory inside this entry. Only
+   * meaningful for `profiles`, where those bodies are hard links into the
+   * launcher's plugin store: their real cost is the store's, not the home's.
+   */
+  nodeModulesBytes?: number
+}
+
+/**
+ * One managed home and the dsh that share it — identity only, no measurement.
+ *
+ * The page asks for these first, then measures one home at a time, so a scan of
+ * several homes reports progress instead of freezing on a single call.
+ */
+export interface DshHomeTarget {
+  /** The `DSH_HOME` (absolute). */
+  home: string
+  /** Ids of the registered MANAGED dsh that share this home. */
+  dshIds: string[]
+}
+
+/** Disk usage of one dsh home (`DSH_HOME`) — never of the dsh install itself. */
+export interface DshHomeUsage {
+  /** The `DSH_HOME` measured (absolute). */
+  home: string
+  /** Ids of the registered MANAGED dsh that share this home. */
+  dshIds: string[]
+  /** False when the home directory is absent (normal before the first run). */
+  exists: boolean
+  apparentBytes: number
+  reclaimableBytes: number
+  sharedBytes: number
+  files: number
+  /** Entries whose `readdir`/`stat` failed (permissions, locks) — not counted. */
+  errors: number
+  /** True when the walk stopped at the entry/deadline budget: the numbers only
+   * cover what was visited, and the page must say so. */
+  truncated: boolean
+  /** ISO timestamp of the scan. */
+  scannedAt: string
+  durationMs: number
+  /** Top-level entries, largest first. */
+  entries: HomeEntryUsage[]
+}
+
+/**
+ * One level of a dsh home, for the structure browser.
+ *
+ * One level at a time: a home is deep, and measuring the whole tree to paint a
+ * collapsed one would cost more than the folder actually opened. Same
+ * read-only contract and the same three numbers as {@link DshHomeUsage}.
+ */
+export interface HomeBrowseResult {
+  /** The home root this level belongs to (absolute). */
+  home: string
+  /** The listed directory, relative to the home, `/`-separated ('' = the root). */
+  relPath: string
+  /** The listed directory (absolute). */
+  path: string
+  exists: boolean
+  apparentBytes: number
+  reclaimableBytes: number
+  sharedBytes: number
+  files: number
+  /** Children whose `readdir`/`stat` failed — not counted. */
+  errors: number
+  /** Children measured but NOT returned, because of the row limit. Reported so
+   * a truncated list never reads as a complete one. */
+  omitted: number
+  /** True when the scan budget stopped the walk: the numbers cover part of it. */
+  truncated: boolean
+  scannedAt: string
+  durationMs: number
+  /** Children, largest first. */
+  entries: HomeEntryUsage[]
+}
+
 // ── launcher data root ───────────────────────────────────────────────────────
 
 /** A launcher-owned directory that a data-root change relocates. Profiles are

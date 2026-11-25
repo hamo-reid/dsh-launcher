@@ -98,6 +98,12 @@ export const E = {
   extMcpIdTaken: 'ext.mcpIdTaken',
   // dsh data import/export
   dataNotSelected: 'data.notSelected',
+  // dsh home (structure browser)
+  /** A home-relative path that would resolve outside the home. */
+  homePathInvalid: 'home.pathInvalid',
+  /** Only a folder may be opened in the file explorer — never a file, whose
+   * default handler could execute it. */
+  homeNotDir: 'home.notDir',
   // run
   runAlreadyRunning: 'run.alreadyRunning',
   runExecMissing: 'run.execMissing',

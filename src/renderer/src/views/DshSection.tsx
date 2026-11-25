@@ -13,6 +13,7 @@ import ConfigRow from '../components/ConfigRow.tsx'
 import Panel from '../components/Panel.tsx'
 import SectionHeading from '../components/SectionHeading.tsx'
 import { AddDshModal, DataMirrorModal, DshRemoveModal, OfficialInstallModal, RenameDshModal, UpdateDshModal } from './DshModals.tsx'
+import HomeUsagePanel from './dsh/HomeUsagePanel.tsx'
 import SkillsManagePanel from './SkillsManagePanel.tsx'
 import McpManagePanel from './McpManagePanel.tsx'
 import { majorOfVersion } from '../../../shared/version.ts'
@@ -113,6 +114,13 @@ export default function DshSection() {
 
   const revealDir = async (id: string): Promise<void> => {
     const r = await window.api.dsh.revealDir(id)
+    if (!r.ok) void message.error(apiErrorText(r))
+  }
+
+  /** Reveal the DATA home (DSH_HOME) — the directory the 目录配置 row describes,
+   * not the install. */
+  const revealHome = async (home: string): Promise<void> => {
+    const r = await window.api.dsh.revealHome(home)
     if (!r.ok) void message.error(apiErrorText(r))
   }
 
@@ -278,6 +286,9 @@ export default function DshSection() {
                 description={t('dsh.homeDesc')}
                 value={homeInput}
                 onSave={saveHome}
+                actions={(
+                  <Button onClick={() => void revealHome(selected.home)}>{t('dsh.homeOpen')}</Button>
+                )}
               />
               <div style={{ margin: '10px 0', borderTop: `1px solid ${token.colorSplit}` }} />
               <div style={{ color: token.colorTextTertiary, fontSize: token.fontSizeSM }}>
@@ -300,6 +311,10 @@ export default function DshSection() {
                 />
               )}
             </Panel>
+            {/* Disk usage of the MANAGED dsh homes. Manual (it walks every
+                profile's node_modules), and read-only: it measures and reveals,
+                never deletes. */}
+            <HomeUsagePanel dshes={dshes} selectedId={selected?.id} />
             <Panel title={t('dsh.dataTitle')}>
               <div style={{ marginBottom: 8, color: token.colorTextTertiary, fontSize: token.fontSizeSM }}>
                 {t('dsh.dataDesc')}
