@@ -17,7 +17,7 @@ export type { DshResolved, LaunchEntry } from './launch.ts'
 
 export {
   detectExecutables, entryFromPath, existsExecutable, installDir, isDeletableDsh, isManagedInstall,
-  probeDshs, resolveInstallAnchor,
+  probeDshs, resolveInstallAnchor, versionSlotOf,
 } from './probe.ts'
 
 export {

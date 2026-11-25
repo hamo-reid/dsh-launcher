@@ -7,7 +7,7 @@ import { dirname, join, resolve, sep } from 'node:path'
 import {
   baseLaunch, checkForDshUpdate, defaultHome, discoverVersionRepo, entryFromPath, existsExecutable, installDir,
   installOfficialDsh, isDeletableDsh, probeDshs, readVersionFromPath, registerInstalledDsh, resolveDshPackage,
-  updateDsh, versionExists, type DshEntry,
+  updateDsh, versionExists, versionSlotOf, type DshEntry,
 } from '../../core/dsh/dsh.ts'
 import {
   contextForEntry, dshEntryById, dshVersionDir, effectiveProfileDir, legacyProfilesDir, readDshState, updateDshState,
@@ -26,6 +26,19 @@ import { handle } from '../handle.ts'
 import type {
   DownloadStep, DshInstallStep, DshProfileInfo, DshUpdateInfo, IpcResult, PackageVersionInfo,
 } from '../../../shared/types.ts'
+
+/** The directory the DSH page shows AND opens for an install.
+ *
+ * A managed install lives in a version slot under the repo (`<repo>/<name>`); its
+ * package sits deeper in `node_modules`, which is a path nobody manages. A
+ * system/global install keeps its own package (or executable) directory. One
+ * definition, so the path on screen and the folder the button opens cannot drift
+ * apart. */
+function displayDirOf(entry: DshEntry): string {
+  const repo = entry.versionDir ?? dshVersionDir()
+  const slot = isDeletableDsh(entry, repo) ? versionSlotOf(entry.execPath, repo) : undefined
+  return slot ?? resolveDshPackage(entry.execPath)?.root ?? installDir(entry.execPath)
+}
 
 /** A filesystem-safe version name (defaults to `official`). Strips path/shell
  * metacharacters and whitespace, and refuses leading/trailing dots — so `.`/`..`
@@ -120,7 +133,9 @@ export function registerDshIpc(): void {
             launch: baseLaunch(d.execPath),
             profileDir: effectiveProfileDir(d),
             legacyProfilesDir: legacy !== undefined && existsSync(legacy) ? legacy : undefined,
-            dir: resolved?.root ?? installDir(d.execPath),
+            // The version slot for a managed install — same value `dsh:revealDir`
+            // opens, so the path shown and the folder opened are one thing.
+            dir: displayDirOf(d),
           }
         }),
       },
@@ -177,12 +192,13 @@ export function registerDshIpc(): void {
     return { ok: true, value: { id: sessionId } }
   })
 
-  // Reveal a dsh's install directory in the OS file explorer.
+  // Reveal a dsh's install directory in the OS file explorer. The SAME directory
+  // the page displays (`displayDirOf`), so the button never opens something else.
   handle('dsh:revealDir', async (_event, id: string): Promise<IpcResult<boolean>> => {
     const { dshes } = readDshState()
     const entry = dshes.find(d => d.id === id)
     if (entry === undefined) return fail(E.dshNotFound)
-    const error = await shell.openPath(installDir(entry.execPath))
+    const error = await shell.openPath(displayDirOf(entry))
     return error === '' ? { ok: true, value: true } : fail(E.shellOpenPath, { detail: error })
   })
 

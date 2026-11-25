@@ -4,7 +4,7 @@
  */
 
 import { existsSync, realpathSync, statSync } from 'node:fs'
-import { basename, dirname, join, sep } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import { spawn } from 'node:child_process'
 import os from 'node:os'
 import { logger } from '../shared/logger.ts'
@@ -153,6 +153,24 @@ export function isManagedInstall(entry: DshEntry, versionRoot: string): boolean 
   const rp = root.endsWith(sep) ? root.slice(0, -1) : root
   const execDir = installDir(entry.execPath)
   return execDir === rp || execDir.startsWith(rp + sep)
+}
+
+/** The version-repo slot (`<repo>/<name>`) an install lives in, or `undefined`
+ * when the install is not under the repo.
+ *
+ * A managed install's package sits at `<slot>/node_modules/@deepseek-ai/dsh`, and
+ * THAT path in the DSH page names a directory nobody can act on: the thing a
+ * person manages, renames and removes is the slot. So the slot is derived from
+ * the package root's position under the repo, which also survives a rename of the
+ * entry (whose stored `name` may no longer match the folder). */
+export function versionSlotOf(execPath: string, versionRoot: string): string | undefined {
+  if (versionRoot === '') return undefined
+  const root = resolveDshPackage(execPath)?.root ?? resolveTargetPath(execPath)
+  const base = resolve(versionRoot)
+  const prefix = base.endsWith(sep) ? base : `${base}${sep}`
+  if (!root.startsWith(prefix)) return undefined
+  const [slot] = root.slice(prefix.length).split(sep)
+  return slot === undefined || slot === '' ? undefined : join(base, slot)
 }
 
 /** A dsh is deletable from the DSH page when it is an app-managed install:

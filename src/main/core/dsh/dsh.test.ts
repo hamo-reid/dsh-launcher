@@ -30,7 +30,7 @@ vi.mock('node:child_process', async (importActual) => {
 import {
   baseLaunch, defaultHome, detectExecutables, discoverVersionRepo, entryFromPath,
   existsExecutable, installDir, isDeletableDsh, isManagedInstall, readVersionFromPath,
-  resolveDshPackage, resolveLaunchEntry, type DshEntry,
+  resolveDshPackage, resolveLaunchEntry, versionSlotOf, type DshEntry,
 } from './dsh.ts'
 
 let root: string
@@ -329,5 +329,29 @@ describe('resolveLaunchEntry', () => {
     const bad = join(dir('launch/nopkg'), 'dsh.bin')
     writeFileSync(bad, '')
     expect(() => resolveLaunchEntry(bad)).toThrow(/无法解析 dsh 启动入口/)
+  })
+})
+
+describe('versionSlotOf', () => {
+  it('reports the version slot, not the package inside node_modules', () => {
+    // The DSH page shows this path; `<slot>/node_modules/@deepseek-ai/dsh` names a
+    // directory nobody manages, while the slot is what a person renames/removes.
+    const repo = dir('versions')
+    const pkg = writeJson('versions/official-0.2.2-rc3/node_modules/@deepseek-ai/dsh', {
+      name: '@deepseek-ai/dsh', version: '0.2.2-rc3', bin: 'bin.js',
+    })
+    const shim = join(root, 'versions', 'official-0.2.2-rc3', 'node_modules', '.bin', 'dsh.cmd')
+    mkdirSync(dirname(shim), { recursive: true })
+    writeFileSync(shim, '@echo off')
+
+    expect(versionSlotOf(shim, repo)).toBe(join(repo, 'official-0.2.2-rc3'))
+    // ...and the package root it would otherwise have shown is deeper in.
+    expect(resolveDshPackage(shim)?.root).toBe(pkg)
+  })
+
+  it('is undefined for an install outside the repo and for an empty repo', () => {
+    const pkg = writeJson('outside/node_modules/@deepseek-ai/dsh', { name: '@deepseek-ai/dsh', version: '1' })
+    expect(versionSlotOf(pkg, join(root, 'versions'))).toBeUndefined()
+    expect(versionSlotOf(pkg, '')).toBeUndefined()
   })
 })
