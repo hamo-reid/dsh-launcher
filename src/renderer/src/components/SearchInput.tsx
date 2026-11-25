@@ -13,6 +13,9 @@ interface SearchInputProps {
   grow?: boolean
   ariaLabel?: string
   style?: CSSProperties
+  /** Focus the field on mount — for a dialog whose only first action is a search,
+   * where making the user click the box is a step with no purpose. */
+  autoFocus?: boolean
 }
 
 /**
@@ -21,12 +24,13 @@ interface SearchInputProps {
  * control (icon / clear / sizing) identical across plugins, download, market.
  */
 export default function SearchInput({
-  value, onChange, placeholder, loading = false, onPressEnter, grow = true, ariaLabel, style,
+  value, onChange, placeholder, loading = false, onPressEnter, grow = true, ariaLabel, style, autoFocus = false,
 }: SearchInputProps): JSX.Element {
   const { token } = theme.useToken()
   return (
     <Input
       allowClear
+      autoFocus={autoFocus}
       value={value}
       onChange={event => onChange(event.target.value)}
       onPressEnter={onPressEnter}
